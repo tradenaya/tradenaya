@@ -1,0 +1,3390 @@
+Futures Trading
+
+Concepts
+
+Order Lifecycle
+
+Position Lifecycle
+
+Margin & Leverage
+
+Exchange Identifiers
+
+Numeric Types
+
+Reference
+
+
+
+WebSockets
+
+Recipe: Futures Client
+
+
+
+Futures Order Lifecycle
+
+This page describes the states a futures order moves through after you place it. Status values appear in the status field of every order response.
+
+
+
+Status values
+
+Status	Description
+
+RAISED	Open order has been accepted by the exchange.
+
+EXECUTED	Order has fully executed. Terminal.
+
+PARTIALLY_EXECUTED	Order has been partially executed. Terminal — the unfilled remainder is no longer working.
+
+CANCELLED	User has cancelled the order. Terminal.
+
+CANCELLATION_RAISED	Intermediate state. We've requested cancellation; resolves to CANCELLED once the exchange confirms.
+
+State machine
+
+place order
+
+
+
+full fill
+
+
+
+partial fill (terminal)
+
+
+
+cancel
+
+
+
+confirmed
+
+
+
+RAISED
+
+
+
+EXECUTED
+
+
+
+PARTIALLY_EXECUTED
+
+
+
+CANCELLATION_RAISED
+
+
+
+CANCELLED
+
+
+
+Differs from Spot
+
+Unlike Spot, PARTIALLY_EXECUTED is terminal for Futures. Once you see it, the unfilled remainder of the order is no longer working — you cannot expect it to keep filling. If you want to fill more, place a new order for the remaining quantity.
+
+
+
+When you see RAISED
+
+When you place an order, the response status may be RAISED. This means we've sent the order to the exchange and are waiting for an acknowledgement. To find out whether it eventually filled, cancelled, or expired, poll Get Order Status with the order_id until you see a terminal status.
+
+
+
+Cancellation is two-phase
+
+Calling Cancel Order moves the order to CANCELLATION_RAISED while we ask the exchange to cancel. Once the exchange confirms, status becomes CANCELLED. Don't treat CANCELLATION_RAISED as fully cancelled — the order may have filled in the gap before the cancel was processed.
+
+
+
+Tracking position-level effects
+
+Order events feed position state. After an order fills or partially fills, check Get Positions to see the resulting position size, average entry price, and unrealised PnL. See Position Lifecycle.
+
+
+
+Position Lifecycle
+
+A position is the net exposure you hold on a futures symbol. Positions open when an order fills, accumulate or shrink as more orders fill, and close when the net size reaches zero.
+
+
+
+How positions form
+
+When your first order on a symbol fills, a position is created with:
+
+
+
+position_side — LONG (you bought) or SHORT (you sold).
+
+position_size — the filled quantity, in base asset.
+
+avg_entry_price — the price at which it filled.
+
+leverage — the leverage you had set on that symbol at the time. See Margin & Leverage.
+
+The position then carries until you close it.
+
+
+
+How positions change
+
+Event	Effect
+
+New order fills in the same direction	position_size grows; avg_entry_price recalculated as a weighted average.
+
+Order fills against the position (smaller than current size)	position_size shrinks; avg_entry_price unchanged. P&L realised.
+
+Order fills against the position (equal to current size)	Position closes. Disappears from Get Positions.
+
+Order fills against the position (larger than current size)	Position flips: closes the existing side, opens a new one in the opposite direction with the leftover quantity.
+
+Funding settlement	A FUNDING_FEE transaction is recorded; balance changes; position size unchanged.
+
+Add margin	position_margin increases; liquidation price moves favourably.
+
+Statuses
+
+The status field on a position is OPEN while the position is live. Once size reaches zero, the position no longer appears in Get Positions — there is no terminal "CLOSED" entry.
+
+
+
+first fill
+
+
+
+more fills (size grows or shrinks)
+
+
+
+size reaches 0
+
+
+
+OPEN
+
+
+
+Reduce-only orders
+
+To close part of a position safely, set reduce_only=true on a counter-side order. This guarantees the order will not open a new opposite-direction position if it accidentally fills more than the current size.
+
+
+
+# Close half a long BTC position safely
+
+body = {
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "btcusdt",
+
+    "side": "SELL",
+
+    "order_type": "LIMIT",
+
+    "price": 60000,
+
+    "quantity": current_size / 2,
+
+    "reduce_only": True,
+
+}
+
+
+
+reduce_only=true is mandatory for TAKE_PROFIT_MARKET and STOP_MARKET orders. See Place Order.
+
+
+
+Liquidation
+
+If your position's mark price moves enough against you that position_margin falls below maint_margin, the exchange liquidates the position. The liquidation_price field on Get Positions is your current liquidation level — keep it well away from mark_price to avoid forced closure.
+
+
+
+You can move the liquidation price by:
+
+
+
+Add Margin — top up margin to push liquidation further away.
+
+Reducing position size — partial close via a reduce-only counter-order.
+
+Lowering leverage — note that this is only allowed when there are no open positions or open orders on the symbol.
+
+Tracking position changes in real time
+
+Position updates aren't pushed via WebSocket today. Poll Get Positions periodically (rate limit: 20/60s).
+
+
+
+Margin & Leverage
+
+Futures trading on CoinSwitch is USDT-margined — you deposit USDT into your futures wallet, and that's the collateral for all positions.
+
+
+
+Setting leverage
+
+Leverage is set per symbol. For example, you can have 10× leverage on BTCUSDT while running 25× on DOGEUSDT.
+
+
+
+Use Update Leverage to change leverage. Use Get Leverage to read the current setting.
+
+
+
+body = {"symbol": "btcusdt", "exchange": "EXCHANGE_2", "leverage": 10}
+
+headers, path = sign_request("POST", "/trade/api/v2/futures/leverage")
+
+response = requests.post(BASE_URL + path, headers=headers, json=body)
+
+
+
+When you can't change leverage
+
+You cannot change leverage on a symbol while you have:
+
+
+
+An open position on that symbol, or
+
+Any open orders on that symbol.
+
+Cancel open orders and close positions first.
+
+
+
+Maximum leverage per symbol
+
+Each symbol has its own min/max leverage. Read it from Get Instrument Info — the min_leverage / max_leverage fields.
+
+
+
+{
+
+  "BTCUSDT": {
+
+    "min_leverage": "1",
+
+    "max_leverage": "25",
+
+    "leverage_step": 1
+
+  }
+
+}
+
+
+
+Margin
+
+Each open position has three margin numbers, all reported in USDT:
+
+
+
+Field	Meaning
+
+position_margin	How much margin you currently have allocated to this position.
+
+maint_margin	The minimum margin required to avoid liquidation. If position_margin falls below this, the exchange forces a close.
+
+liquidation_price	The mark price at which position_margin would equal maint_margin. Keep mark price away from this.
+
+Adding margin
+
+Add Margin tops up position_margin for an open position, pushing liquidation_price further from the mark price. Useful when a position moves against you and you want to ride it out without closing.
+
+
+
+body = {"exchange": "EXCHANGE_2", "symbol": "dogeusdt", "margin": 16}
+
+
+
+The margin value is in USDT and must be ≤ your available wallet balance.
+
+
+
+Wallet balance
+
+Use Get Wallet Balance to see total available USDT, total balance, and per-symbol breakdowns of margin currently locked in positions or open orders. The available balance is what you can use to place new orders or add margin.
+
+
+
+Funding
+
+Perpetual futures have a periodic funding rate payment between long and short holders, settled at the next funding timestamp. The amount you pay or receive is recorded as a FUNDING_FEE row in Get Transactions. Funding does not affect position size or entry price; only your USDT balance.
+
+
+
+The current funding rate and next settlement timestamp are on Get Ticker (funding_rate and next_funding_timestamp fields).
+
+
+
+Exchange Identifiers
+
+Futures endpoints take an exchange parameter that specifies which futures venue the request applies to.
+
+
+
+Identifier	Used for
+
+EXCHANGE_2	All futures trading.
+
+EXCHANGE_2 is the only futures exchange identifier. Send it on every futures request.
+
+
+
+The value is case-insensitive on input. Responses uppercase it: "EXCHANGE_2".
+
+
+
+Symbol format
+
+Futures symbols are concatenated without a slash — BASE and QUOTE joined directly:
+
+
+
+Format	Example
+
+BTCUSDT	BTC perpetual, settled in USDT
+
+ETHUSDT	ETH perpetual, settled in USDT
+
+DOGEUSDT	DOGE perpetual, settled in USDT
+
+1000PEPEUSDT	1000-PEPE perpetual (multiplier prefix on small-tick assets)
+
+This is different from Spot, which uses BASE/QUOTE with a slash.
+
+
+
+Symbols are case-insensitive on input but uppercased in responses.
+
+
+
+The full list of available symbols, with min order size, leverage limits, fees, and tick size, is on Get Instrument Info.
+
+
+
+Quote asset
+
+All futures contracts are quoted and settled in USDT. Profit, loss, fees, and funding are all in USDT.
+
+
+
+Numeric Types in Futures Responses
+
+Futures endpoints return price, quantity, avg_execution_price, realised_pnl, execution_fee, and similar fields as JSON strings (not numbers):
+
+
+
+{
+
+  "data": {
+
+    "order_id": "01936474-a76f-767e-a056-ca1d41915778",
+
+    "price": "0.28",
+
+    "quantity": "650",
+
+    "exec_quantity": "0",
+
+    "avg_execution_price": "0",
+
+    "execution_fee": "0.0041",
+
+    "realised_pnl": "0"
+
+  }
+
+}
+
+
+
+Why strings
+
+Futures values are computed with fixed-precision decimals and serialised to strings so you receive them losslessly. This avoids the floating-point rounding issues JSON numbers can introduce, which matters more on derivatives than on spot because P&L compounds over many fills.
+
+
+
+Recommendations
+
+Parse these strings into a decimal type before doing any arithmetic. Do not coerce to float.
+
+
+
+Language	Parse strategy
+
+Python	decimal.Decimal(s)
+
+Java	new BigDecimal(s)
+
+JavaScript / Node	Use decimal.js or bignumber.js; native Number(s) is unsafe.
+
+Go	decimal.NewFromString(s) (shopspring/decimal)
+
+Rust	rust_decimal::Decimal::from_str
+
+Common pitfalls
+
+Don't subtract two strings naively ("60000.5" - "60000.4" is invalid in most languages).
+
+Don't rely on JSON.parse (Node) — it'll silently coerce strings that look numeric, costing you precision.
+
+Do normalise everything to a single decimal library at parse time so downstream code doesn't need to think about it.
+
+Comparison with Spot
+
+Spot returns the same kinds of fields as JSON numbers. If you write a single client that handles both surfaces, parse both into your preferred decimal type so the rest of your code is uniform.
+
+
+
+Place Order
+
+Place a new futures order.
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/order
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2. See Exchange Identifiers.
+
+symbol	string	Yes	Concatenated BASEUSDT, e.g. BTCUSDT, DOGEUSDT. Quote is always USDT.
+
+side	string	Yes	BUY or SELL (case-insensitive).
+
+order_type	string	Yes	MARKET, LIMIT, TAKE_PROFIT_MARKET, or STOP_MARKET.
+
+price	number	Conditional	Limit price. Mandatory for LIMIT; ignored for the others.
+
+quantity	number	Yes	Base-asset quantity. Send 0 for TAKE_PROFIT_MARKET and STOP_MARKET (these apply to the full position).
+
+trigger_price	number	Conditional	Trigger price for TAKE_PROFIT_MARKET / STOP_MARKET.
+
+reduce_only	boolean	Conditional	Mandatory true for TAKE_PROFIT_MARKET / STOP_MARKET. Optional for limit orders — true ensures the order will only reduce the existing position, never open the opposite side.
+
+time_in_force	string	No	GTC (default), IOC, or FOK.
+
+client_order_id	string	No	Optional client-supplied UUID echoed back in order responses.
+
+TP/SL orders (TAKE_PROFIT_MARKET / STOP_MARKET)
+
+These set position-level take-profit / stop-loss. They apply to the whole open position on the symbol, not a specific quantity. The pattern is:
+
+
+
+quantity = 0
+
+trigger_price = the price at which to trigger the close
+
+reduce_only = true
+
+# Set a stop-loss at 0.30 USDT on a long DOGEUSDT position
+
+body = {
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "dogeusdt",
+
+    "side": "SELL",
+
+    "order_type": "STOP_MARKET",
+
+    "quantity": 0,
+
+    "trigger_price": 0.30,
+
+    "reduce_only": True,
+
+}
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {
+
+    "symbol": "dogeusdt",
+
+    "exchange": "EXCHANGE_2",
+
+    "side": "BUY",
+
+    "order_type": "LIMIT",
+
+    "price": 0.28,
+
+    "quantity": 22,
+
+};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/order');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "order_id": "01936474-a76f-767e-a056-ca1d41915778",
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "DOGEUSDT",
+
+    "side": "BUY",
+
+    "status": "RAISED",
+
+    "order_type": "LIMIT",
+
+    "quantity": "22",
+
+    "exec_quantity": "0",
+
+    "price": "0.28",
+
+    "avg_execution_price": "0",
+
+    "execution_fee": "0.0041",
+
+    "realised_pnl": "0",
+
+    "reduce_only": false,
+
+    "trigger_price": "0",
+
+    "created_at": 1732557186934,
+
+    "updated_at": 1732557186934
+
+  }
+
+}
+
+
+
+If status is RAISED, poll Get Order Status until you see a terminal status. See Order Lifecycle.
+
+
+
+Futures PARTIALLY_EXECUTED is terminal
+
+Unlike Spot, in Futures PARTIALLY_EXECUTED is a terminal status — the unfilled remainder of the order is no longer working and won't fill further. If you need the full quantity filled, place a new order for the remaining size.
+
+
+
+Response Parameters
+
+Field	Type	Description
+
+order_id	string	CoinSwitch order ID (UUID).
+
+exchange	string	Exchange identifier echoed back.
+
+symbol	string	Symbol echoed back, uppercase.
+
+side	string	BUY or SELL.
+
+status	string	One of the Order Lifecycle values.
+
+order_type	string	Echoed back.
+
+quantity	string	Original quantity (decimal string).
+
+exec_quantity	string	Filled quantity so far.
+
+price	string	Limit price for LIMIT orders; "0" for market orders.
+
+avg_execution_price	string	Average fill price. "0" until any fill.
+
+execution_fee	string	Total fee charged so far (USDT).
+
+realised_pnl	string	Realised P&L (USDT).
+
+reduce_only	boolean	Echoed back.
+
+trigger_price	string	Trigger price for TAKE_PROFIT_MARKET / STOP_MARKET. "0" otherwise.
+
+created_at	integer	Order creation time (Unix milliseconds).
+
+updated_at	integer	Last update time (Unix milliseconds).
+
+Errors
+
+HTTP	Cause
+
+400	Invalid quantity, price below tick, or insufficient available balance.
+
+401	Invalid signature. See Authentication.
+
+422	Validation failed on parameter types or missing required fields.
+
+
+
+Cancel Order
+
+Cancel a single open futures order.
+
+
+
+HTTP
+
+Method	DELETE
+
+Endpoint	/trade/api/v2/futures/order
+
+Rate limit	10 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+order_id	string	Yes	The order_id to cancel.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {
+
+    "exchange": "EXCHANGE_2",
+
+    "order_id": "698ed406-8ef5-4664-9779-f7978702a447",
+
+};
+
+
+
+const {headers, path} = signRequest('DELETE', '/trade/api/v2/futures/order');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'DELETE',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "order_id": "0193688e-5212-7493-be58-4f83644772e8",
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "DOGEUSDT",
+
+    "side": "BUY",
+
+    "order_type": "LIMIT",
+
+    "status": "CANCELLATION_RAISED",
+
+    "quantity": "22",
+
+    "exec_quantity": "0",
+
+    "price": "0.28",
+
+    "avg_exec_price": "0",
+
+    "exec_fee": "0",
+
+    "reduce_only": false,
+
+    "created_at": 1732625977884,
+
+    "updated_at": 1732626020104
+
+  }
+
+}
+
+
+
+The cancel response uses slightly different field names from other order responses: avg_exec_price (not avg_execution_price) and exec_fee (not execution_fee). Other fields are the same.
+
+
+
+The status will be CANCELLATION_RAISED immediately after the call. Poll Get Order Status to confirm it resolves to CANCELLED. See Order Lifecycle.
+
+
+
+Cancel All Open Orders
+
+Cancel every open order on the exchange. Optionally scope to a single symbol.
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/cancel_all
+
+Rate limit	10 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	No	If provided, only cancel orders on this symbol (e.g. BTCUSDT). If omitted, cancel everything across all symbols.
+
+This also cancels TP/SL orders (TAKE_PROFIT_MARKET / STOP_MARKET).
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {"exchange": "EXCHANGE_2"};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/cancel_all');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "orders_ids": [
+
+      "01936be4-2571-7a3f-97fa-a29a2b85d717",
+
+      "01936be4-9e37-7487-8e31-20fede6ef271"
+
+    ]
+
+  }
+
+}
+
+
+
+orders_ids lists every order that was sent for cancellation. Each one transitions through CANCELLATION_RAISED to CANCELLED independently — poll Get Order Status on each order_id to confirm.
+
+
+
+Get Order Status
+
+Fetch the current state of a single futures order by order_id.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/order
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+order_id	string	Yes	The order_id you want to fetch.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/order', {"order_id": "698ed406-8ef5-4664-9779-f7978702a447"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "order": {
+
+      "order_id": "698ed406-8ef5-4664-9779-f7978702a447",
+
+      "exchange": "EXCHANGE_2",
+
+      "symbol": "DOGEUSDT",
+
+      "side": "BUY",
+
+      "status": "CANCELLED",
+
+      "order_type": "LIMIT",
+
+      "quantity": "6.16",
+
+      "exec_quantity": "0",
+
+      "price": "0.28",
+
+      "avg_execution_price": "0",
+
+      "execution_fee": "0.0041",
+
+      "realised_pnl": "0",
+
+      "reduce_only": false,
+
+      "created_at": 1732623664116,
+
+      "updated_at": 1732623664116
+
+    }
+
+  }
+
+}
+
+
+
+Note the response is wrapped in data.order (singular), not data directly. Same field shape as Place Order's response.
+
+
+
+Open Orders
+
+List currently working (non-terminal) futures orders.
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/orders/open
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	No	Filter to a single symbol (e.g. BTCUSDT).
+
+limit	integer	No	Page size. Maximum 50.
+
+from_time	integer	No	Filter: orders created at/after this timestamp (Unix ms).
+
+to_time	integer	No	Filter: orders created at/before this timestamp (Unix ms).
+
+Time window
+
+The difference between from_time and to_time cannot exceed 7 days. If you omit both, you get the latest 50 orders from the last 7 days.
+
+
+
+To page through more, use the cursor returned in the response as the next call's to_time.
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {"exchange": "EXCHANGE_2", "symbol": "btcusdt"};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/orders/open');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "orders": [
+
+      {
+
+        "order_id": "01936c09-85a6-79d5-a7b8-d0e19daa9fbf",
+
+        "exchange": "EXCHANGE_2",
+
+        "symbol": "BTCUSDT",
+
+        "side": "BUY",
+
+        "status": "RAISED",
+
+        "order_type": "LIMIT",
+
+        "quantity": "160",
+
+        "exec_quantity": "0",
+
+        "price": "80000",
+
+        "avg_execution_price": "0",
+
+        "execution_fee": "0.1051",
+
+        "realised_pnl": "0",
+
+        "reduce_only": false,
+
+        "created_at": 1732684383674,
+
+        "updated_at": 1732684383674
+
+      }
+
+    ],
+
+    "cursor": 1732684383674
+
+  }
+
+}
+
+
+
+Response Parameters
+
+Field	Type	Description
+
+data.orders	array	Array of order objects. Each entry has the same shape as Place Order.
+
+data.cursor	integer	Pagination marker (Unix ms timestamp of the oldest entry returned). Pass as to_time in the next call to fetch the next page.
+
+
+
+Closed Orders
+
+List terminal-state futures orders (EXECUTED, PARTIALLY_EXECUTED, CANCELLED).
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/orders/closed
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	No	Filter to a single symbol (e.g. BTCUSDT).
+
+status	string	No	Filter to a specific terminal status.
+
+limit	integer	No	Page size. Maximum 50.
+
+from_time	integer	No	Filter: orders created at/after this timestamp (Unix ms).
+
+to_time	integer	No	Filter: orders created at/before this timestamp (Unix ms).
+
+Time window
+
+The difference between from_time and to_time cannot exceed 7 days. If you omit both, you get the latest 50 orders from the last 7 days.
+
+
+
+To page through more, use the cursor returned in the response as the next call's to_time.
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {"exchange": "EXCHANGE_2", "symbol": "btcusdt", "limit": 10};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/orders/closed');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+Same shape as Open Orders — data.orders array of order objects, plus a data.cursor pagination marker.
+
+
+
+{
+
+  "data": {
+
+    "orders": [
+
+      {
+
+        "order_id": "01936be4-9e37-7487-8e31-20fede6ef271",
+
+        "exchange": "EXCHANGE_2",
+
+        "symbol": "BTCUSDT",
+
+        "side": "BUY",
+
+        "status": "CANCELLED",
+
+        "order_type": "LIMIT",
+
+        "quantity": "160",
+
+        "exec_quantity": "0",
+
+        "price": "80000",
+
+        "avg_execution_price": "0",
+
+        "execution_fee": "0.1051",
+
+        "realised_pnl": "0",
+
+        "reduce_only": false,
+
+        "created_at": 1732681965292,
+
+        "updated_at": 1732681965292
+
+      }
+
+    ],
+
+    "cursor": 1732616972834
+
+  }
+
+}
+
+
+
+Get Positions
+
+List currently open futures positions.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/positions
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/positions', {"exchange": "EXCHANGE_2", "symbol": "btcusdt"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": [
+
+    {
+
+      "exchange": "EXCHANGE_2",
+
+      "position_id": "8b81b763-df36-4c93-9bc8-9a93d65b8546",
+
+      "symbol": "DOGEUSDT",
+
+      "position_side": "LONG",
+
+      "leverage": "25",
+
+      "position_size": "65",
+
+      "position_value": "25.09455",
+
+      "position_margin": "34.052117186199",
+
+      "maint_margin": "37.641825",
+
+      "avg_entry_price": "0.38607",
+
+      "mark_price": "0.38231",
+
+      "last_price": "0.38135",
+
+      "unrealised_pnl": "0.3068",
+
+      "liquidation_price": "0.129122150942",
+
+      "client_txn_id": "00000000-0000-0000-0000-000000000000",
+
+      "margin_type": "ISOLATED",
+
+      "status": "OPEN",
+
+      "created_at": 1732617093684,
+
+      "updated_at": 1732636761825
+
+    }
+
+  ]
+
+}
+
+
+
+Response Parameters
+
+data is an array of positions. Each entry:
+
+
+
+Field	Type	Description
+
+exchange	string	Exchange identifier.
+
+position_id	string	Position ID (UUID).
+
+symbol	string	Symbol.
+
+position_side	string	LONG or SHORT.
+
+leverage	string	Current leverage on this symbol.
+
+position_size	string	Position size in base asset.
+
+position_value	string	Notional value in USDT.
+
+position_margin	string	Margin currently allocated to the position (USDT).
+
+maint_margin	string	Minimum margin required to avoid liquidation (USDT). See Margin & Leverage.
+
+avg_entry_price	string	Volume-weighted average entry price.
+
+mark_price	string	Mark price used for liquidation and unrealised P&L.
+
+last_price	string	Most recent trade price.
+
+unrealised_pnl	string	Unrealised P&L on this position (USDT).
+
+liquidation_price	string	Mark price at which the position would be liquidated.
+
+client_txn_id	string	Client transaction ID associated with the most recent margin operation on this position. Default is the all-zeros UUID if you've never sent one.
+
+margin_type	string	Margin mode (ISOLATED or CROSS).
+
+status	string	OPEN while the position is live. Closed positions are not returned by this endpoint.
+
+created_at	integer	Position open time (Unix milliseconds).
+
+updated_at	integer	Last update time (Unix milliseconds).
+
+Stale snapshots
+
+If mark_price and unrealised_pnl are both 0, treat them as transient — the system is mid-update. The other fields (position_size, avg_entry_price, etc.) remain reliable.
+
+
+
+Update Leverage
+
+Set leverage for a futures symbol.
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/leverage
+
+Rate limit	10 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+exchange	string	Yes	EXCHANGE_2.
+
+leverage	integer	Yes	Integer between min_leverage and max_leverage for the symbol (read these from Get Instrument Info).
+
+Leverage change restrictions
+
+You cannot change leverage on a symbol while you have:
+
+
+
+An open position on that symbol, or
+
+Any open orders on that symbol.
+
+Cancel open orders and close the position first. See Margin & Leverage.
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {"symbol": "btcusdt", "exchange": "EXCHANGE_2", "leverage": 13};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/leverage');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "BTCUSDT",
+
+    "leverage": "13"
+
+  }
+
+}
+
+
+
+Get Leverage
+
+Read the current leverage on a futures symbol.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/leverage
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+exchange	string	Yes	EXCHANGE_2.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/leverage', {"symbol": "btcusdt", "exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "exchange": "EXCHANGE_2",
+
+    "symbol": "BTCUSDT",
+
+    "leverage": "13"
+
+  }
+
+}
+
+
+
+To change leverage, use Update Leverage.
+
+
+
+Add Margin
+
+Top up margin on an open position. Pushes the liquidation price further away from the mark price. See Margin & Leverage.
+
+
+
+HTTP
+
+Method	POST
+
+Endpoint	/trade/api/v2/futures/add_margin
+
+Rate limit	10 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+symbol	string	Yes	Symbol with the open position, e.g. DOGEUSDT.
+
+exchange	string	Yes	EXCHANGE_2.
+
+margin	integer	Yes	USDT amount to add. Must be ≤ available wallet balance.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const body = {"exchange": "EXCHANGE_2", "symbol": "dogeusdt", "margin": 16};
+
+
+
+const {headers, path} = signRequest('POST', '/trade/api/v2/futures/add_margin');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'POST',
+
+  headers,
+
+  body: JSON.stringify(body),
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "exchange": "EXCHANGE_2",
+
+    "position_id": "8b81b763-df36-4c93-9bc8-9a93d65b8546",
+
+    "symbol": "DOGEUSDT",
+
+    "position_side": "LONG",
+
+    "leverage": "25",
+
+    "position_size": "65",
+
+    "position_value": "25.09455",
+
+    "position_margin": "50.052117186199",
+
+    "maint_margin": "37.641825",
+
+    "avg_entry_price": "0.38607",
+
+    "mark_price": "0.38694",
+
+    "last_price": "0.38677",
+
+    "unrealised_pnl": "-0.0455",
+
+    "liquidation_price": "-0.3752759970953692",
+
+    "status": "OPEN",
+
+    "created_at": 1732617093684,
+
+    "updated_at": 1732636761825
+
+  }
+
+}
+
+
+
+The response is the updated position object. Same shape as Get Positions. Note position_margin reflects the new (higher) value and liquidation_price has moved.
+
+
+
+Get Wallet Balance
+
+Get your futures wallet balance — total + available + per-symbol breakdown of locked margin.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/wallet_balance
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+None.
+
+
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/wallet_balance');
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "base_asset_balances": [
+
+      {
+
+        "base_asset": "USDT",
+
+        "balances": {
+
+          "total_balance": "60960.82599588",
+
+          "total_available_balance": "60910.77418715",
+
+          "total_blocked_balance": "50.05180873",
+
+          "total_position_margin": "56.83032573",
+
+          "total_open_order_margin": "-6.778517"
+
+        }
+
+      }
+
+    ],
+
+    "asset": [
+
+      {
+
+        "symbol": "DOGEUSDT",
+
+        "base_asset": "USDT",
+
+        "exchange": "EXCHANGE_2",
+
+        "blocked_balance": "50.04968529",
+
+        "position_margin": "50.04959675",
+
+        "open_order_margin": "0.00008854"
+
+      }
+
+    ]
+
+  }
+
+}
+
+
+
+Response Parameters
+
+data has two arrays.
+
+
+
+base_asset_balances — overall totals per quote/settlement asset (USDT)
+
+Field	Type	Description
+
+base_asset	string	Settlement asset, currently USDT.
+
+balances.total_balance	string	Total wallet balance (USDT).
+
+balances.total_available_balance	string	Available for new orders/positions or for Add Margin.
+
+balances.total_blocked_balance	string	Locked in open orders + active positions.
+
+balances.total_position_margin	string	Sum of position_margin across all open positions.
+
+balances.total_open_order_margin	string	Margin reserved for open orders. May be negative for reduce-only orders.
+
+asset — per-symbol breakdown of locked margin
+
+Field	Type	Description
+
+symbol	string	Symbol.
+
+base_asset	string	Settlement asset (USDT).
+
+exchange	string	Exchange identifier.
+
+blocked_balance	string	Total locked balance for this symbol.
+
+position_margin	string	Margin held against the open position on this symbol.
+
+open_order_margin	string	Margin reserved for open orders on this symbol.
+
+
+
+Get Transactions
+
+List balance-affecting transactions on your futures account: trading fees, funding payments, P&L, add-margin, liquidation fees.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/transactions
+
+Rate limit	20 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	No	Filter to a single symbol (e.g. btcusdt).
+
+type	string	No	Filter by type: commission, P&L, funding fee, liquidation fee.
+
+limit	integer	No	Maximum number of records to return.
+
+from_time	integer	No	Start of the time range (Unix ms).
+
+to_time	integer	No	End of the time range (Unix ms).
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/transactions', {
+
+  exchange: 'EXCHANGE_2',
+
+  symbol:   'btcusdt',
+
+  type:     'commission',
+
+  limit:    20,
+
+});
+
+const r = await fetch(BASE_URL + path, { method: 'GET', headers });
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": [
+
+    {
+
+      "exchange": "EXCHANGE_2",
+
+      "transaction_id": "678708aa-507b-4881-8b3f-1a50b63dd0c4-0193677c-0544-77d1-b3a6-2130d671e54c",
+
+      "symbol": "ADAUSDT",
+
+      "type": "FUNDING_FEE",
+
+      "quote_asset": "USDT",
+
+      "amount": "0.00099946"
+
+    },
+
+    {
+
+      "exchange": "EXCHANGE_2",
+
+      "transaction_id": "8b81b763-df36-4c93-9bc8-9a93d65b8546",
+
+      "symbol": "DOGEUSDT",
+
+      "type": "ADD_MARGIN",
+
+      "quote_asset": "USDT",
+
+      "amount": "16"
+
+    }
+
+  ]
+
+}
+
+
+
+
+
+Response Parameters
+
+data is an array of transactions:
+
+
+
+Field	Type	Description
+
+exchange	string	Exchange identifier.
+
+transaction_id	string	Unique transaction ID.
+
+symbol	string	Symbol the transaction relates to.
+
+type	string	One of FUNDING_FEE, COMMISSION, P&L, LIQUIDATION_FEE, ADD_MARGIN.
+
+quote_asset	string	Asset of the amount field, currently always USDT.
+
+amount	string	Signed amount. Positive for credits, negative for debits.
+
+
+
+Get Instrument Info
+
+Get the trading rules, leverage limits, fees, and tick size for every (or one) futures symbol.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/instrument_info
+
+Rate limit	100 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	No	EXCHANGE_2. If omitted, returns info for all available futures exchanges.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/instrument_info', {"exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "BTCUSDT": {
+
+      "symbol": "btc",
+
+      "base_asset": "btc",
+
+      "quote_asset": "usdt",
+
+      "status": "TRADING",
+
+      "type": "PERPETUAL_FUTURES",
+
+      "min_leverage": "1",
+
+      "max_leverage": "25",
+
+      "leverage_step": 1,
+
+      "min_base_quantity": "0.001",
+
+      "base_quantity_step_size": "0.001",
+
+      "lot_size": "0.001",
+
+      "quantity_precision": 3,
+
+      "price_precision": 2,
+
+      "tick_size": 1,
+
+      "max_market_base_quantity": "119",
+
+      "max_base_quantity": "952",
+
+      "risk_limit": "1000000",
+
+      "maint_margin_rate": "0.56",
+
+      "taker_fee_rate": "0.00065",
+
+      "maker_fee_rate": "0.00024",
+
+      "liq_fee_rate": "0.0075",
+
+      "quote_asset_precision": 1
+
+    }
+
+  }
+
+}
+
+
+
+Response Parameters
+
+data is an object keyed by symbol. Each instrument:
+
+
+
+Field	Type	Description
+
+symbol	string	Lowercase base asset, e.g. "btc".
+
+base_asset / quote_asset	string	Lowercase.
+
+status	string	TRADING if open.
+
+type	string	PERPETUAL_FUTURES.
+
+min_leverage, max_leverage	string	Allowed leverage range.
+
+leverage_step	integer	Granularity for leverage updates (typically 1).
+
+min_base_quantity	string	Minimum order quantity.
+
+base_quantity_step_size	string	Quantity must be a multiple of this.
+
+lot_size	string	Same as base_quantity_step_size for most symbols.
+
+quantity_precision	integer	Decimal places for quantity. Negative values mean trailing zeros required (e.g. -2 for 1000PEPEUSDT means quantity must be a multiple of 100).
+
+price_precision	integer	Decimal places for price.
+
+tick_size	integer	Smallest price increment (in price_precision decimal places).
+
+max_market_base_quantity	string	Max single MARKET order size.
+
+max_base_quantity	string	Max LIMIT order size.
+
+risk_limit	string	Position-size risk cap.
+
+maint_margin_rate	string	Maintenance margin rate (percent).
+
+taker_fee_rate / maker_fee_rate	string	Default fee rates (decimal — 0.00065 = 0.065%).
+
+liq_fee_rate	string	Liquidation fee rate.
+
+quote_asset_precision	integer	Decimal places for position_value, unrealised_pnl, etc.
+
+
+
+Get Order Book
+
+Get the current order book (bids + asks) for a futures symbol. Two modes via the same endpoint:
+
+
+
+Top of book — best few levels. Default.
+
+L2 mode — deeper view. Add l2Orderbook=true.
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/order_book
+
+Rate limit	100 requests per 60 seconds (combined limit for both modes)
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+l2Orderbook	string	No	Send "true" to fetch the L2 (deeper) view.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/order_book', {"symbol": "btcusdt", "exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "timestamp": 1732685131699,
+
+    "asks": [
+
+      ["3388.92", "0.10"],
+
+      ["3388.94", "0.01"]
+
+    ],
+
+    "bids": [
+
+      ["3425.71", "2.16"],
+
+      ["3425.69", "0.01"]
+
+    ],
+
+    "symbol": "ETHUSDT"
+
+  }
+
+}
+
+
+
+Response Parameters
+
+Field	Type	Description
+
+symbol	string	Symbol echoed back.
+
+timestamp	integer	Snapshot time (Unix milliseconds).
+
+bids	array	Sorted descending. Each entry [price (string), quantity (string)].
+
+asks	array	Sorted ascending. Each entry [price (string), quantity (string)].
+
+For real-time depth updates, use the Order Book WebSocket.
+
+
+
+Get Ticker
+
+24-hour stats and funding info for one futures symbol.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/ticker
+
+Rate limit	100 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/ticker', {"symbol": "btcusdt", "exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": {
+
+    "EXCHANGE_2": {
+
+      "low_price_24h": "94707.00",
+
+      "high_price_24h": "97276.00",
+
+      "last_price": "95136.60",
+
+      "symbol": "BTCUSDT",
+
+      "exchange": "EXCHANGE_2",
+
+      "timestamp": 1732821806680,
+
+      "best_ask_price": "95136.70",
+
+      "best_bid_price": "95136.60",
+
+      "price_24h_pcnt": "-1.297300",
+
+      "base_asset_volume_24h": "93707.6800",
+
+      "quote_asset_volume_24h": "8970676685.2608",
+
+      "index_price": 95046.53,
+
+      "mark_price": 95136.7,
+
+      "open_interest": "67529.878",
+
+      "open_interest_value": "6424569744.32",
+
+      "funding_rate": 0.00039681,
+
+      "next_funding_timestamp": 1732838400000,
+
+      "best_bid_size": "3.189",
+
+      "best_ask_size": "3.963"
+
+    }
+
+  }
+
+}
+
+
+
+data is keyed by exchange identifier; the value is the ticker object.
+
+
+
+Response Parameters
+
+Field	Type	Description
+
+symbol	string	Symbol.
+
+exchange	string	Exchange identifier.
+
+last_price	string	Last traded price.
+
+low_price_24h / high_price_24h	string	24h range.
+
+best_ask_price / best_bid_price	string	Best bid and ask.
+
+best_ask_size / best_bid_size	string	Quantity at best ask / bid.
+
+price_24h_pcnt	string	24h percentage change.
+
+base_asset_volume_24h	string	24h base-asset volume.
+
+quote_asset_volume_24h	string	24h quote-asset (USDT) volume.
+
+index_price	number	Index price (unweighted reference).
+
+mark_price	number	Mark price (used for liquidation and unrealised P&L).
+
+open_interest	string	Total open interest, in base asset.
+
+open_interest_value	string	Total open interest, in USDT.
+
+funding_rate	number	Current funding rate (decimal — 0.0001 = 0.01%).
+
+next_funding_timestamp	integer	Next funding settlement (Unix ms).
+
+timestamp	integer	Snapshot time (Unix ms).
+
+
+
+Get All-Pairs Ticker
+
+24-hour stats for every futures symbol on the exchange.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/all-pairs/ticker
+
+Rate limit	100 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/all-pairs/ticker', {"exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+data is an object keyed by symbol. Each value has the same shape as Get Ticker.
+
+
+
+{
+
+  "data": {
+
+    "BTCUSDT": {
+
+      "low_price_24h": "94707.00",
+
+      "high_price_24h": "97276.00",
+
+      "last_price": "95136.60",
+
+      "symbol": "BTCUSDT",
+
+      "exchange": "EXCHANGE_2",
+
+      "timestamp": 1732821806680,
+
+      "best_ask_price": "95136.70",
+
+      "best_bid_price": "95136.60",
+
+      "price_24h_pcnt": "-1.297300",
+
+      "base_asset_volume_24h": "93707.6800",
+
+      "quote_asset_volume_24h": "8970676685.2608",
+
+      "index_price": 95046.53,
+
+      "mark_price": 95136.7,
+
+      "open_interest": "67529.878",
+
+      "open_interest_value": "6424569744.32",
+
+      "funding_rate": 0.00039681,
+
+      "next_funding_timestamp": 1732838400000,
+
+      "best_bid_size": "3.189",
+
+      "best_ask_size": "3.963"
+
+    }
+
+  }
+
+}
+
+
+
+See Get Ticker for field descriptions.
+
+
+
+KLines
+
+Historical OHLCV (open / high / low / close / volume) candles for a futures symbol.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/klines
+
+Rate limit	30 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+interval	string	Yes	Candle duration in minutes. One of '1', '5', '15', '30', '60', '120', '240', '360', '720', '1440'.
+
+start_time	integer	No	Range start (Unix ms).
+
+end_time	integer	No	Range end (Unix ms).
+
+limit	integer	No	Number of candles to return.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/klines', {
+
+    "symbol": "btcusdt",
+
+    "exchange": "EXCHANGE_2",
+
+    "interval": "1",
+
+    "start_time": "1731555003792",
+
+    "end_time": "1732555003792",
+
+    "limit": 10,
+
+});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": [
+
+    {
+
+      "o": "95500.100000000000",
+
+      "h": "95875.000000000000",
+
+      "l": "94707.000000000000",
+
+      "c": "95524.000000000000",
+
+      "symbol": "BTCUSDT",
+
+      "close_time": "1732795200000",
+
+      "volume": "22426.480000000000",
+
+      "start_time": "1732773600000",
+
+      "interval": "360"
+
+    }
+
+  ]
+
+}
+
+
+
+Response Parameters
+
+data is an array of candles:
+
+
+
+Field	Type	Description
+
+symbol	string	Symbol.
+
+interval	string	Echo of the requested interval, in minutes.
+
+o	string	Open price.
+
+h	string	High price.
+
+l	string	Low price.
+
+c	string	Close price.
+
+volume	string	Trade volume in base asset over the candle period.
+
+start_time	string	Candle start (Unix ms).
+
+close_time	string	Candle close (Unix ms).
+
+For real-time candle pushes, use the KLines WebSocket.
+
+
+
+Get Trades
+
+Recent public trades for a futures symbol.
+
+
+
+HTTP
+
+Method	GET
+
+Endpoint	/trade/api/v2/futures/trades
+
+Rate limit	100 requests per 60 seconds
+
+Request Parameters
+
+Parameter	Type	Mandatory	Description
+
+exchange	string	Yes	EXCHANGE_2.
+
+symbol	string	Yes	Symbol, e.g. BTCUSDT.
+
+Example
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const {signRequest, BASE_URL} = require('./reference-client');
+
+
+
+const {headers, path} = signRequest('GET', '/trade/api/v2/futures/trades', {"symbol": "btcusdt", "exchange": "EXCHANGE_2"});
+
+const r = await fetch(BASE_URL + path, {
+
+  method: 'GET',
+
+  headers,
+
+});
+
+console.log(await r.json());
+
+
+
+Response
+
+{
+
+  "data": [
+
+    {
+
+      "E": 1732691693128,
+
+      "p": 0.39391,
+
+      "q": 133,
+
+      "e": "EXCHANGE_2",
+
+      "s": "DOGEUSDT",
+
+      "m": true
+
+    }
+
+  ]
+
+}
+
+
+
+Response Parameters
+
+data is an array of trades. Single-letter keys:
+
+
+
+Field	Type	Description
+
+E	integer	Trade timestamp (Unix milliseconds).
+
+p	number	Trade price.
+
+q	number	Trade quantity (base asset).
+
+s	string	Symbol.
+
+e	string	Exchange identifier.
+
+m	boolean	true if the buyer was the market maker.
+
+For real-time trade prints, use the Trades WebSocket.
+
+
+
+Connecting to Futures WebSockets
+
+Public market-data sockets for futures use Socket.IO v4 with a single namespace per exchange.
+
+
+
+Connection details
+
+Type	Socket.IO
+
+Version	v4
+
+Base URL	wss://ws.coinswitch.co/
+
+Handshake path	/pro/realtime-rates-socket/futures/{exchange}
+
+{exchange} in the handshake path is exchange_2 (lowercase).
+
+
+
+Namespace
+
+Exchange	Namespace
+
+EXCHANGE_2	/exchange_2 (lowercase in the namespace)
+
+Subscription protocol
+
+Each event (Order Book, Ticker, Trades, KLines) follows the same shape:
+
+
+
+Connect to the namespace.
+
+emit the event name with a subscribe payload that includes the symbol you care about.
+
+The server pushes updates back on the same event name.
+
+Symbol convention
+
+Most futures WebSocket events use the same BASEUSDT format as REST (e.g. BTCUSDT).
+
+
+
+The KLines event is special — it uses SYMBOL_INTERVAL (e.g. BTCUSDT_5 for 5-minute candles). See the KLines page for details.
+
+
+
+Authentication
+
+Public market-data sockets are unauthenticated — anyone with the URL can subscribe.
+
+
+
+User-data sockets (Order updates, Position updates) aren't available on Futures today.
+
+
+
+Next
+
+Order Book — real-time depth snapshots
+
+Ticker — last price + funding + open-interest pushes
+
+Trades — real-time trade prints
+
+KLines — real-time candles, with the special SYMBOL_INTERVAL subscription pattern
+
+
+
+Order Book WebSocket
+
+Streams order book snapshots for a futures symbol.
+
+
+
+Event name	FETCH_ORDER_BOOK_CS_PRO
+
+Connection	See Connection for handshake and namespace.
+
+Each push is a full snapshot, not a delta. Replace your local book on every event.
+
+
+
+Subscribe
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+// npm install socket.io-client@^4
+
+const { io } = require('socket.io-client');
+
+
+
+const sock = io('wss://ws.coinswitch.co/exchange_2', {
+
+  path: '/pro/realtime-rates-socket/futures/exchange_2',
+
+  transports: ['websocket'],
+
+});
+
+
+
+sock.on('connect', () => {
+
+  sock.emit('FETCH_ORDER_BOOK_CS_PRO', { event: 'subscribe', pair: 'BTCUSDT' });
+
+});
+
+
+
+sock.on('FETCH_ORDER_BOOK_CS_PRO', (data) => {
+
+  console.log('update:', data);
+
+});
+
+
+
+Update payload
+
+{
+
+  "data": {
+
+    "timestamp": 1732685131699,
+
+    "asks": [
+
+      ["3388.92", "0.10"],
+
+      ["3388.94", "0.01"]
+
+    ],
+
+    "bids": [
+
+      ["3425.71", "2.16"],
+
+      ["3425.69", "0.01"]
+
+    ],
+
+    "symbol": "ETHUSDT"
+
+  }
+
+}
+
+
+
+Field	Type	Description
+
+symbol	string	Symbol echoed back.
+
+timestamp	integer	Snapshot time (Unix ms).
+
+bids	array	Sorted descending. Each entry [price, quantity] (both strings).
+
+asks	array	Sorted ascending. Each entry [price, quantity] (both strings).
+
+
+
+Ticker WebSocket
+
+Streams 24h stats + funding info for a futures symbol whenever trades execute on it.
+
+
+
+Event name	FETCH_TICKER_INFO_CS_PRO
+
+Connection	See Connection.
+
+Subscribe
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+// npm install socket.io-client@^4
+
+const { io } = require('socket.io-client');
+
+
+
+const sock = io('wss://ws.coinswitch.co/exchange_2', {
+
+  path: '/pro/realtime-rates-socket/futures/exchange_2',
+
+  transports: ['websocket'],
+
+});
+
+
+
+sock.on('connect', () => {
+
+  sock.emit('FETCH_TICKER_INFO_CS_PRO', { event: 'subscribe', pair: 'BTCUSDT' });
+
+});
+
+
+
+sock.on('FETCH_TICKER_INFO_CS_PRO', (data) => {
+
+  console.log('update:', data);
+
+});
+
+
+
+Update payload
+
+The push is keyed by symbol (so a single connection can carry multiple symbols' updates):
+
+
+
+{
+
+  "BTCUSDT": {
+
+    "E": 1732801135779,
+
+    "s": "BTCUSDT",
+
+    "o": "93905.00",
+
+    "h": "97276.00",
+
+    "l": "93803.00",
+
+    "c": "95357.00",
+
+    "e": "EXCHANGE_2",
+
+    "bv": "124666.7500",
+
+    "qv": "11922532766.1146",
+
+    "P": "1.546200",
+
+    "b": "95357.00",
+
+    "a": "95357.10",
+
+    "T": 1732809600000,
+
+    "p": 95347.19,
+
+    "i": 95280.65,
+
+    "r": 0.00024185,
+
+    "oi": "",
+
+    "oiv": "",
+
+    "bs": "",
+
+    "as": ""
+
+  }
+
+}
+
+
+
+Field	Type	Description
+
+s	string	Symbol.
+
+e	string	Exchange.
+
+E	integer	Snapshot timestamp (Unix ms).
+
+o / h / l / c	string	24h open / high / low / last (close).
+
+bv	string	24h base-asset volume.
+
+qv	string	24h quote-asset (USDT) volume.
+
+P	string	24h percentage change.
+
+b / a	string	Best bid / best ask price.
+
+bs / as	string	Best bid / ask size. May be empty.
+
+p	number	Mark price.
+
+i	number	Index price.
+
+r	number	Funding rate.
+
+T	integer	Next funding timestamp (Unix ms).
+
+oi / oiv	string	Open interest in base asset / USDT. May be empty.
+
+
+
+Trades WebSocket
+
+Streams a trade message every time a public trade prints on the futures symbol you've subscribed to.
+
+
+
+Event name	FETCH_TRADES_CS_PRO
+
+Connection	See Connection.
+
+Subscribe
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+// npm install socket.io-client@^4
+
+const { io } = require('socket.io-client');
+
+
+
+const sock = io('wss://ws.coinswitch.co/exchange_2', {
+
+  path: '/pro/realtime-rates-socket/futures/exchange_2',
+
+  transports: ['websocket'],
+
+});
+
+
+
+sock.on('connect', () => {
+
+  sock.emit('FETCH_TRADES_CS_PRO', { event: 'subscribe', pair: 'BTCUSDT' });
+
+});
+
+
+
+sock.on('FETCH_TRADES_CS_PRO', (data) => {
+
+  console.log('update:', data);
+
+});
+
+
+
+Update payload
+
+{
+
+  "data": [
+
+    {
+
+      "E": 1732691693128,
+
+      "p": 0.39391,
+
+      "q": 133,
+
+      "e": "EXCHANGE_2",
+
+      "s": "DOGEUSDT",
+
+      "m": true
+
+    }
+
+  ]
+
+}
+
+
+
+Field	Type	Description
+
+E	integer	Trade timestamp (Unix ms).
+
+p	number	Trade price.
+
+q	number	Trade quantity (base asset).
+
+s	string	Symbol.
+
+e	string	Exchange.
+
+m	boolean	true if the buyer was the market maker.
+
+
+
+KLines WebSocket
+
+Streams real-time candle updates for a futures symbol at a chosen interval. Used to render live charts.
+
+
+
+Event name	FETCH_CANDLESTICK_CS_PRO
+
+Connection	See Connection.
+
+Pair format — SYMBOL_INTERVAL
+
+The pair field on the subscribe payload is SYMBOL_INTERVAL (with an underscore), where INTERVAL is in minutes. This is different from every other futures WebSocket (which use just SYMBOL).
+
+
+
+Pattern	Description
+
+BTCUSDT_5	5-minute BTCUSDT candles
+
+ETHUSDT_15	15-minute ETHUSDT candles
+
+DOGEUSDT_60	1-hour DOGEUSDT candles
+
+Subscribe
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+// npm install socket.io-client@^4
+
+const { io } = require('socket.io-client');
+
+
+
+const sock = io('wss://ws.coinswitch.co/exchange_2', {
+
+  path: '/pro/realtime-rates-socket/futures/exchange_2',
+
+  transports: ['websocket'],
+
+});
+
+
+
+sock.on('connect', () => {
+
+  sock.emit('FETCH_CANDLESTICK_CS_PRO', { event: 'subscribe', pair: 'BTCUSDT_5' });
+
+});
+
+
+
+sock.on('FETCH_CANDLESTICK_CS_PRO', (data) => {
+
+  console.log('update:', data);
+
+});
+
+
+
+Update payload
+
+{
+
+  "o": "104562.7",
+
+  "h": "104588.5",
+
+  "l": "104535",
+
+  "c": "104558.7",
+
+  "v": "43.205",
+
+  "q": "1918381.4344",
+
+  "s": "BTCUSDT",
+
+  "i": "5",
+
+  "x": false,
+
+  "t": 1734343500000,
+
+  "T": 1734343799999,
+
+  "ts": 1734343543430
+
+}
+
+
+
+Field	Type	Description
+
+s	string	Symbol.
+
+i	string	Interval in minutes.
+
+o / h / l / c	string	Open / high / low / close.
+
+v	string	Base-asset volume during the candle.
+
+q	string	Quote-asset (USDT) volume during the candle.
+
+t	integer	Candle start time (Unix ms).
+
+T	integer	Candle close time (Unix ms).
+
+ts	integer	Time of the most recent trade in this candle (Unix ms).
+
+x	boolean	true if this candle is closed (final). false while it's still updating.
+
+While a candle is open, x is false and you'll receive multiple updates as new trades print. When the interval boundary passes, you receive a final update with x = true, then the first update for the next candle.
+
+
+
+Futures Client
+
+A single-file client that wraps every CoinSwitch PRO Futures REST endpoint. Drop it into your project, set your API key + secret, and start trading perpetuals.
+
+
+
+Download
+
+Python
+
+coinswitch_futures.py
+
+↓
+
+Java
+
+CoinswitchFutures.java
+
+↓
+
+Go
+
+coinswitch_futures.go
+
+↓
+
+Node.js
+
+coinswitch_futures.js
+
+↓
+
+What it gives you
+
+Every Futures REST endpoint as a method on FuturesClient.
+
+exchange: "EXCHANGE_2" filled in automatically — you only need to pass symbol and order details.
+
+Auto-minted client_order_id on place_order for safe retries.
+
+Symbols use the unseparated form (BTCUSDT, DOGEUSDT).
+
+Install
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+Node 18+ — no dependencies.
+
+
+
+Use it
+
+Python
+
+Java
+
+Go
+
+Node.js
+
+const { FuturesClient } = require('./coinswitch_futures');
+
+
+
+const cf = new FuturesClient({
+
+  apiKey:    '<your hex api key>',
+
+  secretKey: '<your hex secret key>',
+
+});
+
+
+
+console.log(await cf.walletBalance());
+
+
+
+const placed = await cf.placeOrder({
+
+  symbol: 'DOGEUSDT', side: 'BUY',
+
+  order_type: 'LIMIT',
+
+  price: 0.28, quantity: 22,
+
+});
+
+const orderId = placed.data.order_id;
+
+
+
+console.log(await cf.openOrders('DOGEUSDT'));
+
+console.log(await cf.cancelOrder(orderId));
+
+
+
+// Stop-loss
+
+await cf.placeOrder({
+
+  symbol: 'DOGEUSDT', side: 'SELL',
+
+  order_type: 'STOP_MARKET',
+
+  quantity: 0,
+
+  trigger_price: 0.30,
+
+  reduce_only: true,
+
+});
+
+
+
+console.log(await cf.positions());
+
+
+
+Endpoints covered
+
+Method	Endpoint
+
+wallet_balance / walletBalance / WalletBalance	GET /trade/api/v2/futures/wallet_balance
+
+transactions / Transactions	GET /trade/api/v2/futures/transactions
+
+instrument_info / instrumentInfo / InstrumentInfo	GET /trade/api/v2/futures/instrument_info
+
+order_book / orderBook / OrderBook	GET /trade/api/v2/futures/order_book
+
+ticker / Ticker	GET /trade/api/v2/futures/ticker
+
+all_pairs_ticker / allPairsTicker / AllPairsTicker	GET /trade/api/v2/futures/all-pairs/ticker
+
+klines / Klines	GET /trade/api/v2/futures/klines
+
+market_trades / marketTrades / MarketTrades	GET /trade/api/v2/futures/trades
+
+place_order / placeOrder / PlaceOrder	POST /trade/api/v2/futures/order
+
+cancel_order / cancelOrder / CancelOrder	DELETE /trade/api/v2/futures/order
+
+cancel_all_open_orders / cancelAllOpenOrders / CancelAllOpenOrders	POST /trade/api/v2/futures/cancel-all
+
+get_order_status / getOrderStatus / GetOrderStatus	GET /trade/api/v2/futures/order
+
+open_orders / openOrders / OpenOrders	GET /trade/api/v2/futures/orders?open=true
+
+closed_orders / closedOrders / ClosedOrders	GET /trade/api/v2/futures/orders?open=false
+
+positions / Positions	GET /trade/api/v2/futures/positions
+
+get_leverage / getLeverage / GetLeverage	GET /trade/api/v2/futures/leverage
+
+update_leverage / updateLeverage / UpdateLeverage	POST /trade/api/v2/futures/leverage
+
+add_margin / addMargin / AddMargin	POST /trade/api/v2/futures/add_margin
+
+For per-endpoint request/response details, see Futures Reference.
+
+
+
+Related
+
+Order Lifecycle — PARTIALLY_EXECUTED is terminal for Futures.
+
+Position Lifecycle — opening, adding, reducing, closing.
+
+Margin & Leverage — when leverage can/can't change.
+
+
+
