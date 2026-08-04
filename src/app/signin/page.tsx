@@ -53,8 +53,8 @@ export default function SigninPage() {
       dispatch(
         customerLogin({
           tenantId: 1,
-          tenantCode: "tradiaura",
-          tenantName: "TradiAura",
+          tenantCode: "tradenaya",
+          tenantName: "TradeNaya",
           profileId: data.user.id,
           profileCode: `CUS-${data.user.id}`,
           firstName: data.user.firstName,
@@ -72,12 +72,12 @@ export default function SigninPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--background)", color: "var(--foreground)" }}>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0f1115", color: "#f5f7fa" }}>
       <div className="absolute inset-0" style={{ background: "radial-gradient(circle at top right, #23262c 0%, transparent 40%), radial-gradient(circle at bottom left, #12141a 0%, transparent 45%)" }} />
 
-      <Card className="relative z-10 w-full max-w-md border shadow-2xl" style={{ backgroundColor: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+      <Card className="relative z-10 w-full max-w-md border shadow-2xl" style={{ backgroundColor: "#171a20", color: "#f5f7fa", borderColor: "#2a2f38" }}>
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl">TradiAura</CardTitle>
+          <CardTitle className="text-3xl">TradeNaya</CardTitle>
           <CardDescription>User Sign In</CardDescription>
         </CardHeader>
 
@@ -91,7 +91,7 @@ export default function SigninPage() {
                   type="email"
                   placeholder="Enter email"
                   className="pl-10"
-                  style={{ backgroundColor: "var(--input)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  style={{ backgroundColor: "#1d2129", color: "#f5f7fa", borderColor: "#3a414d" }}
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                 />
@@ -106,13 +106,13 @@ export default function SigninPage() {
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter password"
                   className="pl-10 pr-10"
-                  style={{ backgroundColor: "var(--input)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  style={{ backgroundColor: "#1d2129", color: "#f5f7fa", borderColor: "#3a414d" }}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                 />
                 <button
                   type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300"
                   onClick={() => setShowPassword((prev) => !prev)}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}

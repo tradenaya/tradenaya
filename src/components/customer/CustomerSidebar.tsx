@@ -22,7 +22,7 @@ export default function CustomerSidebar({ open, onClose, tenantName }: Props) {
         style={{ backgroundColor: "var(--background)", color: "var(--foreground)", borderColor: "var(--border)" }}
       >
         <div className="h-16 flex items-center justify-between px-5 border-b" style={{ borderColor: "var(--border)" }}>
-          <h1 className="text-xl font-bold">{tenantName || "TradiAura"}</h1>
+          <h1 className="text-xl font-bold">{tenantName || "TradeNaya"}</h1>
 
           <button onClick={onClose} className="cursor-pointer md:hidden" style={{ color: "var(--foreground)" }}>
             <X size={22} />

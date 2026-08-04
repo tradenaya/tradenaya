@@ -5,12 +5,12 @@ export function middleware(
 ) {
   const adminToken =
     request.cookies.get(
-      "tradiaura_admin_token"
+      "tradenaya_admin_token"
     )?.value;
 
   const customerToken =
     request.cookies.get(
-      "tradiaura_user_token"
+      "tradenaya_user_token"
     )?.value;
 
   const pathname =

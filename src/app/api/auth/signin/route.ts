@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-import { signTradiauraToken } from "@/lib/auth";
+import { signTradenayaToken } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,11 +31,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: "Invalid credentials" }, { status: 401 });
     }
 
-    const token = signTradiauraToken({
+    const token = signTradenayaToken({
       customerId: user.id,
       tenantId: 1,
-      tenantCode: "tradiaura",
-      tenantName: "TradiAura",
+      tenantCode: "tradenaya",
+      tenantName: "TradeNaya",
       customerCode: `CUS-${user.id}`,
       firstName: user.first_name,
       lastName: user.last_name,
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    response.cookies.set("tradiaura_user_token", token, {
+    response.cookies.set("tradenaya_user_token", token, {
       httpOnly: true,
       sameSite: "lax",
       path: "/",

@@ -34,7 +34,7 @@ export default function AdminSidebar({ open, onClose, tenantName }: Props) {
           style={{ borderBottom: `1px solid ${surface}` }}
         >
           <h1 className="text-lg font-bold" style={{ fontFamily: "var(--font-poppins)" }}>
-            {tenantName || "TradiAura"}
+            {tenantName || "TradeNaya"}
           </h1>
           <button onClick={onClose} className="md:hidden cursor-pointer" style={{ color: fg }}>
             <X size={20} />
@@ -59,7 +59,7 @@ export default function AdminSidebar({ open, onClose, tenantName }: Props) {
 
         <div className="p-3 shrink-0" style={{ borderTop: `1px solid ${surface}` }}>
           <div className="px-3 py-2 text-xs" style={{ color: fg, opacity: 0.4 }}>
-            TradiAura Admin
+            TradeNaya Admin
           </div>
         </div>
       </div>

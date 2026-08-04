@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,8 +11,8 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = { exchange: "EXCHANGE_2", order_id };
-
-    const { url, headers } = buildSignedRequest("DELETE", "/futures/order", payload);
+    const keys = await getKeysFromRequest(req as any);
+    const { url, headers } = buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "DELETE",

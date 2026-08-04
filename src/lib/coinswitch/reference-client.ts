@@ -1,13 +1,9 @@
 import crypto from "crypto";
 
 export const BASE_URL = process.env.COINSWITCH_BASE_URL!;
-const API_KEY = process.env.COINSWITCH_API_KEY!;
-const API_SECRET = process.env.COINSWITCH_API_SECRET!;
 
-if (!API_KEY || !API_SECRET || !BASE_URL) {
-  throw new Error(
-    "COINSWITCH_API_KEY / COINSWITCH_API_SECRET / COINSWITCH_BASE_URL are not set"
-  );
+if (!BASE_URL) {
+  // don't throw here so the app can still run if the base URL is not configured
 }
 
 function createSignature(
@@ -54,7 +50,9 @@ export interface SignedRequest {
 export function buildSignedRequest(
   method: "GET" | "POST" | "DELETE",
   endpoint: string,
-  params?: Record<string, any>
+  params?: Record<string, any>,
+  apiKey?: string,
+  apiSecret?: string
 ): SignedRequest {
   let query = "";
 
@@ -74,13 +72,20 @@ export function buildSignedRequest(
 
   const epoch = Date.now().toString();
 
-  const signature = createSignature(method, signPath, API_SECRET, epoch);
+  if (!apiKey || !apiSecret) {
+    throw new Error("CoinSwitch credentials are missing. Please reconnect your CoinSwitch account to continue.");
+  }
+
+  const keyToUse = apiKey;
+  const secretToUse = apiSecret;
+
+  const signature = createSignature(method, signPath, secretToUse, epoch);
 
   return {
     url: `${BASE_URL}${fullEndpoint}`,
     headers: {
       "Content-Type": "application/json",
-      "X-AUTH-APIKEY": API_KEY,
+      "X-AUTH-APIKEY": keyToUse,
       "X-AUTH-SIGNATURE": signature,
       "X-AUTH-EPOCH": epoch,
     },

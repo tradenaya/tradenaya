@@ -23,7 +23,7 @@ export default function TradePage() {
   }, [symbol]);
 
   return (
-    <div className="min-h-screen bg-black text-white p-6">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] p-6">
       <h1 className="text-3xl font-bold mb-6">{symbol} Futures</h1>
 
       <WalletSummary />
@@ -31,7 +31,7 @@ export default function TradePage() {
 
       <div className="grid grid-cols-3 gap-5">
         <div className="col-span-2">
-          <div className="bg-zinc-900 rounded-xl h-[500px] flex items-center justify-center">
+          <div className="bg-[var(--card)] rounded-xl h-[500px] flex items-center justify-center">
             <TradingChart symbol={symbol} />
           </div>
           <PositionsPanel symbol={symbol} />

@@ -26,7 +26,7 @@ const noopStorage = {
 };
 
 const persistConfig = {
-  key: "tradiaura-v1",
+  key: "tradenaya-v1",
   storage:
     typeof window === "undefined"
       ? noopStorage

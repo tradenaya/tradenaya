@@ -17,8 +17,8 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "TradiAura",
-  description: "TradiAura authentication and dashboard experience",
+  title: "TradeNaya",
+  description: "TradeNaya authentication and dashboard experience",
 };
 
 export default function RootLayout({
@@ -27,18 +27,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${poppins.variable} h-full antialiased`}
-    >
-      <body
-        className="min-h-full flex flex-col"
-        style={{
-          fontFamily: "var(--font-inter), system-ui, sans-serif",
-          backgroundColor: "#000000",
-          color: "#f9fafb",
-        }}
-      >
+    <html lang="en" className={`${inter.variable} ${poppins.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
         <Providers>
           {children}
           <Toaster position="top-right" richColors />

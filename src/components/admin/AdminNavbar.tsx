@@ -55,7 +55,7 @@ export default function AdminNavbar({ onMenuClick }: Props) {
         >
           <Menu size={24} />
         </button>
-        <h1 className="text-xl font-bold" style={{ color: primary }}>{adminAuth.tenantName || "TradiAura"}</h1>
+        <h1 className="text-xl font-bold" style={{ color: primary }}>{adminAuth.tenantName || "TradeNaya"}</h1>
       </div>
 
       {!mounted ? (

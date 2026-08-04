@@ -30,7 +30,7 @@ export default function SignupPage() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/theme?tenant=tradiaura")
+    fetch("/api/theme?tenant=tradenaya")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.customerTheme) {
@@ -73,7 +73,7 @@ export default function SignupPage() {
         style={{ backgroundColor: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
       >
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-semibold">TradiAura</CardTitle>
+          <CardTitle className="text-3xl font-semibold">TradeNaya</CardTitle>
           <CardDescription style={{ color: "var(--muted-foreground)" }}>Create your account</CardDescription>
         </CardHeader>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, User, LogOut, ChevronDown } from "lucide-react";
+import { Menu, User, LogOut, Plug, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
@@ -40,6 +40,16 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
     router.replace("/signin");
   }
 
+  async function handleDisconnect() {
+    try {
+      await fetch("/api/coinswitch/disconnect", { method: "POST" });
+    } catch (error) {
+      console.error("Disconnect failed", error);
+    }
+
+    router.replace("/coinswitch/connect");
+  }
+
   return (
     <header
       className="h-16 border-b flex items-center justify-between px-5"
@@ -49,7 +59,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         <button onClick={onMenuClick} className="cursor-pointer">
           <Menu size={24} />
         </button>
-        <h1 className="text-lg font-semibold">{tenant.tenantName || "TradiAura"}</h1>
+        <h1 className="text-lg font-semibold">{tenant.tenantName || "TradeNaya"}</h1>
       </div>
 
       {!mounted ? (
@@ -84,7 +94,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
 
             {open && (
               <div
-                className="absolute right-0 top-14 w-64 rounded-xl border shadow-xl z-50"
+                className="absolute right-0 top-14 w-72 rounded-xl border shadow-xl z-50"
                 style={{ backgroundColor: "var(--card, var(--background))", borderColor: "var(--border)", color: "var(--foreground)" }}
               >
                 <div className="p-4 border-b" style={{ borderColor: "var(--border)" }}>
@@ -95,10 +105,22 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
                   <div className="text-xs mt-1" style={{ color: "var(--primary)" }}>{customerAuth.role}</div>
                 </div>
                 <button
+                  onClick={() => { setOpen(false); router.push('/coinswitch/connect'); }}
+                  className="w-full flex items-center gap-2 px-4 py-3 hover:bg-[var(--muted)] transition cursor-pointer"
+                >
+                  <User size={18} />
+                  Spot Profile
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-yellow-300 transition cursor-pointer hover:bg-[var(--muted)]"
+                >
+                  <Plug size={18} />
+                  Disconnect
+                </button>
+                <button
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-red-600 transition cursor-pointer"
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.05)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-red-600 transition cursor-pointer hover:bg-[var(--muted)]"
                 >
                   <LogOut size={18} />
                   Logout

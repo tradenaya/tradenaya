@@ -211,6 +211,7 @@ try {
     side,
     order_type: orderType,
     quantity: effectiveQuantity,
+    order_context: "entry",
   };
   if (orderType === "LIMIT") entryPayload.price = Number(limitPrice);
 
@@ -242,9 +243,10 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
           symbol,
           side: closingSide,
           order_type: "STOP_MARKET",
-          quantity: 0,
+          quantity: effectiveQuantity,
           trigger_price: Number(slPrice),
           reduce_only: true,
+          order_context: "stop_loss",
         });
         placedExtras.push(`SL @ ${slPrice}`);
       }
@@ -255,9 +257,10 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
           symbol,
           side: closingSide,
           order_type: "TAKE_PROFIT_MARKET",
-          quantity: 0,
+          quantity: effectiveQuantity,
           trigger_price: Number(tpPrice),
           reduce_only: true,
+          order_context: "take_profit",
         });
         placedExtras.push(`TP @ ${tpPrice}`);
       }
@@ -276,19 +279,19 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
   const busy = phase.status === "submitting" || phase.status === "polling";
 
   return (
-    <div className="bg-zinc-900 rounded-xl p-5">
+    <div className="bg-[var(--card)] rounded-xl p-5">
       <h2 className="text-xl font-bold mb-5">Place Order</h2>
 
       <div className="flex gap-2 mb-4">
         <button
           onClick={() => setSide("BUY")}
-          className={`flex-1 py-2 rounded font-semibold ${side === "BUY" ? "bg-green-600 text-white" : "bg-zinc-800 text-zinc-400"}`}
+          className={`flex-1 py-2 rounded font-semibold ${side === "BUY" ? "bg-green-600 text-[var(--foreground)]" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
         >
           Buy / Long
         </button>
         <button
           onClick={() => setSide("SELL")}
-          className={`flex-1 py-2 rounded font-semibold ${side === "SELL" ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400"}`}
+          className={`flex-1 py-2 rounded font-semibold ${side === "SELL" ? "bg-red-600 text-[var(--foreground)]" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
         >
           Sell / Short
         </button>
@@ -297,13 +300,13 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
       <div className="flex gap-2 mb-4 text-sm">
         <button
           onClick={() => setOrderType("MARKET")}
-          className={`flex-1 py-1.5 rounded ${orderType === "MARKET" ? "bg-zinc-700 text-white" : "bg-zinc-800 text-zinc-500"}`}
+          className={`flex-1 py-1.5 rounded ${orderType === "MARKET" ? "bg-[color-mix(in_lab,var(--card),var(--muted)_10%)] text-[var(--foreground)]" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
         >
           Market
         </button>
         <button
           onClick={() => setOrderType("LIMIT")}
-          className={`flex-1 py-1.5 rounded ${orderType === "LIMIT" ? "bg-zinc-700 text-white" : "bg-zinc-800 text-zinc-500"}`}
+          className={`flex-1 py-1.5 rounded ${orderType === "LIMIT" ? "bg-[color-mix(in_lab,var(--card),var(--muted)_10%)] text-[var(--foreground)]" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
         >
           Limit
         </button>
@@ -316,7 +319,7 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
             type="number"
             value={limitPrice}
             onChange={(e) => setLimitPrice(e.target.value)}
-            className="w-full mt-1 mb-3 bg-zinc-800 text-white rounded px-3 py-2 outline-none"
+            className="w-full mt-1 mb-3 bg-[var(--muted)] text-[var(--foreground)] rounded px-3 py-2 outline-none"
           />
         </>
       )}
@@ -335,9 +338,9 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
           onTouchEnd={(e) => updateLeverage(Number((e.target as HTMLInputElement).value))}
           className="flex-1"
         />
-        <span className="text-white font-semibold w-12 text-right">{leverage}x</span>
+        <span className="text-[var(--foreground)] font-semibold w-12 text-right">{leverage}x</span>
       </div>
-      {leverageSaving && <p className="text-xs text-zinc-500 mb-2">Updating leverage…</p>}
+      {leverageSaving && <p className="text-xs text-[var(--muted-foreground)] mb-2">Updating leverage…</p>}
       {leverageError && (
         <p className="text-xs text-red-400 mb-2">
           {leverageError} — leverage can't change with an open position/order on this symbol.
@@ -345,7 +348,7 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
       )}
 
       <div className="border-t border-zinc-800 pt-3 mt-3 mb-2">
-        <label className="flex items-center gap-2 text-sm text-zinc-300 mb-2">
+        <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)] mb-2">
           <input
             type="checkbox"
             checked={useManualQuantity}
@@ -355,18 +358,18 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
         </label>
 
         {useManualQuantity && (
-          <input
+            <input
             type="number"
             value={manualQuantity}
             onChange={(e) => setManualQuantity(e.target.value)}
             placeholder={instrument ? `min ${instrument.min_base_quantity}` : "0.00"}
-            className="w-full mb-3 bg-zinc-800 text-white rounded px-3 py-2 outline-none text-sm"
+            className="w-full mb-3 bg-[var(--muted)] text-[var(--foreground)] rounded px-3 py-2 outline-none text-sm"
           />
         )}
       </div>
 
       <div className={useManualQuantity ? "opacity-40 pointer-events-none" : ""}>
-        <label className="text-xs text-zinc-500 mt-2 block">
+        <label className="text-xs text-[var(--muted-foreground)] mt-2 block">
           Position Size — {pct}% of available balance
           {available !== null && (
             <span className="text-zinc-600"> (${available.toFixed(2)} available)</span>
@@ -377,7 +380,7 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
             <button
               key={p}
               onClick={() => setPct(p)}
-              className={`flex-1 py-1 rounded text-xs ${pct === p ? "bg-zinc-700 text-white" : "bg-zinc-800 text-zinc-500"}`}
+              className={`flex-1 py-1 rounded text-xs ${pct === p ? "bg-[color-mix(in_lab,var(--card),var(--muted)_10%)] text-[var(--foreground)]" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
             >
               {p}%
             </button>
@@ -393,32 +396,30 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
         />
       </div>
 
-      <div className="bg-zinc-800 rounded p-3 mb-4 text-sm">
-        <div className="flex justify-between text-zinc-400">
+      <div className="bg-[var(--muted)] rounded p-3 mb-4 text-sm">
+        <div className="flex justify-between text-[var(--muted-foreground)]">
           <span>Quantity</span>
-          <span className="text-white font-semibold">
-            {effectiveQuantity || "—"} {symbol.replace("USDT", "")}
-          </span>
+          <span className="text-[var(--foreground)] font-semibold">{effectiveQuantity || "—"} {symbol.replace("USDT", "")}</span>
         </div>
         {instrument && (
-          <div className="text-zinc-600 text-xs mt-1">
+          <div className="text-[var(--muted-foreground)] text-xs mt-1">
             min {instrument.min_base_quantity}, step {instrument.base_quantity_step_size}
           </div>
         )}
       </div>
 
       <div className="border-t border-zinc-800 pt-3 mb-2">
-        <label className="flex items-center gap-2 text-sm text-zinc-300 mb-2">
+        <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)] mb-2">
           <input type="checkbox" checked={slEnabled} onChange={(e) => setSlEnabled(e.target.checked)} />
           Stop Loss
         </label>
         {slEnabled && (
-          <input
+            <input
             type="number"
             value={slPrice}
             onChange={(e) => setSlPrice(e.target.value)}
             placeholder="Trigger price (USDT)"
-            className="w-full mb-3 bg-zinc-800 text-white rounded px-3 py-2 outline-none text-sm"
+            className="w-full mb-3 bg-[var(--muted)] text-[var(--foreground)] rounded px-3 py-2 outline-none text-sm"
           />
         )}
 
@@ -427,21 +428,17 @@ if (finalStatus !== "EXECUTED" && finalStatus !== "PARTIALLY_EXECUTED") {
           Take Profit
         </label>
         {tpEnabled && (
-          <input
+            <input
             type="number"
             value={tpPrice}
             onChange={(e) => setTpPrice(e.target.value)}
             placeholder="Trigger price (USDT)"
-            className="w-full mb-3 bg-zinc-800 text-white rounded px-3 py-2 outline-none text-sm"
+            className="w-full mb-3 bg-[var(--muted)] text-[var(--foreground)] rounded px-3 py-2 outline-none text-sm"
           />
         )}
       </div>
 
-      <button
-        onClick={submitOrder}
-        disabled={busy}
-        className={`w-full py-3 rounded font-bold text-white disabled:opacity-50 ${side === "BUY" ? "bg-green-600" : "bg-red-600"}`}
-      >
+      <button onClick={submitOrder} disabled={busy} className={`w-full py-3 rounded font-bold text-[var(--foreground)] disabled:opacity-50 ${side === "BUY" ? "bg-green-600" : "bg-red-600"}`}>
         {busy ? "Placing…" : `${side === "BUY" ? "Buy" : "Sell"} ${symbol.replace("USDT", "")}`}
       </button>
 

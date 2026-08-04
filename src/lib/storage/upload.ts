@@ -17,7 +17,7 @@ export async function uploadImage({
 }: UploadImageProps): Promise<string> {
 
   const folder =
-    `tradiaura/${tenantSlug}/${module}/${category}`;
+    `tradenaya/${tenantSlug}/${module}/${category}`;
 
   return new Promise<string>(
     (

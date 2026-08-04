@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -10,10 +11,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { url, headers } = buildSignedRequest("GET", "/futures/leverage", {
-      symbol: symbol.toLowerCase(),
-      exchange: "EXCHANGE_2",
-    });
+    const keys = await getKeysFromRequest(req as any);
+    const { url, headers } = buildSignedRequest("GET", "/futures/leverage", { symbol: symbol.toLowerCase(), exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
 
     console.log("LEVERAGE GET URL:", url);
 
@@ -57,7 +56,8 @@ export async function POST(req: NextRequest) {
       leverage: Number(leverage),
     };
 
-    const { url, headers } = buildSignedRequest("POST", "/futures/leverage", payload);
+    const keys = await getKeysFromRequest(req as any);
+    const { url, headers } = buildSignedRequest("POST", "/futures/leverage", payload, keys?.apiKey, keys?.apiSecret);
 
     console.log("LEVERAGE POST URL:", url);
     console.log("LEVERAGE POST PAYLOAD:", payload);

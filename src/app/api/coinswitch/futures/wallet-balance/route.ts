@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const { url, headers } = buildSignedRequest("GET", "/futures/wallet_balance");
+    const keys = await getKeysFromRequest(req as any);
+    const { url, headers } = buildSignedRequest("GET", "/futures/wallet_balance", undefined, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
     const data = await res.json();

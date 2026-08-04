@@ -70,20 +70,17 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
 
   if (loading) {
     return (
-      <div className="bg-zinc-900 rounded-xl p-5 mt-5 text-zinc-500 text-sm">
+      <div className="bg-[var(--card)] rounded-xl p-5 mt-5 text-[var(--muted-foreground)] text-sm">
         Loading open orders…
       </div>
     );
   }
 
   return (
-    <div className="bg-zinc-900 rounded-xl p-5 mt-5">
+    <div className="bg-[var(--card)] rounded-xl p-5 mt-5">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">Open Orders</h2>
-        <button
-          onClick={fetchOpenOrders}
-          className="text-xs text-zinc-500 hover:text-white"
-        >
+        <button onClick={fetchOpenOrders} className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
           Refresh
         </button>
       </div>
@@ -91,13 +88,13 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
       {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
       {orders.length === 0 ? (
-        <p className="text-zinc-500 text-sm">No open orders on {symbol}.</p>
+        <p className="text-[var(--muted-foreground)] text-sm">No open orders on {symbol}.</p>
       ) : (
         <div className="space-y-2">
           {orders.map((order) => (
             <div
               key={order.order_id}
-              className="bg-zinc-800 rounded-lg p-3 text-sm flex items-center justify-between"
+              className="bg-[color-mix(in_lab,var(--card),var(--muted)_10%)] rounded-lg p-3 text-sm flex items-center justify-between"
             >
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -110,14 +107,14 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
                   >
                     {order.side}
                   </span>
-                  <span className="text-zinc-400 text-xs">{order.order_type}</span>
-                  <span className="text-zinc-600 text-xs">{order.status}</span>
+                  <span className="text-[var(--muted-foreground)] text-xs">{order.order_type}</span>
+                  <span className="text-[var(--muted-foreground)] text-xs">{order.status}</span>
                 </div>
-                <div className="text-zinc-300">
+                <div className="text-[var(--foreground)]">
                   {order.quantity} {symbol.replace("USDT", "")} @ {order.price} USDT
                 </div>
                 {Number(order.exec_quantity) > 0 && (
-                  <div className="text-zinc-500 text-xs mt-1">
+                  <div className="text-[var(--muted-foreground)] text-xs mt-1">
                     Filled: {order.exec_quantity} / {order.quantity}
                   </div>
                 )}

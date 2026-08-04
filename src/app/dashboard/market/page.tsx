@@ -258,10 +258,7 @@ setFilteredCoins(
 
   return (
 
-    <div className="
-      p-6
-      text-white
-    ">
+    <div className="p-6 text-[var(--foreground)] bg-[var(--background)]">
 
 
       <h1 className="
@@ -290,15 +287,8 @@ setFilteredCoins(
           Search coin e.g BTCUSDT
         "
 
-        className="
-          border
-          border-zinc-700
-          bg-black
-          rounded
-          p-3
-          w-full
-          mb-5
-        "
+        className="border rounded p-3 w-full mb-5"
+        style={{ borderColor: "var(--border)", backgroundColor: "var(--card)", color: "var(--foreground)" }}
 
       />
 
@@ -338,27 +328,18 @@ setFilteredCoins(
 
 
 
-        <div className="
-          overflow-x-auto
-        ">
+        <div className="overflow-x-auto">
 
 
 
-        <table className="
-          w-full
-          border
-          border-zinc-700
-        ">
+        <table className="w-full" style={{ borderColor: "var(--border)" }}>
 
 
 
         <thead>
 
 
-        <tr className="
-          border
-          border-zinc-700
-        ">
+        <tr style={{ borderColor: "var(--border)" }}>
 
 
           <th className="p-3">
@@ -416,14 +397,8 @@ setFilteredCoins(
   }
 
 
-  className="
-    border
-    border-zinc-700
-    hover:bg-zinc-800
-    hover:text-white
-    transition
-    cursor-pointer
-  "
+  className="transition cursor-pointer hover:bg-[var(--muted)]"
+  style={{ borderColor: "var(--border)" }}
 
             >
 

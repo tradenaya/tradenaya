@@ -51,7 +51,7 @@ export default function WalletSummary() {
 
   if (error) {
     return (
-      <div className="w-full bg-zinc-900 rounded-xl p-4 mb-5 text-red-400 text-sm">
+      <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5 text-red-400 text-sm">
         Failed to load wallet balance: {error}
       </div>
     );
@@ -59,7 +59,7 @@ export default function WalletSummary() {
 
   if (!balances) {
     return (
-      <div className="w-full bg-zinc-900 rounded-xl p-4 mb-5 text-zinc-500 text-sm">
+      <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5 text-[var(--muted-foreground)] text-sm">
         Loading wallet balance…
       </div>
     );
@@ -69,7 +69,7 @@ export default function WalletSummary() {
   const isEmpty = total === 0;
 
   return (
-    <div className="w-full bg-zinc-900 rounded-xl p-4 mb-5">
+    <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
         <Stat label="Total Balance" value={`${balances.total_balance} USDT`} />
         <Stat label="Available" value={`${balances.total_available_balance} USDT`} highlight />
@@ -100,7 +100,7 @@ function Stat({
   return (
     <div>
       <div className="text-zinc-500 text-xs mb-1">{label}</div>
-      <div className={`font-semibold ${highlight ? "text-emerald-400" : "text-white"}`}>
+      <div className={`font-semibold ${highlight ? "text-emerald-400" : "text-[var(--foreground)]"}`}>
         {value}
       </div>
     </div>

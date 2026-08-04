@@ -6,12 +6,14 @@ export const ADMIN_DEFAULTS = {
   lightBackground: "#f5f5f5",
   lightSurface: "#f8fafc",
   lightText: "#111827",
-  darkPrimary: "#f8fafc",
+  // primary will be a dark gold/bronze shade
+  darkPrimary: "#b8860b",
   darkSecondary: "#c1c8d7",
   darkAccent: "#9ca3af",
   darkSidebar: "#090a10",
   darkBackground: "#000000",
-  darkSurface: "#13151d",
+  // cards / surfaces: darkest charcoal
+  darkSurface: "#0b0d10",
   darkText: "#f8fafc",
 };
 
@@ -22,11 +24,11 @@ export const CUSTOMER_DEFAULTS = {
   lightBackground: "#f5f5f5",
   lightSurface: "#f8fafc",
   lightText: "#111827",
-  darkPrimary: "#f8fafc",
+  darkPrimary: "#b8860b",
   darkSecondary: "#c1c8d7",
   darkAccent: "#9ca3af",
   darkBackground: "#000000",
-  darkSurface: "#13151d",
+  darkSurface: "#0b0d10",
   darkText: "#f8fafc",
 };
 

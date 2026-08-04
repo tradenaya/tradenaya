@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -13,9 +14,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { url, headers } = buildSignedRequest("GET", "/futures/order", {
-      order_id: orderId,
-    });
+    const keys = await getKeysFromRequest(req as any);
+    const { url, headers } = buildSignedRequest("GET", "/futures/order", { order_id: orderId }, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
     const data = await res.json();

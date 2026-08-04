@@ -78,7 +78,7 @@ export default function AdminSigninPage() {
           <div className="flex justify-center mb-3">
             <Shield className="h-10 w-10 text-indigo-600" />
           </div>
-          <CardTitle className="text-3xl">TradiAura</CardTitle>
+          <CardTitle className="text-3xl">TradeNaya</CardTitle>
           <CardDescription>Administrator Sign In</CardDescription>
         </CardHeader>
 

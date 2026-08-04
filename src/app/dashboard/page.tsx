@@ -49,7 +49,7 @@ useEffect(()=>{
 },[]);
 
   return (
-    <div className="p-6">
+    <div className="p-6 bg-[var(--background)] text-[var(--foreground)]">
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
       {/* <button
 
@@ -79,16 +79,7 @@ rounded-lg
 >
 Start Live Prices
 </button> */}
-      <button
-        onClick={loadPortfolio}
-        className="
-bg-blue-600
-text-white
-px-5
-py-3
-rounded-lg
-"
-      >
+      <button onClick={loadPortfolio} className="px-5 py-3 rounded-lg" style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground)" }}>
         {loading ? "Loading..." : "Load Portfolio"}
       </button>
 

@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import crypto from "crypto";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
-const BASE_URL =
-  process.env.COINSWITCH_BASE_URL!;
+const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
 function createSignature(
   method: string,
@@ -52,7 +52,7 @@ function createSignature(
     .toString("hex");
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
 
   try {
 
@@ -65,13 +65,15 @@ export async function GET() {
     const epoch =
       Date.now().toString();
 
-    const signature =
-      createSignature(
-        "GET",
-        signPath,
-        process.env.COINSWITCH_API_SECRET!,
-        epoch
-      );
+    const keys = await getKeysFromRequest(req as any);
+    const apiSecret = keys?.apiSecret;
+    const apiKey = keys?.apiKey;
+
+    if (!apiKey || !apiSecret) {
+      throw new Error("No saved CoinSwitch credentials were found for this account. Please reconnect your CoinSwitch account.");
+    }
+
+    const signature = createSignature("GET", signPath, apiSecret, epoch);
 
     console.log("========== PORTFOLIO ==========");
     console.log("URL:", `${BASE_URL}${endpoint}`);
@@ -89,8 +91,7 @@ export async function GET() {
             "Content-Type":
               "application/json",
 
-            "X-AUTH-APIKEY":
-              process.env.COINSWITCH_API_KEY!,
+            "X-AUTH-APIKEY": apiKey,
 
             "X-AUTH-SIGNATURE":
               signature,

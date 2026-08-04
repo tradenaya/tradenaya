@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 
 const markets = [
@@ -39,7 +40,7 @@ export default function FuturesPage() {
 
   return (
 
-    <div className="min-h-screen bg-black text-white p-6">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] p-6">
 
 
       <h1 className="text-3xl font-bold mb-6">
@@ -54,9 +55,9 @@ export default function FuturesPage() {
         value={search}
         onChange={(e)=>setSearch(e.target.value)}
         className="
-          bg-zinc-900
+          bg-[var(--card)]
           border
-          border-zinc-700
+          border-[var(--border)]
           rounded
           px-4
           py-3
@@ -68,17 +69,10 @@ export default function FuturesPage() {
 
 
 
-      <div className="bg-zinc-900 rounded-xl overflow-hidden">
+      <div className="bg-[var(--card)] rounded-xl overflow-hidden">
 
 
-        <div className="
-          grid
-          grid-cols-4
-          p-4
-          border-b
-          border-zinc-700
-          text-gray-400
-        ">
+        <div className="grid grid-cols-4 p-4 border-b" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
 
           <span>Symbol</span>
           <span>Price</span>
@@ -88,62 +82,16 @@ export default function FuturesPage() {
         </div>
 
 
-
-
-        {
-          filteredMarkets.map((market)=>(
-
-
+        {filteredMarkets.map((market) => (
+          <Link key={market.symbol} href={`/trade/${market.symbol.replace("/", "-")}`} className="block">
             <div
-              key={market.symbol}
-              className="
-                grid
-                grid-cols-4
-                p-4
-                border-b
-                border-zinc-800
-                hover:bg-zinc-800
-                cursor-pointer
-              "
+              className="grid grid-cols-4 p-4 border-b hover:bg-[var(--muted)] cursor-pointer"
+              style={{ borderColor: "var(--border)" }}
             >
-
-              <span className="font-semibold">
-                {market.symbol}
-              </span>
-
-
-              <span>
-                ${market.price}
-              </span>
-
-
-              <span
-                className={
-                  market.change.startsWith("+")
-                  ? "text-green-500"
-                  : "text-red-500"
-                }
-              >
-                {market.change}
-              </span>
-
-
-              <span>
-                {market.volume}
-              </span>
-
-
+              <span className="font-semibold">{market.symbol}</span>
+              <span>${market.price}</span>
+              <span className={market.change.startsWith("+") ? "text-green-500" : "text-red-500"}>{market.change}</span>
+              <span>{market.volume}</span>
             </div>
-
-
-          ))
-        }
-
-
-      </div>
-
-
-    </div>
-
-  );
-}
+          </Link>
+        ))}

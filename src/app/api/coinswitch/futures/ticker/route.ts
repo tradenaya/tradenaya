@@ -1,16 +1,26 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { coinSwitchRequest } from "@/lib/coinswitch";
+import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 
-export async function GET() {
+export async function GET(req: NextRequest) {
 
   try {
+
+    const keys = await getKeysFromRequest(req as any);
+
+    const apiKey = keys?.apiKey;
+    const apiSecret = keys?.apiSecret;
+
+    if (!apiKey || !apiSecret) {
+      throw new Error("No saved CoinSwitch credentials were found for this account. Please reconnect your CoinSwitch account.");
+    }
 
     const response = await coinSwitchRequest(
       "/futures/all-pairs/ticker",
       "GET",
-      process.env.COINSWITCH_API_KEY!,
-      process.env.COINSWITCH_API_SECRET!,
+      apiKey,
+      apiSecret,
       undefined,
       {
         exchange: "EXCHANGE_2"
