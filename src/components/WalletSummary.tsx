@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface WalletBalances {
   total_balance: string;
@@ -41,7 +44,7 @@ export default function WalletSummary() {
     }
 
     fetchBalance();
-    const interval = setInterval(fetchBalance, 10000); // refresh every 10s
+    const interval = setInterval(fetchBalance, 10000);
 
     return () => {
       cancelled = true;
@@ -51,17 +54,21 @@ export default function WalletSummary() {
 
   if (error) {
     return (
-      <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5 text-red-400 text-sm">
-        Failed to load wallet balance: {error}
-      </div>
+      <Card className="mb-5 bg-card">
+        <CardContent className="py-4 text-sm text-red-400">
+          Failed to load wallet balance: {error}
+        </CardContent>
+      </Card>
     );
   }
 
   if (!balances) {
     return (
-      <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5 text-[var(--muted-foreground)] text-sm">
-        Loading wallet balance…
-      </div>
+      <Card className="mb-5 bg-card">
+        <CardContent className="py-4">
+          <Skeleton className="h-8 w-full rounded-md" />
+        </CardContent>
+      </Card>
     );
   }
 
@@ -69,22 +76,25 @@ export default function WalletSummary() {
   const isEmpty = total === 0;
 
   return (
-    <div className="w-full bg-[var(--card)] rounded-xl p-4 mb-5">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-        <Stat label="Total Balance" value={`${balances.total_balance} USDT`} />
-        <Stat label="Available" value={`${balances.total_available_balance} USDT`} highlight />
-        <Stat label="Blocked" value={`${balances.total_blocked_balance} USDT`} />
-        <Stat label="In Positions" value={`${balances.total_position_margin} USDT`} />
-        <Stat label="In Open Orders" value={`${balances.total_open_order_margin} USDT`} />
-      </div>
+    <Card className="mb-5 bg-card">
+      <CardContent className="py-4">
+        <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
+          <Stat label="Total Balance" value={`${balances.total_balance} USDT`} />
+          <Stat label="Available" value={`${balances.total_available_balance} USDT`} highlight />
+          <Stat label="Blocked" value={`${balances.total_blocked_balance} USDT`} />
+          <Stat label="In Positions" value={`${balances.total_position_margin} USDT`} />
+          <Stat label="In Open Orders" value={`${balances.total_open_order_margin} USDT`} />
+        </div>
 
-      {isEmpty && (
-        <p className="text-yellow-400 text-xs mt-3">
-          ⚠️ Futures wallet balance is 0 — deposit/transfer funds into your Futures wallet on
-          CoinSwitch before placing real orders.
-        </p>
-      )}
-    </div>
+        {isEmpty && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400">
+            <AlertTriangle size={14} />
+            Futures wallet balance is 0 — deposit/transfer funds into your Futures wallet on
+            CoinSwitch before placing real orders.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -99,8 +109,8 @@ function Stat({
 }) {
   return (
     <div>
-      <div className="text-zinc-500 text-xs mb-1">{label}</div>
-      <div className={`font-semibold ${highlight ? "text-emerald-400" : "text-[var(--foreground)]"}`}>
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
+      <div className={`font-semibold ${highlight ? "text-emerald-400" : "text-foreground"}`}>
         {value}
       </div>
     </div>

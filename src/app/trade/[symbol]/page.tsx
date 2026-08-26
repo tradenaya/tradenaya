@@ -1,7 +1,10 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ChevronLeft } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import TradingChart from "@/components/TradingChart";
 import TickerBar from "@/components/TickerBar";
 import WalletSummary from "@/components/WalletSummary";
@@ -12,6 +15,7 @@ import { futuresTickerSocket, TickerData } from "@/lib/coinswitch/futuresTickerS
 
 export default function TradePage() {
   const params = useParams();
+  const router = useRouter();
   const symbol = (params.symbol as string).toUpperCase();
 
   const [ticker, setTicker] = useState<TickerData | null>(null);
@@ -23,17 +27,24 @@ export default function TradePage() {
   }, [symbol]);
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] p-6">
-      <h1 className="text-3xl font-bold mb-6">{symbol} Futures</h1>
+    <div className="min-h-screen p-6">
+      <div className="mb-6 flex items-center gap-4">
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => router.push("/dashboard/market")}>
+          <ChevronLeft size={16} /> Markets
+        </Button>
+        <h1 className="text-2xl font-bold">{symbol} Futures</h1>
+      </div>
 
       <WalletSummary />
       <TickerBar ticker={ticker} />
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="col-span-2">
-          <div className="bg-[var(--card)] rounded-xl h-[500px] flex items-center justify-center">
-            <TradingChart symbol={symbol} />
-          </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <Card className="bg-card">
+            <CardContent className="flex h-[500px] items-center justify-center p-0">
+              <TradingChart symbol={symbol} />
+            </CardContent>
+          </Card>
           <PositionsPanel symbol={symbol} />
           <OpenOrdersPanel symbol={symbol} />
         </div>

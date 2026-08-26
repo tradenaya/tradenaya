@@ -10,7 +10,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth >= 1024,
+  );
   const tenant = useAppSelector((state) => state.tenant);
 
   return (
@@ -21,7 +23,7 @@ export default function DashboardLayout({
         tenantName={tenant.tenantName}
       />
 
-      <div className={`flex flex-col min-h-screen transition-all duration-300 ${sidebarOpen ? "md:ml-72" : ""}`}>
+      <div className={`flex flex-col min-h-screen transition-all duration-300 ${sidebarOpen ? "ml-72" : ""}`}>
         <CustomerNavbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1">{children}</main>
       </div>

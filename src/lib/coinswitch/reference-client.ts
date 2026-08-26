@@ -56,7 +56,11 @@ export function buildSignedRequest(
 ): SignedRequest {
   let query = "";
 
-  if (params && Object.keys(params).length > 0) {
+  // CoinSwitch signs GET parameters as a query string on the path, but
+  // POST/DELETE send their parameters as the JSON request body — the signed
+  // path must stay clean there, or the signature never matches and the API
+  // rejects the request with "Malformed request data".
+  if (method === "GET" && params && Object.keys(params).length > 0) {
     query =
       "?" +
       new URLSearchParams(

@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Position {
   position_id: string;
@@ -87,22 +94,6 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
     };
   }, [symbol]);
 
-  if (loading) {
-    return (
-      <div className="bg-[var(--card)] rounded-xl p-5 mt-5 text-[var(--muted-foreground)] text-sm">
-        Loading positions…
-      </div>
-    );
-  }
-
-  if (positions.length === 0) {
-    return (
-      <div className="bg-[var(--card)] rounded-xl p-5 mt-5 text-[var(--muted-foreground)] text-sm">
-        No open position on {symbol}.
-      </div>
-    );
-  }
-
   async function closePosition(position: Position) {
     try {
       setClosingId(position.position_id);
@@ -126,9 +117,10 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
 
       const json = await res.json();
       if (!json.success) throw new Error(json.message || "Close failed");
+      toast.success("Position closing");
       await fetchPositions();
     } catch (err: any) {
-      console.log("CLOSE POSITION ERROR", err);
+      toast.error(err.message || "Close failed");
     } finally {
       setClosingId(null);
     }
@@ -169,159 +161,185 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
 
       const json = await res.json();
       if (!json.success) throw new Error(json.message || "Protective order failed");
+      toast.success(kind === "sl" ? "Stop-loss set" : "Take-profit set");
       await fetchPositions();
     } catch (err: any) {
-      console.log("PLACE PROTECTIVE ORDER ERROR", err);
+      toast.error(err.message || "Failed to place protective order");
     } finally {
       setPlacingProtectiveId(null);
     }
   }
 
+  if (loading) {
+    return <Skeleton className="mt-5 h-40 w-full rounded-lg" />;
+  }
+
+  if (positions.length === 0) {
+    return (
+      <Card className="mt-5 bg-card">
+        <CardContent className="py-6 text-center text-sm text-muted-foreground">
+          No open position on {symbol}.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <div className="bg-[var(--card)] rounded-xl p-5 mt-5">
-      <h2 className="text-xl font-bold mb-4">Open Position</h2>
+    <Card className="mt-5 bg-card">
+      <CardHeader className="border-b">
+        <CardTitle>Open Position</CardTitle>
+        <CardDescription>{positions.length} active on {symbol}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        {positions.map((pos, index) => {
+          const pnl = Number(pos.unrealised_pnl);
+          const isProfit = pnl >= 0;
+          const markPrice = Number(pos.mark_price);
+          const liqPrice = Number(pos.liquidation_price);
+          const liqDistance =
+            markPrice > 0 ? (Math.abs(markPrice - liqPrice) / markPrice) * 100 : 0;
+          const liqWarning = liqDistance < 10;
 
-      {positions.map((pos) => {
-        const pnl = Number(pos.unrealised_pnl);
-        const isProfit = pnl >= 0;
-        const markPrice = Number(pos.mark_price);
-        const liqPrice = Number(pos.liquidation_price);
-        const liqDistance =
-          markPrice > 0 ? (Math.abs(markPrice - liqPrice) / markPrice) * 100 : 0;
-        const liqWarning = liqDistance < 10; // within 10% of liquidation
+          const stopLoss = orders.find(
+            (order) => order.order_context === "stop_loss" || order.order_type === "STOP_MARKET"
+          );
+          const takeProfit = orders.find(
+            (order) => order.order_context === "take_profit" || order.order_type === "TAKE_PROFIT_MARKET"
+          );
 
-        const stopLoss = orders.find(
-          (order) => order.order_context === "stop_loss" || order.order_type === "STOP_MARKET"
-        );
-        const takeProfit = orders.find(
-          (order) => order.order_context === "take_profit" || order.order_type === "TAKE_PROFIT_MARKET"
-        );
+          const entryPrice = Number(pos.avg_entry_price);
+          const size = Number(pos.position_size);
+          const slInputValue = Number(protectiveInputs[pos.position_id]?.sl ?? "");
+          const tpInputValue = Number(protectiveInputs[pos.position_id]?.tp ?? "");
+          const slPreview = Number.isFinite(slInputValue) && slInputValue > 0
+            ? (pos.position_side === "LONG" ? (slInputValue - entryPrice) * size : (entryPrice - slInputValue) * size)
+            : null;
+          const tpPreview = Number.isFinite(tpInputValue) && tpInputValue > 0
+            ? (pos.position_side === "LONG" ? (tpInputValue - entryPrice) * size : (entryPrice - tpInputValue) * size)
+            : null;
 
-        const entryPrice = Number(pos.avg_entry_price);
-        const currentMarkPrice = Number(pos.mark_price);
-        const size = Number(pos.position_size);
-        const slInputValue = Number(protectiveInputs[pos.position_id]?.sl ?? "");
-        const tpInputValue = Number(protectiveInputs[pos.position_id]?.tp ?? "");
-        const slPreview = Number.isFinite(slInputValue) && slInputValue > 0
-          ? (pos.position_side === "LONG" ? (slInputValue - entryPrice) * size : (entryPrice - slInputValue) * size)
-          : null;
-        const tpPreview = Number.isFinite(tpInputValue) && tpInputValue > 0
-          ? (pos.position_side === "LONG" ? (tpInputValue - entryPrice) * size : (entryPrice - tpInputValue) * size)
-          : null;
+          return (
+            <div key={pos.position_id ?? `${pos.symbol}-${index}`} className="rounded-lg bg-muted/50 p-4 text-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <Badge
+                  className={
+                    pos.position_side === "LONG"
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-red-500/15 text-red-400"
+                  }
+                >
+                  {pos.position_side} {pos.leverage}x
+                </Badge>
+                <span className="text-xs text-muted-foreground">{pos.margin_type}</span>
+              </div>
 
-        return (
-          <div key={pos.position_id} className="bg-zinc-800 rounded-lg p-4 text-sm">
-            <div className="flex justify-between items-center mb-3">
-              <span
-                className={`px-2 py-0.5 rounded text-xs font-bold ${
-                  pos.position_side === "LONG"
-                    ? "bg-emerald-600/20 text-emerald-400"
-                    : "bg-red-600/20 text-red-400"
-                }`}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-3">
+                <Row label="Size" value={`${pos.position_size} ${symbol.replace("USDT", "")}`} />
+                <Row label="Entry Price" value={pos.avg_entry_price} />
+                <Row label="Mark Price" value={pos.mark_price} />
+                <Row
+                  label="Unrealised PnL"
+                  value={`${isProfit ? "+" : ""}${pnl.toFixed(4)} USDT`}
+                  valueClass={isProfit ? "text-emerald-400" : "text-red-400"}
+                />
+                <Row label="Position Margin" value={`${pos.position_margin} USDT`} />
+                <Row
+                  label="Liquidation Price"
+                  value={pos.liquidation_price}
+                  valueClass={liqWarning ? "font-bold text-red-400" : undefined}
+                />
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="rounded-md bg-muted p-2">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">SL</div>
+                  <div className="font-semibold text-foreground">
+                    {stopLoss ? stopLoss.trigger_price ?? stopLoss.price ?? "—" : "Not set"}
+                  </div>
+                  <Input
+                    type="number"
+                    value={protectiveInputs[pos.position_id]?.sl ?? ""}
+                    onChange={(e) =>
+                      setProtectiveInputs((prev) => ({
+                        ...prev,
+                        [pos.position_id]: {
+                          sl: e.target.value,
+                          tp: prev[pos.position_id]?.tp ?? "",
+                        },
+                      }))
+                    }
+                    placeholder={pos.mark_price}
+                    className="mt-2 h-8 text-xs"
+                  />
+                  <div className="mt-1.5 text-[10px] text-muted-foreground">
+                    {slPreview === null ? "Enter a price to preview PnL" : `${slPreview >= 0 ? "+" : ""}${slPreview.toFixed(2)} USDT`}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="mt-1.5 w-full bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 hover:text-amber-400"
+                    disabled={placingProtectiveId === pos.position_id}
+                    onClick={() => placeProtectiveOrder(pos, "sl")}
+                  >
+                    {placingProtectiveId === pos.position_id && <Loader2 className="animate-spin" />}
+                    Set SL
+                  </Button>
+                </div>
+                <div className="rounded-md bg-muted p-2">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">TP</div>
+                  <div className="font-semibold text-foreground">
+                    {takeProfit ? takeProfit.trigger_price ?? takeProfit.price ?? "—" : "Not set"}
+                  </div>
+                  <Input
+                    type="number"
+                    value={protectiveInputs[pos.position_id]?.tp ?? ""}
+                    onChange={(e) =>
+                      setProtectiveInputs((prev) => ({
+                        ...prev,
+                        [pos.position_id]: {
+                          sl: prev[pos.position_id]?.sl ?? "",
+                          tp: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder={pos.mark_price}
+                    className="mt-2 h-8 text-xs"
+                  />
+                  <div className="mt-1.5 text-[10px] text-muted-foreground">
+                    {tpPreview === null ? "Enter a price to preview PnL" : `${tpPreview >= 0 ? "+" : ""}${tpPreview.toFixed(2)} USDT`}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="mt-1.5 w-full bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 hover:text-emerald-400"
+                    disabled={placingProtectiveId === pos.position_id}
+                    onClick={() => placeProtectiveOrder(pos, "tp")}
+                  >
+                    {placingProtectiveId === pos.position_id && <Loader2 className="animate-spin" />}
+                    Set TP
+                  </Button>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                className="mt-3 w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                disabled={closingId === pos.position_id}
+                onClick={() => closePosition(pos)}
               >
-                {pos.position_side} {pos.leverage}x
-              </span>
-              <span className="text-zinc-500 text-xs">{pos.margin_type}</span>
+                {closingId === pos.position_id && <Loader2 className="animate-spin" />}
+                Close now
+              </Button>
+
+              {liqWarning && (
+                <p className="mt-2 text-xs text-red-400">
+                  Mark price is within {liqDistance.toFixed(1)}% of liquidation — consider adding
+                  margin or reducing size.
+                </p>
+              )}
             </div>
-
-            <Row label="Size" value={`${pos.position_size} ${symbol.replace("USDT", "")}`} />
-            <Row label="Entry Price" value={pos.avg_entry_price} />
-            <Row label="Mark Price" value={pos.mark_price} />
-            <Row
-              label="Unrealised PnL"
-              value={`${isProfit ? "+" : ""}${pnl.toFixed(4)} USDT`}
-              valueClass={isProfit ? "text-emerald-400" : "text-red-400"}
-            />
-            <Row label="Position Margin" value={`${pos.position_margin} USDT`} />
-            <Row label="Position Value" value={`${pos.position_value} USDT`} />
-            <Row
-              label="Liquidation Price"
-              value={pos.liquidation_price}
-              valueClass={liqWarning ? "text-red-400 font-bold" : undefined}
-            />
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-md bg-zinc-700/60 p-2">
-                <div className="text-[10px] uppercase tracking-wide text-zinc-400">SL</div>
-                <div className="font-semibold text-zinc-200">
-                  {stopLoss ? stopLoss.trigger_price ?? stopLoss.price ?? "—" : "Not set"}
-                </div>
-                <input
-                  type="number"
-                  value={protectiveInputs[pos.position_id]?.sl ?? ""}
-                  onChange={(e) =>
-                    setProtectiveInputs((prev) => ({
-                      ...prev,
-                      [pos.position_id]: {
-                        sl: e.target.value,
-                        tp: prev[pos.position_id]?.tp ?? "",
-                      },
-                    }))
-                  }
-                  placeholder={pos.mark_price}
-                  className="mt-2 w-full rounded border border-zinc-600 bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
-                />
-                <div className="mt-2 text-[10px] text-zinc-400">
-                  {slPreview === null ? "Enter a price to preview PnL" : `${slPreview >= 0 ? "+" : ""}${slPreview.toFixed(2)} USDT`}
-                </div>
-                <button
-                  onClick={() => placeProtectiveOrder(pos, "sl")}
-                  disabled={placingProtectiveId === pos.position_id}
-                  className="mt-2 w-full rounded bg-amber-600/20 px-2 py-1 text-xs font-semibold text-amber-400 hover:bg-amber-600/30 disabled:opacity-60"
-                >
-                  {placingProtectiveId === pos.position_id ? "Placing…" : "Set SL"}
-                </button>
-              </div>
-              <div className="rounded-md bg-zinc-700/60 p-2">
-                <div className="text-[10px] uppercase tracking-wide text-zinc-400">TP</div>
-                <div className="font-semibold text-zinc-200">
-                  {takeProfit ? takeProfit.trigger_price ?? takeProfit.price ?? "—" : "Not set"}
-                </div>
-                <input
-                  type="number"
-                  value={protectiveInputs[pos.position_id]?.tp ?? ""}
-                  onChange={(e) =>
-                    setProtectiveInputs((prev) => ({
-                      ...prev,
-                      [pos.position_id]: {
-                        sl: prev[pos.position_id]?.sl ?? "",
-                        tp: e.target.value,
-                      },
-                    }))
-                  }
-                  placeholder={pos.mark_price}
-                  className="mt-2 w-full rounded border border-zinc-600 bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
-                />
-                <div className="mt-2 text-[10px] text-zinc-400">
-                  {tpPreview === null ? "Enter a price to preview PnL" : `${tpPreview >= 0 ? "+" : ""}${tpPreview.toFixed(2)} USDT`}
-                </div>
-                <button
-                  onClick={() => placeProtectiveOrder(pos, "tp")}
-                  disabled={placingProtectiveId === pos.position_id}
-                  className="mt-2 w-full rounded bg-emerald-600/20 px-2 py-1 text-xs font-semibold text-emerald-400 hover:bg-emerald-600/30 disabled:opacity-60"
-                >
-                  {placingProtectiveId === pos.position_id ? "Placing…" : "Set TP"}
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={() => closePosition(pos)}
-              disabled={closingId === pos.position_id}
-              className="mt-3 w-full rounded-md bg-red-600/20 px-3 py-2 text-sm font-semibold text-red-400 hover:bg-red-600/30 disabled:opacity-60"
-            >
-              {closingId === pos.position_id ? "Closing…" : "Close now"}
-            </button>
-
-            {liqWarning && (
-              <p className="text-red-400 text-xs mt-2">
-                ⚠️ Mark price is within {liqDistance.toFixed(1)}% of liquidation — consider adding margin or reducing size.
-              </p>
-            )}
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -335,9 +353,9 @@ function Row({
   valueClass?: string;
 }) {
   return (
-    <div className="flex justify-between py-1">
-      <span className="text-zinc-500">{label}</span>
-      <span className={valueClass ?? "text-[var(--foreground)]"}>{value}</span>
+    <div className="flex justify-between py-0.5">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={valueClass ?? "text-foreground"}>{value}</span>
     </div>
   );
 }

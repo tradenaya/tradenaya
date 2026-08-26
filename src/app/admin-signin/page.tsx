@@ -2,26 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2, Lock, Mail, Shield } from "lucide-react";
 import { toast } from "sonner";
 
-import { Mail, Lock, Shield, Eye, EyeOff } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import AuthShell from "@/components/auth/AuthShell";
+import { AuthField } from "@/components/auth/AuthField";
 import { useAppDispatch } from "@/store/hooks";
 import { adminLogin } from "@/store/slices/adminAuthSlice";
 
 export default function AdminSigninPage() {
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
 
   const router = useRouter();
@@ -29,14 +20,13 @@ export default function AdminSigninPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.email || !form.password) {
+      toast.error("Please enter your email and password");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      if (!form.email || !form.password) {
-        toast.error("Please enter your email and password");
-        return;
-      }
-
       const response = await fetch("/api/admin/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -72,44 +62,50 @@ export default function AdminSigninPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "var(--background)", color: "var(--foreground)" }}>
-      <Card className="w-full max-w-md shadow-2xl border" style={{ backgroundColor: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-3">
-            <Shield className="h-10 w-10 text-indigo-600" />
-          </div>
-          <CardTitle className="text-3xl">TradeNaya</CardTitle>
-          <CardDescription>Administrator Sign In</CardDescription>
-        </CardHeader>
+    <AuthShell
+      title="Admin Console"
+      subtitle="Administrator Sign In"
+      footer={
+        <p className="text-center text-xs" style={{ color: "var(--muted-foreground)" }}>
+          Restricted access · Authorized personnel only
+        </p>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <AuthField
+          id="email"
+          label="Email"
+          type="email"
+          placeholder="Admin email"
+          icon={<Mail size={16} />}
+          autoComplete="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
 
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <Label>Email</Label>
-              <Input
-                type="email"
-                placeholder="Admin email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
+        <AuthField
+          id="password"
+          label="Password"
+          placeholder="Password"
+          icon={<Lock size={16} />}
+          toggleable
+          autoComplete="current-password"
+          value={form.password}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+        />
 
-            <div>
-              <Label>Password</Label>
-              <Input
-                type="password"
-                placeholder="Password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-            </div>
-
-            <Button className="w-full" disabled={loading}>
-              {loading ? "Signing In..." : "Admin Sign In"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading ? (
+            <>
+              <Loader2 className="animate-spin" /> Signing in…
+            </>
+          ) : (
+            <>
+              <Shield /> Admin Sign In
+            </>
+          )}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

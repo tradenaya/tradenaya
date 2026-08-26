@@ -23,8 +23,8 @@
   --secondary-foreground: #c1c8d7;
   --muted: #0b0d12;
   --muted-foreground: #9aa4b6;
-  --accent: #111318;
-  --accent-foreground: #c1c8d7;
+  --accent: #232b3e;
+  --accent-foreground: #e6ecf5;
   --destructive: #ef4444;
   --input: #0d1017;
   --ring: #8f9bb7;
@@ -119,10 +119,10 @@ h1, h2, h3, h4, h5, h6 {
   --secondary-foreground: #f8fafc;
   --muted: #0a0c11;
   --muted-foreground: #9aa4b6;
-  --accent: #111318;
-  --accent-foreground: #cbd5e1;
+  --accent: #232b3e;
+  --accent-foreground: #e6ecf5;
   --destructive: #ef4444;
-  --border: rgba(255,255,255,0.08);
+  --border: rgba(184,134,11,0.14);
   --input: #0d1017;
   --ring: #8f9bb7;
   --chart-1: #f8fafc;
@@ -136,7 +136,7 @@ h1, h2, h3, h4, h5, h6 {
   --sidebar-primary-foreground: #000000;
   --sidebar-accent: #0b0d11;
   --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: rgba(255,255,255,0.08);
+  --sidebar-border: rgba(184,134,11,0.14);
   --sidebar-ring: #f8fafc;
   --admin-primary: #f8fafc;
   --admin-secondary: #c1c8d7;
@@ -171,4 +171,96 @@ h1, h2, h3, h4, h5, h6 {
   .card, .card * {
     border-color: rgba(255,255,255,0.04);
   }
+}
+
+/* ---------- Global UI polish ---------- */
+
+  /* Slim themed scrollbars — gold accent on dark track */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(184, 134, 11, 0.35) rgba(184, 134, 11, 0.06);
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(184, 134, 11, 0.3);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(184, 134, 11, 0.5);
+  }
+
+/* Selection tint matching brand */
+::selection {
+  background: rgba(184, 134, 11, 0.35);
+  color: var(--foreground);
+}
+
+/* Smooth color/theme transitions without breaking data-heavy pages */
+body,
+header,
+nav,
+.card,
+button {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+/* Brand accent on focus rings for custom controls */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(184, 134, 11, 0.4);
+  outline-offset: 1px;
+}
+
+/* Subtle hover treatment for data tables */
+table tbody tr:hover {
+  transition: background-color 0.15s ease;
+}
+
+/* Skeleton shimmer refinement */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.06),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Fade/slide-in for page content */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease both;
 }
