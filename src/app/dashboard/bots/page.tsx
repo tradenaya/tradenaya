@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Eye, Loader2, Pause, Play, Power, Square, Pencil, Trash } from "lucide-react";
+import { Check, Eye, Loader2, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
+import { CreateBotDialog } from "@/components/automation/CreateBotDialog";
 import { BehindTheScenes } from "@/components/automation/BehindTheScenes";
 import { BotDetailsDialog } from "@/components/automation/BotDetailsDialog";
 import { EditBotDialog } from "@/components/automation/EditBotDialog";
@@ -238,6 +240,10 @@ export default function AutomationPage() {
   const [confirmStop, setConfirmStop] = useState<BotView | null>(null);
   const [editBot, setEditBot] = useState<BotView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BotView | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [confirmDeleteMany, setConfirmDeleteMany] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   async function loadBots() {
     try {
@@ -328,6 +334,46 @@ export default function AutomationPage() {
     }
   }
 
+  async function deleteManyBots() {
+    setConfirmDeleteMany(false);
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    let failed = 0;
+    for (const id of ids) {
+      setBusyId(id);
+      try {
+        const res = await fetch(`/api/bots/${id}`, { method: "DELETE" });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete bot");
+        deleted++;
+      } catch (err: unknown) {
+        failed++;
+        toast.error(`${bots.find((b) => b.id === id)?.symbol ?? `Bot #${id}`}: ${err instanceof Error ? err.message : "Failed to delete bot"}`);
+      }
+    }
+    if (deleted > 0) {
+      toast.success(`${deleted} bot${deleted === 1 ? "" : "s"} deleted${failed > 0 ? `, ${failed} failed` : ""}`);
+    } else if (failed > 0) {
+      toast.error(`No bots could be deleted (${failed} failed)`);
+    }
+    setBusyId(null);
+    setSelectedIds(new Set());
+    setSelecting(false);
+    await loadBots();
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
   // Running bots surface first — the ones needing attention shouldn't be buried in the list.
   const sortedBots = useMemo(() => [...bots].sort((a, b) => Number(isLive(b)) - Number(isLive(a))), [bots]);
 
@@ -346,6 +392,9 @@ export default function AutomationPage() {
         )}
       </div>
 
+      {/* Settings + Turn On / Turn Off — create a new bot and start it without leaving this screen */}
+      <AutomationSwitch onCreated={loadBots} />
+
       {/* Live status — full width, this is the one thing that matters most right now */}
       <section>
         {loading && bots.length === 0 ? (
@@ -358,7 +407,36 @@ export default function AutomationPage() {
       {/* Bots and Recent activity side by side, locked to the same height with independent scrollers */}
       <div className="grid gap-6 lg:h-[34rem] lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
         <section className="flex min-h-0 flex-col">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Bots</h2>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Bots</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 gap-1.5 px-2 text-xs"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={12} /> New bot
+              </Button>
+              {bots.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={selecting ? "default" : "outline"}
+                  className="h-6 gap-1.5 px-2 text-xs"
+                  onClick={() => {
+                    setSelecting((prev) => {
+                      const next = !prev;
+                      if (!next) setSelectedIds(new Set());
+                      return next;
+                    });
+                  }}
+                >
+                  {selecting ? <X size={12} /> : <Check size={12} />}
+                  {selecting ? "Done" : "Select…"}
+                </Button>
+              )}
+            </div>
+          </div>
           {loading && bots.length === 0 ? (
             <Skeleton className="h-64 w-full rounded-lg" />
           ) : bots.length === 0 ? (
@@ -375,6 +453,23 @@ export default function AutomationPage() {
                 const busy = busyId === bot.id;
                 return (
                   <div key={bot.id} className="flex items-center gap-2.5 px-3 py-2.5">
+                    {selecting && (
+                      <button
+                        type="button"
+                        disabled={live}
+                        title={live ? "Stop the bot before deleting" : undefined}
+                        onClick={() => toggleSelected(bot.id)}
+                        className={cn(
+                          "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors",
+                          selectedIds.has(bot.id)
+                            ? "border-red-500/60 bg-red-500/25 text-red-300"
+                            : "border-border text-transparent hover:border-red-500/50 hover:text-red-500/40",
+                          live && "cursor-not-allowed opacity-30",
+                        )}
+                      >
+                        <Check size={13} />
+                      </button>
+                    )}
                     <div
                       className={cn(
                         "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-bold",
@@ -473,6 +568,33 @@ export default function AutomationPage() {
               })}
             </div>
           )}
+          {selecting && (
+            <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                {selectedIds.size} of {bots.length} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 px-2.5 text-xs"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="h-7 gap-1.5 px-2.5 text-xs bg-red-500/90 hover:bg-red-500"
+                  disabled={selectedIds.size === 0}
+                  onClick={() => setConfirmDeleteMany(true)}
+                >
+                  {busyId != null ? <Loader2 className="animate-spin" size={13} /> : <Trash size={13} />}
+                  Delete selected
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="flex min-h-0 flex-col">
@@ -518,6 +640,26 @@ export default function AutomationPage() {
           onConfirm={() => deleteBot(confirmDelete)}
         />
       )}
+
+      {confirmDeleteMany && (
+        <ConfirmationDialog
+          open={Boolean(confirmDeleteMany)}
+          onOpenChange={(open) => {
+            if (!open) setConfirmDeleteMany(false);
+          }}
+          title={`Delete ${selectedIds.size} bot${selectedIds.size === 1 ? "" : "s"}?`}
+          description="The selected bots will be permanently deleted. Any that are still running or have open positions must be resolved first and won't be deleted. This can't be undone."
+          confirmLabel="Delete selected"
+          destructive
+          onConfirm={() => deleteManyBots()}
+        />
+      )}
+
+      <CreateBotDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={loadBots}
+      />
 
       {confirmStop && (
         <ConfirmationDialog

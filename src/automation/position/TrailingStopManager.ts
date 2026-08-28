@@ -1,5 +1,8 @@
-import type { CoinSwitchClientLike, PositionSnapshot, PositionStoreLike } from "./PositionManagerTypes";
+import type { CoinSwitchClientLike, PositionSnapshot, PositionRecord, PositionStoreLike } from "./PositionManagerTypes";
 import { clientOrderId } from "@/automation/executor/order-id";
+import { OrderHistoryRepository, type OrderHistoryInsert } from "@/automation/order-history";
+
+const TERMINAL_STATUSES = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
 
 export interface TrailingUpdateResult {
   moved: boolean;
@@ -76,13 +79,25 @@ export class TrailingStopManager {
     return { moved: true, newStopLoss: candidate };
   }
 
-  private async replaceStopOrder(position: PositionSnapshot["position"], newStop: number): Promise<boolean> {
-    try {
-      if (position.stopLossOrderId) {
-        await this.client.cancelOrder(position.userId, position.stopLossOrderId).catch(() => null);
-      }
+  /**
+   * Move the trailing stop safely.
+   *
+   * The previous implementation CANCELLED the existing SL and then placed the
+   * new one. If the process died between the two calls the position was left
+   * with NO stop loss while the DB still referenced the (now cancelled) order.
+   *
+   * This now:
+   *   1. Places the replacement SL first.
+   *   2. Confirms the replacement is active on the exchange.
+   *   3. Only THEN cancels the obsolete SL.
+   *   4. If the replacement cannot be created/confirmed, the existing SL is
+   *      kept untouched so the position is never left unprotected.
+   */
+  private async replaceStopOrder(position: PositionRecord, newStop: number): Promise<boolean> {
+    const opposite = position.side === "BUY" ? "SELL" : "BUY";
 
-      const opposite = position.side === "BUY" ? "SELL" : "BUY";
+    let newOrderId: string | null = null;
+    try {
       const order = await this.client.placeOrder(position.userId, {
         symbol: position.symbol,
         side: opposite,
@@ -92,14 +107,85 @@ export class TrailingStopManager {
         reduceOnly: true,
         clientOrderId: clientOrderId(`trail_${position.executionId}_${Date.now()}`),
       });
+      newOrderId = order.orderId ?? null;
+      if (!newOrderId) throw new Error("replacement SL placed but no order id returned");
+    } catch (error) {
+      console.log(`[PROTECTION] Replacement SL create FAILED — keeping existing SL ${position.stopLossOrderId ?? "(none)"}`, error instanceof Error ? error.message : String(error));
+      return false;
+    }
 
-      if (order.orderId) {
-        await this.store.updateProtection(position.id, order.orderId, position.takeProfitOrderId);
-        return true;
-      }
-      return false;
+    console.log("[PROTECTION] Replacement SL created", newOrderId);
+
+    let confirmed = false;
+    try {
+      const status = String((await this.client.getOrderStatus(position.userId, newOrderId))?.status ?? "");
+      confirmed = status !== "" && !TERMINAL_STATUSES.has(status);
     } catch {
+      confirmed = false;
+    }
+
+    if (!confirmed) {
+      // The replacement could not be confirmed as active (transient API issue
+      // or it filled instantly). Cancel the just-created replacement and keep
+      // the existing SL so the position is never left with a phantom/unverified
+      // protection and is never left unprotected.
+      console.log("[PROTECTION] Replacement SL NOT confirmed — cancelling replacement and KEEPING existing SL", position.stopLossOrderId ?? "(none)");
+      await this.client.cancelOrder(position.userId, newOrderId).catch(() => null);
       return false;
+    }
+    console.log("[PROTECTION] Replacement SL confirmed active", newOrderId);
+
+    // Only now is it safe to remove the obsolete SL.
+    if (position.stopLossOrderId) {
+      await this.client.cancelOrder(position.userId, position.stopLossOrderId).catch(() => null);
+      this.recordProtective("STOP_MARKET", position, position.stopLossOrderId, "CANCELLED", newStop).catch(() => null);
+      console.log("[PROTECTION] Old SL cancelled", position.stopLossOrderId);
+    }
+
+    this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);
+    await this.store.updateProtection(position.id, newOrderId, position.takeProfitOrderId);
+    return true;
+  }
+
+  /** Best-effort persistence of protective SL orders so history survives sub-account unavailability. */
+  private async recordProtective(
+    orderType: "STOP_MARKET" | "TAKE_PROFIT_MARKET",
+    position: PositionRecord,
+    exchangeOrderId: string,
+    status: string,
+    triggerPrice: number | null,
+    quantity?: number | null,
+  ): Promise<void> {
+    try {
+      const context = orderType === "STOP_MARKET" ? "stop_loss" : "take_profit";
+      const row: OrderHistoryInsert = {
+        userId: position.userId,
+        userEmail: null,
+        userCode: null,
+        symbol: position.symbol,
+        side: position.side === "BUY" ? "SELL" : "BUY",
+        orderType,
+        orderContext: context,
+        quantity: quantity ?? position.filledQuantity ?? position.quantity ?? null,
+        price: null,
+        triggerPrice,
+        reduceOnly: true,
+        status,
+        exchangeOrderId,
+        clientOrderId: null,
+        responseStatus: status,
+        message: context,
+        amountUsed: null,
+        avgExecutionPrice: null,
+        executionFee: null,
+        pnl: null,
+        realizedPnl: null,
+        isProfit: null,
+        rawResponse: null,
+      };
+      await new OrderHistoryRepository().saveOrder(row);
+    } catch {
+      // best-effort: history must never break trailing-stop management
     }
   }
 

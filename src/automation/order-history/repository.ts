@@ -25,7 +25,7 @@ function buildSearch(search: string): { sql: string; params: string[] } {
 
 const BASE_COLUMNS = `
   o.id, o.user_id, o.user_email, o.user_code,
-  o.symbol, o.side, o.order_type, o.order_context,
+  o.exchange, o.symbol, o.side, o.order_type, o.order_context,
   o.quantity, o.price, o.trigger_price, o.reduce_only,
   o.status, o.exchange_order_id, o.client_order_id,
   o.response_status, o.message, o.amount_used,
@@ -37,6 +37,7 @@ function mapRow(row: Record<string, unknown>): OrderHistoryRow {
   return {
     id: Number(row.id),
     userCode: row.user_code != null ? String(row.user_code) : null,
+    exchange: row.exchange != null ? String(row.exchange) : null,
     symbol: String(row.symbol),
     side: row.side === "SELL" ? "SELL" : "BUY",
     orderType: row.order_type != null ? String(row.order_type) : "MARKET",
@@ -71,6 +72,7 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
         user_id INT NULL,
         user_email VARCHAR(255) NULL,
         user_code VARCHAR(100) NULL,
+        exchange VARCHAR(50) NULL,
         symbol VARCHAR(50) NOT NULL,
         side VARCHAR(10) NOT NULL,
         order_type VARCHAR(30) NOT NULL,
@@ -98,6 +100,14 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
         KEY idx_status (status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    const [rows] = await db.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'futures_orders_history';`,
+    );
+    const columns = new Set((rows as Array<{ COLUMN_NAME: string }>).map((row) => row.COLUMN_NAME));
+    if (!columns.has("exchange")) {
+      await db.query(`ALTER TABLE futures_orders_history ADD COLUMN exchange VARCHAR(50) NULL;`);
+    }
   }
 
   async saveOrder(input: OrderHistoryInsert) {
@@ -109,15 +119,16 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
 
     await db.query(
       `INSERT INTO futures_orders_history (
-        user_id, user_email, user_code, symbol, side, order_type, order_context,
+        user_id, user_email, user_code, exchange, symbol, side, order_type, order_context,
         quantity, price, trigger_price, reduce_only, status, exchange_order_id,
         client_order_id, response_status, message, amount_used, avg_execution_price,
         execution_fee, pnl, realized_pnl, is_profit, raw_response
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         input.userId,
         input.userEmail,
         input.userCode,
+        input.exchange ?? "EXCHANGE_2",
         input.symbol,
         input.side,
         input.orderType,

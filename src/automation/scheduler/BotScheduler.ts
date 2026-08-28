@@ -87,6 +87,10 @@ export class BotScheduler {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     void serverMarketDataService.stop();
+    // Shutdown must NEVER close an open position or cancel SL/TP orders on the
+    // exchange. Exchange-side protective orders remain active independently of
+    // this server.
+    console.log("[SHUTDOWN] BotScheduler stopped — NO position close / order cancel performed. Exchange-side SL/TP remain active.");
   }
 
   /**

@@ -14,7 +14,7 @@ import { coinswitchClient, CoinSwitchClient, type ExchangeOrder, type ExchangePo
 import { reconcileClose } from "./close-accounting";
 import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import { executionStore } from "@/automation/executor/store";
-import { detectExecutedClose } from "./executed-close";
+import { detectExecutedClose, confirmExternalClose } from "./executed-close";
 import { evaluateEntryValidity } from "./EntryValidity";
 import { serverMarketDataService } from "@/automation/market/service";
 import { normalizeInterval } from "@/automation/market/normalizer";
@@ -73,6 +73,20 @@ export class PositionMonitor {
     this.running = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    // Shutdown must NEVER close an open position or cancel SL/TP orders.
+    // Exchange-side protective orders are independent of this server and remain
+    // active on CoinSwitch after this process exits.
+    console.log("[SHUTDOWN] PositionMonitor stopped — NO position close / order cancel performed. Exchange-side SL/TP remain active.");
+  }
+
+  /**
+   * Revives the monitor if it was never started (e.g. the module was hot
+   * reloaded in dev and instrumentation.register() did not re-run). This keeps
+   * position management active after a restart so active positions keep being
+   * reconciled instead of being assumed finished.
+   */
+  async ensureStarted(): Promise<void> {
+    if (!this.running) await this.start();
   }
 
   async tick(): Promise<void> {
@@ -340,12 +354,20 @@ export class PositionMonitor {
       }
       const ageMs = Date.now() - new Date(position.createdAt).getTime();
       if (ageMs > ENTRY_VISIBILITY_GRACE_MS) {
-        await this.finalizeClose(snapshot, {
-          shouldClose: true,
-          reason: "MANUAL_CLOSE",
-          exitPrice: snapshot.currentPrice ?? null,
-          detail: "entry executed but position never appeared on exchange",
-        });
+        // Only finalize once we can CONFIRM the position really closed (ledger
+        // realized P&L or a terminal protective order). Never fabricate a
+        // MANUAL_CLOSE for a position that might still be open / slow to read.
+        const confirmed = await confirmExternalClose(this.client, position.userId, position);
+        if (confirmed.confirmed) {
+          await this.finalizeClose(snapshot, {
+            shouldClose: true,
+            reason: confirmed.reason ?? "MANUAL_CLOSE",
+            exitPrice: confirmed.price ?? snapshot.currentPrice ?? null,
+            detail: "entry executed but position never appeared on exchange (close confirmed)",
+          });
+          return;
+        }
+        await this.log(position, "WAITING_POSITION", "entry executed but position not visible; close unconfirmed — keeping open and retrying");
         return;
       }
       await this.log(position, "WAITING_POSITION", "entry executed but position not yet visible on exchange");
@@ -436,11 +458,23 @@ export class PositionMonitor {
       return;
     }
 
-    await this.stateManager.transition(position.id, position.state, "CLOSING", "position no longer exists on exchange");
+    // The read succeeded (positionsReadFailed was checked by the caller) and
+    // returned no live position, but neither SL nor TP reports as filled. This
+    // is a strong indication the position was closed externally (manual close
+    // or liquidation). Confirm via the transaction ledger / protective status
+    // before booking the close so we never falsely close a position that is
+    // merely slow or undergoing a transient exchange read issue.
+    const confirmed = await confirmExternalClose(this.client, position.userId, position);
+    if (!confirmed.confirmed) {
+      await this.log(position, "POSITION_READ_FAILED", "position not returned by exchange but close could not be confirmed — keeping open and retrying");
+      return;
+    }
+
+    await this.stateManager.transition(position.id, position.state, "CLOSING", "position no longer exists on exchange (close confirmed)");
     const close: CloseDetectionResult = {
       shouldClose: true,
-      reason: "MANUAL_CLOSE",
-      exitPrice: snapshot.currentPrice ?? snapshot.exchangePosition?.markPrice ?? null,
+      reason: confirmed.reason ?? "MANUAL_CLOSE",
+      exitPrice: confirmed.price ?? snapshot.currentPrice ?? snapshot.exchangePosition?.markPrice ?? null,
       detail: "position manually closed on exchange",
     };
     await this.finalizeClose(snapshot, close);

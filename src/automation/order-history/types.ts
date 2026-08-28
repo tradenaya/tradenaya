@@ -2,6 +2,8 @@ export interface OrderHistoryInsert {
   userId: number | null;
   userEmail: string | null;
   userCode: string | null;
+  /** Futures exchange / sub-account reference the order was placed on (e.g. EXCHANGE_2). */
+  exchange?: string | null;
   symbol: string;
   side: "BUY" | "SELL";
   orderType: string;
@@ -27,6 +29,7 @@ export interface OrderHistoryInsert {
 export interface OrderHistoryRow {
   id: number;
   userCode: string | null;
+  exchange: string | null;
   symbol: string;
   side: "BUY" | "SELL";
   orderType: string;

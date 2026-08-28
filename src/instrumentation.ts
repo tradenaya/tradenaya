@@ -7,7 +7,10 @@ export async function register() {
     } catch (e) {
       console.error("PositionManager bootstrap: failed to ensure tables", e);
     }
-    positionMonitor.start().catch((e) => {
+    // ensureStarted is idempotent — it restarts the monitor after a hot reload
+    // while never double-starting it. Recovery never assumes positions finished
+    // just because this process was previously stopped.
+    positionMonitor.ensureStarted().catch((e) => {
       console.error("PositionManager: failed to start monitor", e);
     });
 
