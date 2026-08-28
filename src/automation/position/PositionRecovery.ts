@@ -4,6 +4,7 @@ import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import type { ExchangePosition } from "@/automation/executor/client";
 import type { CoinSwitchClientLike, PositionManagerConfig, PositionRecord, PositionStoreLike } from "./PositionManagerTypes";
 import { detectExecutedClose } from "./executed-close";
+import { reconcileClose } from "./close-accounting";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 
@@ -86,38 +87,214 @@ export class PositionRecovery {
     }
 
     await this.reconcileProtection(position);
+
+    if (position.state === "ENTRY_PENDING") {
+      await this.recoverEntryFromLivePosition(position, execution);
+    }
+
     await this.reconcileState(position);
   }
 
   /**
-   * A tracked position no longer exists on the exchange. If one of the
-   * protective orders actually executed (e.g. SL/TP fired while the server was
-   * down) we record a real close using the exchange's fill data and release
-   * the bot. Otherwise we leave it for the monitor, which applies its own
-   * grace period / MANUAL_CLOSE handling — we never silently discard it.
+   * A tracked position no longer exists on the exchange. We attempt to figure
+   * out what happened:
+   *
+   * 1. ENTRY_PENDING with an entry order → check if the order filled or was
+   *    cancelled while we were offline.
+   * 2. A protective (SL/TP) order executed → record the close with the
+   *    exchange's fill data.
+   * 3. Neither protective order executed (manual close on exchange, liquidation,
+   *    or no protective orders were placed) → still close the position so the
+   *    bot is released. We use the last known price as a best-effort exit.
    */
   private async reconcileMissingPosition(position: PositionRecord, price: number | null): Promise<void> {
-    if (position.state === "WAITING_ENTRY" || position.state === "ENTRY_PENDING") return;
+    if (position.state === "WAITING_ENTRY") return;
 
-    const closing = await detectExecutedClose(this.client, position.userId, position);
-    if (!closing) return;
+    if (position.state === "ENTRY_PENDING") {
+      await this.reconcilePendingEntry(position, price);
+      return;
+    }
 
-    const exitPrice = closing.price ?? price ?? null;
-    const realizedPnl = closing.realizedPnl ?? 0;
-    const fees = closing.fees ?? 0;
+    let closing = await detectExecutedClose(this.client, position.userId, position);
 
-    await this.store.markClose(position.id, exitPrice ?? 0, closing.reason, realizedPnl, fees);
+    if (!closing && (!position.stopLossOrderId || !position.takeProfitOrderId)) {
+      closing = await this.detectCloseFromExchangeOrders(position);
+    }
+
+    const exitPrice = closing?.price ?? price ?? null;
+    const realizedPnl = closing?.realizedPnl ?? null;
+    const fees = closing?.fees ?? null;
+    const reason = closing?.reason ?? "MANUAL_CLOSE";
+
+    // Reconcile gross profit, full commission and funding so the net P&L ties
+    // to the wallet rather than a price-only estimate.
+    const accounting = await reconcileClose(
+      this.client,
+      position.userId,
+      position,
+      position.entryPrice,
+      exitPrice,
+    ).catch(() => ({
+      grossProfit: realizedPnl ?? 0,
+      commission: fees ?? 0,
+      fundingFee: 0,
+      realizedPnl: realizedPnl ?? 0,
+      estimated: true,
+    }));
+
+    await this.store.markClose(position.id, exitPrice ?? 0, reason, accounting.realizedPnl, accounting.commission);
     await this.store.recordCloseSummary({
       position,
       exitPrice,
-      reason: closing.reason,
-      realizedPnl: closing.realizedPnl,
-      fees: closing.fees,
+      reason,
+      realizedPnl: accounting.realizedPnl,
+      fees: accounting.commission,
+      grossProfit: accounting.grossProfit,
+      commission: accounting.commission,
+      fundingFee: accounting.fundingFee,
       entryPrice: position.entryPrice,
     });
     await this.executionStore.updateState(position.executionId, "CLOSED");
-    await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${closing.reason} at ${exitPrice ?? "n/a"} pnl=${realizedPnl}`);
+    await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${reason} (recovery: position missing from exchange) at ${exitPrice ?? "n/a"} pnl=${realizedPnl ?? "unknown"}`);
     await this.releaseBot(position);
+  }
+
+  /**
+   * During recovery the entry order was pending and no position exists on the
+   * exchange. Check whether the order was filled or cancelled while we were
+   * offline so we can reconcile the DB state accordingly.
+   */
+  private async reconcilePendingEntry(position: PositionRecord, price: number | null): Promise<void> {
+    const orderId = position.entryOrderId;
+    if (!orderId) return;
+
+    const order = await this.client.getOrderStatus(position.userId, orderId).catch(() => null);
+    const status = order?.status ?? "";
+
+    const FILLED = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED"]);
+    const TERMINAL = new Set(["CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
+
+    if (FILLED.has(status)) {
+      const entryPrice = price ?? order?.raw?.avg_execution_price ?? order?.raw?.avg_price ?? null;
+      const quantity = order?.raw?.exec_quantity ?? position.filledQuantity ?? null;
+      await this.store.updateEntry(position.id, entryPrice, quantity, null, orderId);
+      await this.store.updateState(position.id, "ENTRY_EXECUTED");
+      await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
+      await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", `entry order ${orderId} was filled while offline`);
+      return;
+    }
+
+    if (TERMINAL.has(status)) {
+      await this.store.updateState(position.id, "CLOSED");
+      await this.store.recordCloseSummary({
+        position,
+        exitPrice: null,
+        reason: "ENTRY_CANCELLED",
+        realizedPnl: 0,
+        fees: 0,
+        entryPrice: null,
+      });
+      await this.executionStore.updateState(position.executionId, "CANCELLED", `entry order ${status} while offline`);
+      await this.saveEvent(position, "RECOVERY_ENTRY_CANCELLED", `entry order ${orderId} was ${status} while offline`);
+      await this.releaseBot(position);
+    }
+  }
+
+  /**
+   * During recovery the position state is ENTRY_PENDING but the position
+   * actually exists on the exchange — meaning the entry filled while the
+   * server was down and the fill was never recorded. Transition to
+   * ENTRY_EXECUTED. If the DB has no protective order IDs, search the
+   * exchange for reduce-only orders that could be the SL/TP.
+   */
+  private async recoverEntryFromLivePosition(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord | null): Promise<void> {
+    if (!execution) {
+      await this.store.updateState(position.id, "ENTRY_EXECUTED");
+      await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
+      await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", "entry was filled while offline (no execution record)");
+      return;
+    }
+
+    const entryPrice = execution.entry.orderId ? null : position.entryPrice;
+    const quantity = execution.filledQuantity ?? position.filledQuantity;
+    await this.store.updateEntry(position.id, entryPrice ?? position.entryPrice, quantity, position.positionId, execution.entry.orderId ?? position.entryOrderId);
+    await this.store.updateState(position.id, "ENTRY_EXECUTED");
+    await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
+
+    if (!position.stopLossOrderId && !position.takeProfitOrderId && execution.stopLoss && execution.takeProfit) {
+      await this.recoverProtectiveOrdersFromExchange(position, execution);
+    }
+
+    await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", "entry was filled while offline; position reconciled");
+  }
+
+  /**
+   * The entry filled and protective orders were placed on the exchange, but
+   * their IDs were never saved to the DB (server crashed between placement
+   * and persistence). Search the exchange for reduce-only orders and save
+   * their IDs so the monitor can track them.
+   */
+  private async recoverProtectiveOrdersFromExchange(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord): Promise<void> {
+    const opposite = position.side === "BUY" ? "SELL" : "BUY";
+
+    let openOrders;
+    try {
+      openOrders = await this.client.getOpenOrders(position.userId, position.symbol);
+    } catch {
+      return;
+    }
+
+    let slOrderId: string | null = null;
+    let tpOrderId: string | null = null;
+
+    for (const order of openOrders) {
+      const raw = order.raw ?? {};
+      const isReduceOnly = raw.reduce_only === true || raw.reduceOnly === true || String(raw.reduce_only) === "1";
+      const orderSide = String(raw.side ?? "").toUpperCase();
+      const orderType = String(raw.type ?? raw.order_type ?? "").toUpperCase();
+      if (!isReduceOnly || orderSide !== opposite || !order.orderId) continue;
+
+      if (orderType.includes("STOP") && !slOrderId) {
+        slOrderId = order.orderId;
+      } else if ((orderType.includes("PROFIT") || orderType.includes("LIMIT")) && !tpOrderId) {
+        tpOrderId = order.orderId;
+      }
+    }
+
+    if (slOrderId || tpOrderId) {
+      await this.store.updateProtection(position.id, slOrderId, tpOrderId);
+      await this.saveEvent(position, "RECOVERY_PROTECTIVE_RECOVERED", `recovered protective orders from exchange: SL=${slOrderId ?? "none"} TP=${tpOrderId ?? "none"}`);
+    }
+  }
+  private async detectCloseFromExchangeOrders(position: PositionRecord): Promise<import("./executed-close").ExecutedCloseInfo | null> {
+    const opposite = position.side === "BUY" ? "SELL" : "BUY";
+
+    let openOrders;
+    try {
+      openOrders = await this.client.getOpenOrders(position.userId, position.symbol);
+    } catch {
+      return null;
+    }
+
+    for (const order of openOrders) {
+      const raw = order.raw ?? {};
+      const isReduceOnly = raw.reduce_only === true || raw.reduceOnly === true || String(raw.reduce_only) === "1";
+      const orderSide = String(raw.side ?? "").toUpperCase();
+      if (!isReduceOnly || orderSide !== opposite) continue;
+
+      const status = await this.client.getOrderStatus(position.userId, order.orderId!).catch(() => null);
+      const s = String(status?.status ?? "");
+      if (["EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(s)) {
+        return {
+          reason: "STOP_LOSS",
+          price: Number(status?.raw?.avg_execution_price) || null,
+          realizedPnl: Number(status?.raw?.realised_pnl) || null,
+          fees: Number(status?.raw?.execution_fee) || null,
+        };
+      }
+    }
+
+    return null;
   }
 
   private async reconcileProtection(position: PositionRecord): Promise<void> {
@@ -128,10 +305,18 @@ export class PositionRecovery {
     const tpOrder = openOrders.find((o) => o.orderId === position.takeProfitOrderId);
 
     if (position.stopLoss && position.stopLossOrderId && !slOrder) {
-      await this.store.updateProtection(position.id, null, position.takeProfitOrderId);
+      const slStatus = await this.client.getOrderStatus(position.userId, position.stopLossOrderId).catch(() => null);
+      const slFilled = slStatus && ["EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(String(slStatus.status ?? ""));
+      if (!slFilled) {
+        await this.store.updateProtection(position.id, null, position.takeProfitOrderId);
+      }
     }
     if (position.takeProfit && position.takeProfitOrderId && !tpOrder) {
-      await this.store.updateProtection(position.id, position.stopLossOrderId, null);
+      const tpStatus = await this.client.getOrderStatus(position.userId, position.takeProfitOrderId).catch(() => null);
+      const tpFilled = tpStatus && ["EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(String(tpStatus.status ?? ""));
+      if (!tpFilled) {
+        await this.store.updateProtection(position.id, position.stopLossOrderId, null);
+      }
     }
 
     const hasSl = Boolean(position.stopLoss && (slOrder || (await this.findReduceOnly(openOrders, position.stopLoss, opposite))));

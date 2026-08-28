@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     const payload = { exchange: "EXCHANGE_2", order_id };
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = await buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "DELETE",

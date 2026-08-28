@@ -4,7 +4,7 @@ import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 async function callSigned(req: NextRequest, method: "GET" | "POST", endpoint: string, payload?: Record<string, any>) {
   const keys = await getKeysFromRequest(req as any);
-  const { url, headers } = buildSignedRequest(method, endpoint, method === "GET" ? payload : undefined, keys?.apiKey, keys?.apiSecret);
+  const { url, headers } = await buildSignedRequest(method, endpoint, method === "GET" ? payload : undefined, keys?.apiKey, keys?.apiSecret);
 
   const res = await fetch(url, { method, headers, ...(method === "POST" && payload ? { body: JSON.stringify(payload) } : {}) });
 
@@ -30,7 +30,7 @@ async function callSigned(req: NextRequest, method: "GET" | "POST", endpoint: st
 export async function GET(req: NextRequest) {
   try {
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = buildSignedRequest("GET", "/futures/positions", { exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = await buildSignedRequest("GET", "/futures/positions", { exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
     const raw = await res.text();

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Power, Settings2, TrendingUp, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { CoinSearchSelect } from "@/components/automation/CoinSearchSelect";
 import { formatPrice } from "@/components/analytics/format";
+import { computeTradePreview, type TradePreview } from "@/components/automation/trade-preview";
+import { TradePreviewPanel } from "@/components/automation/TradePreviewPanel";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -85,6 +87,16 @@ const DEFAULT_SETTINGS = {
   timeframe: "1h",
   leverage: "5",
   capital: "100",
+  maxRiskPerTrade: "1",
+  dailyLossLimit: "5",
+  orderExpiryMinutes: "",
+  minConfidence: "",
+  driftAtr: "2.5",
+  regimeTolerancePct: "0.3",
+  maxCandles: "24",
+  hardCapCandles: "48",
+  enableTrailingStop: false,
+  trailingDistancePercent: "",
 };
 
 const runningStates = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
@@ -109,6 +121,112 @@ export function AutomationSwitch() {
   const [analyzingCoins, setAnalyzingCoins] = useState(false);
   const [coinAnalysis, setCoinAnalysis] = useState<CoinAnalysis[] | null>(null);
   const [analysisError, setAnalysisError] = useState("");
+
+  const tradePreview = useMemo<TradePreview>(() => {
+    return computeTradePreview({
+      walletBalance: wallet,
+      capitalMode,
+      capital: Number(settings.capital) || 0,
+      walletPercent: capitalMode === "percent" ? Number(walletPercent) : null,
+      leverage: Number(settings.leverage) || 1,
+      maxRiskPerTradePct: Number(settings.maxRiskPerTrade) || 0,
+      currentPrice: price,
+    });
+  }, [wallet, capitalMode, settings.capital, walletPercent, settings.leverage, settings.maxRiskPerTrade, price]);
+
+  /* ---- Field-level validation (shown inline as the user types) ---- */
+  const fieldErrors = useMemo<Record<string, string | null>>(() => {
+    const errs: Record<string, string | null> = {};
+    const num = (v: string | undefined | null): number | null => {
+      if (v == null || String(v).trim() === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const symbol = settings.symbol.trim().toUpperCase();
+    if (!symbol) errs.symbol = "Symbol is required.";
+
+    if (capitalMode === "fixed") {
+      const cap = num(settings.capital);
+      if (cap == null) errs.capital = "Enter a capital amount (USDT).";
+      else if (cap <= 0) errs.capital = "Capital must be greater than 0.";
+      else if (wallet != null && cap - wallet > 1e-9) errs.capital = `Exceeds available balance of ${wallet.toFixed(4)} USDT.`;
+    } else {
+      const pct = num(walletPercent);
+      if (pct == null) errs.walletPercent = "Enter a percentage.";
+      else if (pct < 1) errs.walletPercent = "Must be at least 1%.";
+      else if (pct > 100) errs.walletPercent = "Cannot exceed 100%.";
+    }
+
+    // High-allocation headroom warning: at ~100% of the available balance the
+    // order margin leaves zero headroom, so the exchange rejects with a cryptic
+    // "Insufficient balance" over a few cents of fees/rounding (75% works,
+    // 100% fails). Flag it here so the user sees it before submitting.
+    if (wallet != null && wallet > 0) {
+      const allocatedAmt =
+        capitalMode === "fixed"
+          ? num(settings.capital)
+          : wallet * ((num(walletPercent) ?? 0) / 100);
+      if (allocatedAmt != null && allocatedAmt > 0) {
+        const headroom = 0.02;
+        const feeBuffer = 0.01;
+        const safeMax = wallet * (1 - headroom) - feeBuffer;
+        if (allocatedAmt > safeMax + 1e-9) {
+          const safePct = Math.max(0, (safeMax / wallet) * 100);
+          const msg = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
+          if (capitalMode === "fixed") errs.capital = msg;
+          else errs.walletPercent = msg;
+        }
+      }
+    }
+
+    const lev = num(settings.leverage);
+    if (lev == null || !(lev > 0)) errs.leverage = "Leverage must be a positive number.";
+    else if (instrument) {
+      const minL = Number(instrument.min_leverage);
+      const maxL = Number(instrument.max_leverage);
+      if (Number.isFinite(minL) && Number.isFinite(maxL) && (lev < minL || lev > maxL)) {
+        errs.leverage = `Leverage must be ${minL}x–${maxL}x for ${symbol}.`;
+      }
+    }
+
+    const risk = num(settings.maxRiskPerTrade);
+    if (risk == null) errs.maxRisk = "Enter max risk per trade (%).";
+    else if (risk < 0) errs.maxRisk = "Max risk cannot be negative.";
+    else if (risk === 0) errs.maxRisk = "Max risk must be greater than 0% for a protected trade.";
+
+    const daily = num(settings.dailyLossLimit);
+    if (daily == null || daily < 0) errs.dailyLoss = "Enter a daily loss limit ≥ 0 (%).";
+
+    if (settings.orderExpiryMinutes !== undefined && settings.orderExpiryMinutes !== "" && parseFloat(settings.orderExpiryMinutes) > 0) {
+      const exp = num(settings.orderExpiryMinutes);
+      if (exp == null || exp < 1) errs.orderExpiry = "Order expiry must be ≥ 1 minute.";
+    }
+
+    if (settings.minConfidence !== undefined && settings.minConfidence !== "") {
+      const conf = num(settings.minConfidence);
+      if (conf == null || conf < 0 || conf > 100) errs.minConfidence = "Confidence must be 0–100.";
+    }
+
+    const drift = num(settings.driftAtr);
+    if (drift == null || drift <= 0) errs.drift = "Drift tolerance must be a positive number of ATRs.";
+
+    const regime = num(settings.regimeTolerancePct);
+    if (regime == null || regime < 0) errs.regime = "Regime tolerance must be ≥ 0 (%).";
+
+    const maxCandles = num(settings.maxCandles);
+    const hardCap = num(settings.hardCapCandles);
+    if (maxCandles == null || maxCandles < 1) errs.maxCandles = "Must be at least 1.";
+    if (hardCap == null || hardCap < 1) errs.hardCap = "Must be at least 1.";
+    if (maxCandles != null && hardCap != null && maxCandles > hardCap) errs.maxCandles = "Soft cap must not exceed the circuit-breaker cap.";
+
+    if (settings.enableTrailingStop) {
+      const ts = num(settings.trailingDistancePercent);
+      if (ts == null || ts <= 0) errs.trailing = "Trailing distance must be > 0% when enabled.";
+    }
+
+    return errs;
+  }, [settings, capitalMode, walletPercent, wallet, instrument]);
 
   async function analyzeCoins() {
     setAnalyzingCoins(true);
@@ -262,6 +380,12 @@ export function AutomationSwitch() {
   }
 
   function validate(): string | null {
+    // Surface the first inline field error so invalid values cannot be submitted.
+    for (const key of Object.keys(fieldErrors)) {
+      if (key.startsWith("_")) continue;
+      if (fieldErrors[key]) return fieldErrors[key]!;
+    }
+
     const symbol = settings.symbol.trim().toUpperCase();
     if (!symbol) return "Trading symbol is required.";
 
@@ -279,14 +403,18 @@ export function AutomationSwitch() {
       if (!Number.isFinite(pct) || pct <= 0) return "Wallet percent must be greater than zero.";
       if (pct > 100) return "Wallet percent cannot exceed 100%.";
     } else {
-      const capital = Number(settings.capital);
-      if (!Number.isFinite(capital) || capital <= 0) return "Capital per trade must be greater than zero.";
+      const cap = Number(settings.capital);
+      if (!Number.isFinite(cap) || cap <= 0) return "Capital per trade must be greater than zero.";
     }
 
     if (wallet != null) {
       const alloc = effectiveCapital();
-      if (alloc != null && alloc > wallet) {
-        return `Insufficient wallet balance. You need ${alloc.toFixed(2)} USDT but only ${wallet.toFixed(2)} USDT is available.`;
+      // A tiny floating-point excess at exactly 100% allocation must not be
+      // reported as insufficient (10.7887 vs 10.7887000000001). Only block when
+      // the allocation really requires more than the available balance.
+      const EXCESS_TOLERANCE = 1e-9;
+      if (alloc != null && alloc - wallet > EXCESS_TOLERANCE) {
+        return `Insufficient wallet balance. You need ${alloc.toFixed(2)} USDT but only ${wallet.toFixed(2)} USDT is available (including ${(wallet - alloc).toFixed(2)} USDT short).`;
       }
     }
 
@@ -298,22 +426,34 @@ export function AutomationSwitch() {
       return `Cannot start automation — ${notActiveIssue}`;
     }
 
+    if (tradePreview.status === "error" && tradePreview.allocatedCapital > 0 && tradePreview.maxRiskPct > 0 && !tradePreview.riskCompatible) {
+      return `Configuration exceeds maximum risk. The estimated SL loss (~${tradePreview.estimatedLoss.toFixed(2)} USDT) exceeds your max risk limit of ${tradePreview.maxRiskUsdt.toFixed(2)} USDT. Reduce your capital allocation, increase max risk %, or let the bot's dynamic SL adapt at runtime.`;
+    }
+
     return null;
   }
 
   async function createBot() {
     const symbol = settings.symbol.trim().toUpperCase();
     const allocated = effectiveCapital() ?? (Number(settings.capital) || 0);
-    const body = {
+    const body: Record<string, unknown> = {
       symbol,
       timeframe: settings.timeframe,
       leverage: Number(settings.leverage),
       capitalMode,
       capital: allocated,
       walletPercent: capitalMode === "percent" ? Number(walletPercent) : undefined,
-      maxRiskPerTrade: 1,
-      dailyLossLimit: 5,
+      maxRiskPerTrade: Number(settings.maxRiskPerTrade) || 1,
+      dailyLossLimit: Number(settings.dailyLossLimit) || 5,
+      enableTrailingStop: settings.enableTrailingStop,
+      trailingDistancePercent: settings.enableTrailingStop && settings.trailingDistancePercent ? Number(settings.trailingDistancePercent) : undefined,
+      driftAtr: Number(settings.driftAtr) || 2.5,
+      regimeTolerancePct: Number(settings.regimeTolerancePct) || 0.3,
+      maxCandles: Number(settings.maxCandles) || 24,
+      hardCapCandles: Number(settings.hardCapCandles) || 48,
     };
+    if (settings.orderExpiryMinutes) body.orderExpiryMinutes = Number(settings.orderExpiryMinutes);
+    if (settings.minConfidence) body.minConfidence = Number(settings.minConfidence);
     const res = await fetch("/api/bots", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -516,7 +656,7 @@ export function AutomationSwitch() {
           setWalletLoading(true);
         }
       }}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="w-[95vw] max-h-[90dvh] flex flex-col overflow-hidden sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Automated trading setup</DialogTitle>
             <DialogDescription>
@@ -524,7 +664,7 @@ export function AutomationSwitch() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex-1 overflow-y-auto grid gap-4 md:grid-cols-2 py-2">
             <div className="rounded-lg border border-border bg-muted/40 p-3 md:col-span-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -562,6 +702,7 @@ export function AutomationSwitch() {
                 instrument={instrument}
                 price={price}
               />
+              {fieldErrors.symbol && <FieldError>{fieldErrors.symbol}</FieldError>}
             </div>
 
             <div className="md:col-span-2">
@@ -687,6 +828,7 @@ export function AutomationSwitch() {
                 />
                 <span className="w-12 text-right font-semibold text-foreground">{settings.leverage}x</span>
               </div>
+              {fieldErrors.leverage && <FieldError>{fieldErrors.leverage}</FieldError>}
               <p className="text-xs text-muted-foreground">
                 {instrument
                   ? `${instrument.min_leverage}x – ${instrument.max_leverage}x available for ${settings.symbol.trim().toUpperCase()}`
@@ -734,6 +876,7 @@ export function AutomationSwitch() {
                   onChange={(e) => setSettings((s) => ({ ...s, capital: e.target.value }))}
                   placeholder="0.00"
                 />
+                {fieldErrors.capital && <FieldError>{fieldErrors.capital}</FieldError>}
                 {wallet != null && Number(settings.capital) > wallet && (
                   <p className="text-xs text-red-400">
                     Exceeds your available balance of {wallet.toFixed(2)} USDT.
@@ -755,6 +898,7 @@ export function AutomationSwitch() {
                   onChange={(e) => setWalletPercent(e.target.value)}
                   placeholder="10"
                 />
+                {fieldErrors.walletPercent && <FieldError>{fieldErrors.walletPercent}</FieldError>}
                 {wallet != null && effectiveCapital() != null && (
                   <p className="text-xs text-muted-foreground">
                     ≈ {effectiveCapital()!.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
@@ -764,6 +908,164 @@ export function AutomationSwitch() {
                 {minOrderIssue && <p className="text-xs text-red-400">{minOrderIssue}</p>}
               </div>
             )}
+
+            <div className="md:col-span-2">
+              <div className="border-t border-border pt-4 mt-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Advanced Settings</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-max-risk">Max risk / trade (%)</Label>
+              <p className="text-[11px] text-muted-foreground -mt-0.5">
+                Maximum percentage of your margin you are willing to lose if SL is hit. This is separate from your capital allocation.
+              </p>
+              <Input
+                id="auto-max-risk"
+                type="number"
+                min={0}
+                step={0.1}
+                value={settings.maxRiskPerTrade}
+                onChange={(e) => setSettings((s) => ({ ...s, maxRiskPerTrade: e.target.value }))}
+                placeholder="1"
+              />
+              {fieldErrors.maxRisk && <FieldError>{fieldErrors.maxRisk}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-daily-loss">Daily loss limit (%)</Label>
+              <Input
+                id="auto-daily-loss"
+                type="number"
+                min={0}
+                step={0.1}
+                value={settings.dailyLossLimit}
+                onChange={(e) => setSettings((s) => ({ ...s, dailyLossLimit: e.target.value }))}
+                placeholder="5"
+              />
+              {fieldErrors.dailyLoss && <FieldError>{fieldErrors.dailyLoss}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-order-expiry">Order expiry (min)</Label>
+              <Input
+                id="auto-order-expiry"
+                type="number"
+                min={1}
+                value={settings.orderExpiryMinutes ?? ""}
+                onChange={(e) => setSettings((s) => ({ ...s, orderExpiryMinutes: e.target.value }))}
+                placeholder="Optional"
+              />
+              {fieldErrors.orderExpiry && <FieldError>{fieldErrors.orderExpiry}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-min-confidence">Min confidence</Label>
+              <Input
+                id="auto-min-confidence"
+                type="number"
+                min={0}
+                max={100}
+                value={settings.minConfidence ?? ""}
+                onChange={(e) => setSettings((s) => ({ ...s, minConfidence: e.target.value }))}
+                placeholder="Optional"
+              />
+              {fieldErrors.minConfidence && <FieldError>{fieldErrors.minConfidence}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-drift">Drift tolerance (×ATR)</Label>
+              <Input
+                id="auto-drift"
+                type="number"
+                min={0.5}
+                step={0.1}
+                value={settings.driftAtr}
+                onChange={(e) => setSettings((s) => ({ ...s, driftAtr: e.target.value }))}
+                placeholder="2.5"
+              />
+              {fieldErrors.drift && <FieldError>{fieldErrors.drift}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-regime">Regime tolerance (%)</Label>
+              <Input
+                id="auto-regime"
+                type="number"
+                min={0}
+                step={0.1}
+                value={settings.regimeTolerancePct}
+                onChange={(e) => setSettings((s) => ({ ...s, regimeTolerancePct: e.target.value }))}
+                placeholder="0.3"
+              />
+              {fieldErrors.regime && <FieldError>{fieldErrors.regime}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-max-candles">Max candles resting (soft)</Label>
+              <Input
+                id="auto-max-candles"
+                type="number"
+                min={1}
+                value={settings.maxCandles}
+                onChange={(e) => setSettings((s) => ({ ...s, maxCandles: e.target.value }))}
+                placeholder="24"
+              />
+              {fieldErrors.maxCandles && <FieldError>{fieldErrors.maxCandles}</FieldError>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auto-circuit-candles">Circuit-breaker candles</Label>
+              <Input
+                id="auto-circuit-candles"
+                type="number"
+                min={1}
+                value={settings.hardCapCandles}
+                onChange={(e) => setSettings((s) => ({ ...s, hardCapCandles: e.target.value }))}
+                placeholder="48"
+              />
+              {fieldErrors.hardCap && <FieldError>{fieldErrors.hardCap}</FieldError>}
+            </div>
+
+            <div className="md:col-span-2">
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="auto-trailing"
+                    type="checkbox"
+                    checked={settings.enableTrailingStop}
+                    onChange={(e) => setSettings((s) => ({ ...s, enableTrailingStop: e.target.checked }))}
+                    className="h-4 w-4 rounded border-border accent-emerald-500"
+                  />
+                  <Label htmlFor="auto-trailing" className="mb-0">Enable trailing stop</Label>
+                </div>
+                {settings.enableTrailingStop && (
+                  <div className="grid w-40 gap-1.5">
+                    <Label>Trailing distance (%)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={settings.trailingDistancePercent ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, trailingDistancePercent: e.target.value }))}
+                      placeholder="Optional"
+                    />
+                    {fieldErrors.trailing && <FieldError>{fieldErrors.trailing}</FieldError>}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <p className="md:col-span-2 text-[11px] text-muted-foreground">
+              Drift tolerance: how far price (in ATRs) can drift past your resting entry before being cancelled. Regime tolerance: ignore EMA flips smaller than this % so you are not cancelled on noise.
+            </p>
+
+            <div className="md:col-span-2">
+              <div className="border-t border-border pt-4 mt-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Trade Preview</p>
+                <TradePreviewPanel preview={tradePreview} />
+              </div>
+            </div>
 
             {error && <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400 md:col-span-2">{error}</div>}
           </div>
@@ -791,6 +1093,10 @@ export function AutomationSwitch() {
       />
     </Card>
   );
+}
+
+function FieldError({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-red-400">{children}</p>;
 }
 
 function leverageRange(instrument: InstrumentInfo | null): { min: number; max: number } {

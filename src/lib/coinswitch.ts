@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getCoinSwitchEpoch } from "./coinswitch/time-sync";
 
 const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
@@ -75,7 +76,7 @@ export async function coinSwitchRequest(
     signPath = `/trade/api/v2${endpoint}?${query}`;   // ← added prefix here too
   }
 
-  const epoch = Date.now().toString();
+  const epoch = await getCoinSwitchEpoch();
 
   const signature = createSignature(
     method,

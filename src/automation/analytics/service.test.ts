@@ -26,6 +26,10 @@ function trade(overrides: Partial<ClosedTradeRow> = {}): ClosedTradeRow {
     exitReason: "TAKE_PROFIT",
     realizedPnl: 10,
     fees: 0.5,
+    grossProfit: 0,
+    commission: 0,
+    fundingFee: 0,
+    netPnl: 0,
     positionSize: 1,
     closedAt: new Date(DAY_1).toISOString(),
     createdAt: new Date(DAY_1).toISOString(),
@@ -35,6 +39,8 @@ function trade(overrides: Partial<ClosedTradeRow> = {}): ClosedTradeRow {
     highestPrice: 111,
     lowestPrice: 99,
     leverage: null,
+    stopLoss: null,
+    takeProfit: null,
     ...overrides,
   };
 }

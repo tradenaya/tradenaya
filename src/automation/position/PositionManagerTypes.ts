@@ -1,5 +1,5 @@
 import type { ExecutionRecord } from "@/automation/executor/types";
-import type { ExchangeOrder, ExchangePosition } from "@/automation/executor/client";
+import type { ExchangeOrder, ExchangePosition, FuturesTransaction } from "@/automation/executor/client";
 
 export type PositionState =
   | "WAITING_ENTRY"
@@ -139,6 +139,7 @@ export interface CoinSwitchClientLike {
   getOrderStatus(userId: number, orderId: string): Promise<ExchangeOrder>;
   cancelOrder(userId: number, orderId: string): Promise<boolean>;
   placeOrder(userId: number, params: any): Promise<ExchangeOrder>;
+  getTransactions(userId: number, opts?: { symbol?: string; type?: string; fromTime?: number; toTime?: number; limit?: number }): Promise<FuturesTransaction[]>;
 }
 
 export interface BotStateServiceLike {
@@ -200,6 +201,12 @@ export interface CloseSummaryInput {
   realizedPnl: number | null;
   fees: number | null;
   entryPrice: number | null;
+  /** Price-move P&L before any costs (gross), fee-adjusted optional. */
+  grossProfit?: number | null;
+  /** Total trading commission for entry + exit. */
+  commission?: number | null;
+  /** Funding fees accrued while the position was open. */
+  fundingFee?: number | null;
 }
 
 export interface PositionEventInput {

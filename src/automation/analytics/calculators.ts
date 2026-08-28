@@ -39,8 +39,18 @@ export function bucketStartMs(key: number, granularity: Granularity): number {
   return Date.UTC(year, month, 1);
 }
 
-/** Net PnL of a closed trade (realizedPnl is already fee-adjusted in the DB). */
-export function netPnl(trade: Pick<ClosedTradeRow, "realizedPnl">): number {
+/**
+ * Net PnL of a closed trade. Newer rows carry the true cost breakdown
+ * (grossProfit, commission, fundingFee); older rows store a price-only estimate
+ * in realizedPnl. When any accounting figure is present we let the breakdown
+ * define the net; otherwise we fall back to the legacy realizedPnl.
+ */
+export function netPnl(
+  trade: Pick<ClosedTradeRow, "realizedPnl" | "grossProfit" | "commission" | "fundingFee">,
+): number {
+  if (trade.grossProfit !== 0 || trade.commission !== 0 || trade.fundingFee !== 0) {
+    return trade.grossProfit - trade.commission - trade.fundingFee;
+  }
   return trade.realizedPnl;
 }
 

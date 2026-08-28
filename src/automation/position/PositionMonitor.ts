@@ -11,6 +11,7 @@ import { PositionRecovery } from "./PositionRecovery";
 import { PositionStore } from "./PositionStore";
 import { ProtectiveOrdersService } from "@/automation/executor/services/protective-orders";
 import { coinswitchClient, CoinSwitchClient, type ExchangeOrder, type ExchangePosition } from "@/automation/executor/client";
+import { reconcileClose } from "./close-accounting";
 import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import { executionStore } from "@/automation/executor/store";
 import { detectExecutedClose } from "./executed-close";
@@ -461,13 +462,32 @@ export class PositionMonitor {
       ? await this.pnl.computeRealized(snapshot, exitPrice)
       : await this.pnl.compute(snapshot);
 
-    await this.store.markClose(current.id, exitPrice ?? 0, close.reason, pnl.realizedPnl ?? 0, pnl.fees ?? 0);
+    // Reconcile true costs (gross profit, entry+exit commission, funding) so the
+    // reported net P&L ties to the wallet instead of a price-only estimate.
+    const accounting = await reconcileClose(
+      this.client,
+      current.userId,
+      current,
+      pnl.entryPrice,
+      exitPrice,
+    ).catch(() => ({
+      grossProfit: pnl.realizedPnl ?? 0,
+      commission: pnl.fees ?? 0,
+      fundingFee: 0,
+      realizedPnl: pnl.realizedPnl ?? 0,
+      estimated: true,
+    }));
+
+    await this.store.markClose(current.id, exitPrice ?? 0, close.reason, accounting.realizedPnl, accounting.commission);
     await this.store.recordCloseSummary({
       position: current,
       exitPrice,
       reason: close.reason,
-      realizedPnl: pnl.realizedPnl,
-      fees: pnl.fees,
+      realizedPnl: accounting.realizedPnl,
+      fees: accounting.commission,
+      grossProfit: accounting.grossProfit,
+      commission: accounting.commission,
+      fundingFee: accounting.fundingFee,
       entryPrice: pnl.entryPrice,
     });
 

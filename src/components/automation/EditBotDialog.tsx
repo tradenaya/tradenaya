@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import {
   Dialog,
@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { parseBotConfig, type BotConfig, type BotView } from "./bot-config";
+import { computeTradePreview, type TradePreview } from "./trade-preview";
+import { TradePreviewPanel } from "./TradePreviewPanel";
 
 export interface EditBotDialogProps {
   bot: BotView;
@@ -27,19 +29,68 @@ export interface EditBotDialogProps {
 export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialogProps) {
   const [cfg, setCfg] = useState<BotConfig>(parseBotConfig(bot));
   const [saving, setSaving] = useState(false);
+  const [wallet, setWallet] = useState<number | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [price, setPrice] = useState<number | null>(null);
 
   useEffect(() => {
     if (open) {
       const t = setTimeout(() => setCfg(parseBotConfig(bot)), 0);
+
+      setWalletLoading(true);
+      fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.success) {
+            const usdt = json.data?.base_asset_balances?.find(
+              (b: { base_asset: string }) => String(b.base_asset).toUpperCase() === "USDT",
+            );
+            const bal = Number(usdt?.balances?.total_available_balance);
+            setWallet(Number.isFinite(bal) ? bal : null);
+          }
+        })
+        .catch(() => setWallet(null))
+        .finally(() => setWalletLoading(false));
+
+      fetch("/api/coinswitch/futures/ticker", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.success) {
+            const sym = bot.symbol.trim().toUpperCase();
+            const data = json.data ?? {};
+            const row = data[sym] ?? data[sym.toLowerCase()];
+            const p = Number(row?.last_price);
+            setPrice(Number.isFinite(p) && p > 0 ? p : null);
+          }
+        })
+        .catch(() => setPrice(null));
+
       return () => clearTimeout(t);
     }
   }, [open, bot]);
+
+  const tradePreview = useMemo<TradePreview>(() => {
+    return computeTradePreview({
+      walletBalance: wallet,
+      capitalMode: cfg.capitalMode === "percent" ? "percent" : "fixed",
+      capital: cfg.capital || 0,
+      walletPercent: cfg.capitalMode === "percent" ? cfg.walletPercent : null,
+      leverage: cfg.leverage || 1,
+      maxRiskPerTradePct: cfg.maxRiskPerTrade ?? 0,
+      currentPrice: price,
+    });
+  }, [wallet, cfg.capitalMode, cfg.capital, cfg.walletPercent, cfg.leverage, cfg.maxRiskPerTrade, price]);
 
   function update(field: keyof BotConfig, value: unknown) {
     setCfg((prev) => ({ ...prev, [field]: value }));
   }
 
   async function save() {
+    if (tradePreview.status === "error" && tradePreview.allocatedCapital > 0 && tradePreview.maxRiskPct > 0 && !tradePreview.riskCompatible) {
+      toast.error("Configuration exceeds maximum risk. Adjust your settings before saving.");
+      return;
+    }
+
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
@@ -92,6 +143,21 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto grid gap-3.5 py-2">
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Available futures balance</span>
+              {walletLoading ? (
+                <span className="text-muted-foreground animate-pulse">Loading…</span>
+              ) : wallet != null ? (
+                <span className="font-semibold text-foreground">
+                  {wallet.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
+                </span>
+              ) : (
+                <span className="text-xs text-red-400">Unavailable</span>
+              )}
+            </div>
+          </div>
+
           <div className="grid gap-1.5">
             <Label>Timeframe</Label>
             <Input value={cfg.timeframe ?? ""} onChange={(e) => update("timeframe", e.target.value)} />
@@ -132,6 +198,9 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
           <div className="grid grid-cols-2 gap-3.5">
             <div className="grid gap-1.5">
               <Label>Max risk / trade (%)</Label>
+              <p className="text-[11px] text-muted-foreground -mt-0.5">
+                Max loss if SL is hit. Separate from capital allocation.
+              </p>
               <Input type="number" min={0} step={0.1} value={cfg.maxRiskPerTrade ?? ""} onChange={(e) => update("maxRiskPerTrade", Number(e.target.value))} />
             </div>
             <div className="grid gap-1.5">
@@ -172,6 +241,11 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
           <p className="text-[11px] text-muted-foreground">
             Drift tolerance: how far price (in ATRs) can drift past your resting entry before being cancelled. Regime tolerance: ignore EMA flips smaller than this % so you are not cancelled on 0.13%-style noise.
           </p>
+
+          <div className="border-t border-border pt-3 mt-1">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Trade Preview</p>
+            <TradePreviewPanel preview={tradePreview} />
+          </div>
 
           <div className="flex items-end justify-between rounded-lg border border-border bg-background/40 px-3 py-2.5">
             <div className="flex items-center gap-2">

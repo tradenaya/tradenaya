@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = buildSignedRequest("GET", "/futures/positions", { exchange: "EXCHANGE_2", symbol: symbol.toLowerCase() }, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = await buildSignedRequest("GET", "/futures/positions", { exchange: "EXCHANGE_2", symbol: symbol.toLowerCase() }, keys?.apiKey, keys?.apiSecret);
 
     console.log("=== POSITIONS DEBUG START ===");
     console.log("POSITIONS URL:", url);

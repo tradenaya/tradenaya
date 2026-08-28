@@ -19,6 +19,19 @@ function extractErrorMessage(data: any): string {
   }
 }
 
+function toNumberFallback(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function txTypeOf(t: any): string {
+  const fields = [t.amount, t.pnl, t.fee, t.commission, t.change];
+  const has = (k: string) => t[k] != null && t[k] !== "";
+  if (has("funding_rate") || String(t.type ?? "").toLowerCase().includes("fund")) return "FUNDING_FEE";
+  if (has("commission") || has("fee") || String(t.type ?? "").toLowerCase().includes("commission")) return "COMMISSION";
+  return "P&L";
+}
+
 
 export interface PlaceOrderParams {
   symbol: string;
@@ -52,6 +65,16 @@ export interface ExchangePosition {
   liquidationPrice: number | null;
 }
 
+export interface FuturesTransaction {
+  type: "FUNDING_FEE" | "COMMISSION" | "P&L" | "LIQUIDATION_FEE" | "ADD_MARGIN" | string;
+  symbol: string;
+  amount: number;
+  fee: number | null;
+  timestamp: number;
+  orderId: string | null;
+  raw: any;
+}
+
 export interface CoinSwitchClientOptions {
   requestTimeoutMs?: number;
   // Min spacing enforced between consecutive calls on the same endpoint bucket.
@@ -70,6 +93,7 @@ const DEFAULT_RATE_LIMITS: Record<string, number> = {
   instrument: 750, // Instrument Info 100/60s -> ~80/min
   klines: 2200, // Klines 30/60s -> ~27/min
   ticker: 750, // Ticker 100/60s -> ~80/min
+  transactions: 3300, // Transactions 20/60s -> ~18/min
 };
 
 function rateBudget(method: "GET" | "POST" | "DELETE", endpoint: string): { key: string; intervalMs: number } | null {
@@ -92,6 +116,8 @@ function rateBudget(method: "GET" | "POST" | "DELETE", endpoint: string): { key:
       return { key: "klines", intervalMs: 2200 };
     case "/futures/all-pairs/ticker":
       return { key: "ticker", intervalMs: 750 };
+    case "/futures/transactions":
+      return { key: "transactions", intervalMs: 3300 };
     default:
       return null;
   }
@@ -141,7 +167,7 @@ export class CoinSwitchClient {
       throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your account.");
     }
 
-    const { url, headers } = buildSignedRequest(method, endpoint, params, keys.apiKey, keys.apiSecret);
+    const { url, headers } = await buildSignedRequest(method, endpoint, params, keys.apiKey, keys.apiSecret);
 
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -256,6 +282,39 @@ export class CoinSwitchClient {
       status: o.status ?? null,
       raw: o,
     }));
+  }
+
+  /**
+   * Fetch balance-affecting account transactions (commission, funding fee,
+   * P&L, liquidation fee). Used to reconcile a closed trade's true costs:
+   * actual entry+exit commissions and funding accrued while it was open.
+   */
+  async getTransactions(
+    userId: number,
+    opts: { symbol?: string; type?: string; fromTime?: number; toTime?: number; limit?: number } = {},
+  ): Promise<FuturesTransaction[]> {
+    const params: Record<string, any> = { exchange: "EXCHANGE_2" };
+    if (opts.symbol) params.symbol = opts.symbol.toLowerCase();
+    if (opts.type) params.type = opts.type;
+    if (opts.fromTime != null) params.from_time = opts.fromTime;
+    if (opts.toTime != null) params.to_time = opts.toTime;
+    if (opts.limit != null) params.limit = opts.limit;
+    const data = await this.call("GET", "/futures/transactions", params, userId);
+    const rows: any[] = this.extractList(data);
+    return rows.map((t: any) => {
+      const sym = String(t.symbol ?? t.s ?? "").toUpperCase();
+      return {
+        type: String(t.type ?? txTypeOf(t)).toUpperCase(),
+        symbol: sym,
+        amount: toNumberFallback(t.amount ?? t.value ?? t.pnl ?? t.fee ?? 0),
+        fee: t.fee != null ? toNumberFallback(t.fee) : null,
+        timestamp:
+          Number(t.timestamp ?? t.created_at ?? t.time ?? t.transaction_time ?? 0) ||
+          (t.created_at ? new Date(t.created_at).getTime() : 0),
+        orderId: t.order_id ?? t.orderId ?? t.client_order_id ?? null,
+        raw: t,
+      };
+    });
   }
 
   async getCurrentPrice(userId: number, symbol: string): Promise<number | null> {

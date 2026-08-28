@@ -221,6 +221,16 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
+/* Remove browser number-input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 /* Subtle hover treatment for data tables */
 table tbody tr:hover {
   transition: background-color 0.15s ease;

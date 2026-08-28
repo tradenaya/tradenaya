@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
         { status: 401 },
       );
     }
-    const { url, headers } = buildSignedRequest("GET", "/futures/leverage", { symbol: symbol.toLowerCase(), exchange: "EXCHANGE_2" }, keys.apiKey, keys.apiSecret);
+    const { url, headers } = await buildSignedRequest("GET", "/futures/leverage", { symbol: symbol.toLowerCase(), exchange: "EXCHANGE_2" }, keys.apiKey, keys.apiSecret);
 
     const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
     const raw = await res.text();
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       leverage: lev,
     };
 
-    const { url, headers } = buildSignedRequest("POST", "/futures/leverage", payload, keys.apiKey, keys.apiSecret);
+    const { url, headers } = await buildSignedRequest("POST", "/futures/leverage", payload, keys.apiKey, keys.apiSecret);
 
     const res = await fetch(url, {
       method: "POST",

@@ -174,7 +174,7 @@ function readableExchangeError(data: unknown): string {
 
 async function cancelExistingOrder(req: NextRequest, orderId: string) {
   const keys = await getKeysFromRequest(req);
-  const { url, headers } = buildSignedRequest(
+  const { url, headers } = await buildSignedRequest(
     "DELETE",
     "/futures/order",
     { order_id: orderId, exchange: "EXCHANGE_2" },
@@ -291,7 +291,7 @@ export async function POST(req: NextRequest) {
     if (body.order_type === "LIMIT" && price != null) orderPayload.price = price;
     if (isProtective && triggerPrice != null) orderPayload.trigger_price = triggerPrice;
 
-    const { url, headers } = buildSignedRequest("POST", "/futures/order", orderPayload, keys.apiKey, keys.apiSecret);
+    const { url, headers } = await buildSignedRequest("POST", "/futures/order", orderPayload, keys.apiKey, keys.apiSecret);
 
     const res = await fetch(url, {
       method: "POST",

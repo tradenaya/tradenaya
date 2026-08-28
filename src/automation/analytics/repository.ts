@@ -75,6 +75,9 @@ interface ClosedTradeRowDb {
   exit_reason: string;
   realized_pnl: number;
   fees: number;
+  gross_profit: number;
+  commission: number;
+  funding_fee: number;
   position_size: number;
   closed_at: Date;
   created_at: Date;
@@ -85,6 +88,8 @@ interface ClosedTradeRowDb {
   strategy: string | null;
   highest_price: number | null;
   lowest_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
 }
 
 function buildWhere(filters: AnalyticsFilters, prefix = "ct."): { sql: string; params: unknown[] } {
@@ -130,6 +135,10 @@ function mapClosedTrade(row: ClosedTradeRowDb): ClosedTradeRow {
     exitReason: row.exit_reason,
     realizedPnl: Number(row.realized_pnl),
     fees: Number(row.fees),
+    grossProfit: num(row.gross_profit) ?? 0,
+    commission: num(row.commission) ?? 0,
+    fundingFee: num(row.funding_fee) ?? 0,
+    netPnl: (num(row.gross_profit) ?? 0) - (num(row.commission) ?? 0) - (num(row.funding_fee) ?? 0),
     positionSize: Number(row.position_size),
     closedAt: ms(row.closed_at?.getTime?.() ?? row.closed_at)!,
     createdAt: ms(row.created_at?.getTime?.() ?? row.created_at)!,
@@ -139,6 +148,8 @@ function mapClosedTrade(row: ClosedTradeRowDb): ClosedTradeRow {
     highestPrice: row.highest_price != null ? Number(row.highest_price) : null,
     lowestPrice: row.lowest_price != null ? Number(row.lowest_price) : null,
     leverage: row.leverage != null ? Number(row.leverage) : null,
+    stopLoss: row.stop_loss != null ? Number(row.stop_loss) : null,
+    takeProfit: row.take_profit != null ? Number(row.take_profit) : null,
   };
 }
 
@@ -309,16 +320,26 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
       `SELECT
          ct.id, ct.execution_id, ct.bot_id, ct.user_id, ct.symbol, ct.side,
          ct.entry_price, ct.exit_price, ct.exit_reason, ct.realized_pnl, ct.fees,
+         ct.gross_profit, ct.commission, ct.funding_fee,
          ct.position_size, ct.closed_at, ct.created_at,
          p.trailing_activated,
          p.highest_price,
          p.lowest_price,
+         p.stop_loss,
+         p.take_profit,
          p.created_at AS entry_at,
          TIMESTAMPDIFF(MICROSECOND, p.created_at, ct.closed_at) / 1000 AS duration_ms,
          b.leverage, b.strategy
        FROM automation_closed_trades ct
-       LEFT JOIN automation_positions p
-         ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
+       LEFT JOIN (
+         SELECT p1.*
+         FROM automation_positions p1
+         INNER JOIN (
+           SELECT execution_id, bot_id, MAX(id) AS max_id
+           FROM automation_positions
+           GROUP BY execution_id, bot_id
+         ) p2 ON p1.id = p2.max_id
+       ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
        LEFT JOIN automation_bots b ON b.id = ct.bot_id
        WHERE ct.user_id = ?${sql}
        ORDER BY ct.closed_at DESC;`,
@@ -353,14 +374,24 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
         `SELECT
            ct.id, ct.execution_id, ct.bot_id, ct.user_id, ct.symbol, ct.side,
            ct.entry_price, ct.exit_price, ct.exit_reason, ct.realized_pnl, ct.fees,
+           ct.gross_profit, ct.commission, ct.funding_fee,
            ct.position_size, ct.closed_at, ct.created_at,
            p.trailing_activated,
+           p.stop_loss,
+           p.take_profit,
            p.created_at AS entry_at,
            TIMESTAMPDIFF(MICROSECOND, p.created_at, ct.closed_at) / 1000 AS duration_ms,
            b.leverage, b.strategy
          FROM automation_closed_trades ct
-         LEFT JOIN automation_positions p
-           ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
+         LEFT JOIN (
+           SELECT p1.*
+           FROM automation_positions p1
+           INNER JOIN (
+             SELECT execution_id, bot_id, MAX(id) AS max_id
+             FROM automation_positions
+             GROUP BY execution_id, bot_id
+           ) p2 ON p1.id = p2.max_id
+         ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
          LEFT JOIN automation_bots b ON b.id = ct.bot_id
          WHERE ct.user_id = ?${sql}
          ORDER BY ${safeSort} ${direction}, ct.id ${direction}
@@ -475,6 +506,7 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
       `SELECT
          ct.id, ct.execution_id, ct.bot_id, ct.user_id, ct.symbol, ct.side,
          ct.entry_price, ct.exit_price, ct.exit_reason, ct.realized_pnl, ct.fees,
+         ct.gross_profit, ct.commission, ct.funding_fee,
          ct.position_size, ct.closed_at, ct.created_at,
          p.trailing_activated,
          p.highest_price,
@@ -483,8 +515,15 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
          TIMESTAMPDIFF(MICROSECOND, p.created_at, ct.closed_at) / 1000 AS duration_ms,
          b.leverage, b.strategy
        FROM automation_closed_trades ct
-       LEFT JOIN automation_positions p
-         ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
+       LEFT JOIN (
+         SELECT p1.*
+         FROM automation_positions p1
+         INNER JOIN (
+           SELECT execution_id, bot_id, MAX(id) AS max_id
+           FROM automation_positions
+           GROUP BY execution_id, bot_id
+         ) p2 ON p1.id = p2.max_id
+       ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
        LEFT JOIN automation_bots b ON b.id = ct.bot_id
        WHERE ct.user_id = ? AND ct.id = ?
        LIMIT 1;`,

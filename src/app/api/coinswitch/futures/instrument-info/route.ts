@@ -5,7 +5,7 @@ import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 export async function GET(req: NextRequest) {
   try {
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = buildSignedRequest("GET", "/futures/instrument_info", { exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = await buildSignedRequest("GET", "/futures/instrument_info", { exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
     const data = await res.json();

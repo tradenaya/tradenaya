@@ -255,7 +255,7 @@ export default function DashboardPage() {
                       : 0;
                   return (
                     <div
-                      key={`${p.symbol}-${p.avg_entry_price}`}
+                      key={p.position_id}
                       className="cursor-pointer rounded-lg border border-border bg-background/40 p-3"
                       onClick={() => setSelected(p)}
                     >

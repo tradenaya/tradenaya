@@ -1,6 +1,6 @@
 import { getKeysForUser } from "@/lib/coinswitch.store";
 import { coinswitchClient, CoinSwitchClient } from "@/automation/executor/client";
-import { orderExecutor, OrderExecutorService } from "@/automation/executor/order-executor";
+import { orderExecutor, OrderExecutorService, maxSafeAllocationPct, MARGIN_HEADROOM, MARGIN_FEE_BUFFER } from "@/automation/executor/order-executor";
 import { AutomationEngine } from "@/automation/engine/automation-engine";
 import { serverMarketDataService } from "@/automation/market/service";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
@@ -291,9 +291,35 @@ export class BotScheduler {
       throw new Error("Allocated capital must be greater than zero.");
     }
 
-    if (allocated > balance) {
+    if (balance <= 0) {
       throw new Error(
-        `Insufficient wallet balance. You need ${allocated.toFixed(2)} USDT but your available futures balance is ${balance.toFixed(2)} USDT.`,
+        "Your futures available balance is 0 USDT. Set aside USDT in your CoinSwitch futures wallet (free, not locked in positions/orders) before starting a bot.",
+      );
+    }
+
+    // Tiny floating-point excess at exactly 100% allocation must not be reported
+    // as insufficient. Only block when the allocation really exceeds the balance.
+    const EXCESS_TOLERANCE = 1e-9;
+    if (allocated - balance > EXCESS_TOLERANCE) {
+      throw new Error(
+        `Insufficient wallet balance. You need ${allocated.toFixed(2)} USDT but your available futures balance is ${balance.toFixed(2)} USDT (${(balance - allocated).toFixed(2)} USDT short). Reduce your capital allocation or set aside more USDT as free (unlocked) balance.`,
+      );
+    }
+
+    // High-allocation guard: the order's margin (notional / leverage) scales
+    // with the allocated capital, so at ~100% allocation it consumes the entire
+    // available balance with zero headroom. The exchange then rejects with a
+    // cryptic "Insufficient balance" over a few cents of fees/rounding. Block
+    // up front so the user is told the safe allocation instead of seeing a
+    // confusing runtime failure.
+    const headroom = MARGIN_HEADROOM;
+    if (allocated > balance * (1 - headroom) + MARGIN_FEE_BUFFER + EXCESS_TOLERANCE) {
+      const safePct = maxSafeAllocationPct(balance, headroom, MARGIN_FEE_BUFFER);
+      throw new Error(
+        `Leaving no headroom at ${config.capitalMode === "percent" ? `${config.walletPercent}%` : `$${allocated.toFixed(2)}`} allocation. ` +
+        `The order margin would consume nearly all of your ${balance.toFixed(2)} USDT free balance, which the exchange rejects (` +
+        `"Insufficient balance") once fees/rounding push it over. Reduce the allocation to ~${safePct.toFixed(0)}% of the available balance ` +
+        `(or lower leverage) so the order does not use up the whole free balance.`,
       );
     }
 
@@ -337,6 +363,28 @@ export class BotScheduler {
             throw new Error(
               `Allocated capital of ${allocated.toFixed(4)} USDT at ${config.leverage}x cannot buy the minimum order for ${config.symbol} — minimum is ${minQty} ${config.symbol} (~${minNotional.toFixed(4)} USDT). Raise capital to at least ${requiredCapital.toFixed(4)} USDT or increase leverage.`,
             );
+          }
+
+          // Risk compatibility check: verify that the estimated SL loss
+          // does not exceed the user's max risk allocation.
+          const maxRiskPct = Number(config.maxRiskPerTrade) || 0;
+          if (maxRiskPct > 0 && allocated > 0) {
+            const maxRiskUsdt = allocated * (maxRiskPct / 100);
+            // Mirror stop-loss-planner: baseDistance = max(atr*1.35, price*minStopDistancePct*1.01)
+            const minStopDistancePct = 0.008;
+            const estimatedAtr = price * 0.01;
+            const slDistance = Math.max(estimatedAtr * 1.35, price * minStopDistancePct * 1.01);
+            const positionNotional = allocated * config.leverage;
+            const capitalCappedSize = positionNotional / price;
+            const riskBasedSize = maxRiskUsdt / slDistance;
+            const positionSize = Math.min(riskBasedSize, capitalCappedSize);
+            const expectedLoss = slDistance * positionSize;
+
+            if (expectedLoss > maxRiskUsdt * 1.01) {
+              throw new Error(
+                `Configuration exceeds maximum risk. The estimated SL loss (~${expectedLoss.toFixed(2)} USDT) exceeds your max risk limit of ${maxRiskUsdt.toFixed(2)} USDT. Reduce capital allocation, increase max risk %, or let the bot's dynamic SL adapt at runtime.`,
+              );
+            }
           }
         }
       }

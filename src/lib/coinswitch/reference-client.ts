@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getCoinSwitchEpoch } from "./time-sync";
 
 export const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
@@ -47,13 +48,13 @@ export interface SignedRequest {
  *                   both get embedded into the signed path as a query string,
  *                   same as the existing kline route does for GET.
  */
-export function buildSignedRequest(
+export async function buildSignedRequest(
   method: "GET" | "POST" | "DELETE",
   endpoint: string,
   params?: Record<string, any>,
   apiKey?: string,
   apiSecret?: string
-): SignedRequest {
+): Promise<SignedRequest> {
   let query = "";
 
   // CoinSwitch signs GET parameters as a query string on the path, but
@@ -74,22 +75,19 @@ export function buildSignedRequest(
   const fullEndpoint = `${endpoint}${query}`;
   const signPath = `/trade/api/v2${fullEndpoint}`;
 
-  const epoch = Date.now().toString();
+  const epoch = await getCoinSwitchEpoch();
 
   if (!apiKey || !apiSecret) {
     throw new Error("CoinSwitch credentials are missing. Please reconnect your CoinSwitch account to continue.");
   }
 
-  const keyToUse = apiKey;
-  const secretToUse = apiSecret;
-
-  const signature = createSignature(method, signPath, secretToUse, epoch);
+  const signature = createSignature(method, signPath, apiSecret, epoch);
 
   return {
     url: `${BASE_URL}${fullEndpoint}`,
     headers: {
       "Content-Type": "application/json",
-      "X-AUTH-APIKEY": keyToUse,
+      "X-AUTH-APIKEY": apiKey,
       "X-AUTH-SIGNATURE": signature,
       "X-AUTH-EPOCH": epoch,
     },

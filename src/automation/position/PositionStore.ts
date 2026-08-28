@@ -108,6 +108,20 @@ export class PositionStore {
         KEY idx_user_created (user_id, closed_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Add accounting breakdown columns for databases created before this change.
+    const [rows] = await db.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'automation_closed_trades';`,
+    );
+    const columns = new Set((rows as Array<{ COLUMN_NAME: string }>).map((row) => row.COLUMN_NAME));
+    const pending: string[] = [];
+    if (!columns.has("gross_profit")) pending.push("ADD COLUMN gross_profit DECIMAL(18,8) NULL DEFAULT 0");
+    if (!columns.has("commission")) pending.push("ADD COLUMN commission DECIMAL(18,8) NULL DEFAULT 0");
+    if (!columns.has("funding_fee")) pending.push("ADD COLUMN funding_fee DECIMAL(18,8) NULL DEFAULT 0");
+    if (pending.length) {
+      await db.query(`ALTER TABLE automation_closed_trades ${pending.join(", ")};`);
+    }
   }
 
   async createPosition(execution: ExecutionRecord, config: PositionManagerConfig): Promise<number> {
@@ -246,11 +260,13 @@ export class PositionStore {
     await this.ensureCloseTable();
     await db.query(
       `INSERT INTO automation_closed_trades (
-        execution_id, bot_id, user_id, symbol, side, entry_price, exit_price, exit_reason, realized_pnl, fees, position_size
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        execution_id, bot_id, user_id, symbol, side, entry_price, exit_price, exit_reason, realized_pnl, fees, position_size,
+        gross_profit, commission, funding_fee
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         exit_price = VALUES(exit_price), exit_reason = VALUES(exit_reason),
-        realized_pnl = VALUES(realized_pnl), fees = VALUES(fees);`,
+        realized_pnl = VALUES(realized_pnl), fees = VALUES(fees),
+        gross_profit = VALUES(gross_profit), commission = VALUES(commission), funding_fee = VALUES(funding_fee);`,
       [
         input.position.executionId,
         input.position.botId,
@@ -260,9 +276,12 @@ export class PositionStore {
         input.entryPrice,
         input.exitPrice,
         input.reason,
-        input.realizedPnl,
-        input.fees,
+        input.realizedPnl ?? 0,
+        input.fees ?? 0,
         input.position.filledQuantity ?? input.position.quantity,
+        input.grossProfit ?? 0,
+        input.commission ?? 0,
+        input.fundingFee ?? 0,
       ],
     );
 

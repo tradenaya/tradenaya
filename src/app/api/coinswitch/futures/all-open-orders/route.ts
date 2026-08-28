@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   try {
     const requestPayload = { exchange: "EXCHANGE_2", limit: 50 };
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", requestPayload, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = await buildSignedRequest("POST", "/futures/orders/open", requestPayload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "POST",

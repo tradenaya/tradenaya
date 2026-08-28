@@ -103,12 +103,20 @@ function formatTrade(trade: ClosedTradeRow, bots: Map<number, BotRow>): ClosedTr
     realizedPnl: trade.realizedPnl,
     fees: trade.fees,
     netPnl: net,
+    grossProfit: trade.grossProfit,
+    commission: trade.commission,
+    fundingFee: trade.fundingFee,
     entryTime: trade.entryTime ?? trade.closedAt,
     exitTime: trade.closedAt,
     durationMs: trade.durationMs ?? 0,
     exitReason: trade.exitReason,
     leverage: trade.leverage,
     strategy: bot?.strategy ?? "Unknown",
+    stopLoss: trade.stopLoss,
+    takeProfit: trade.takeProfit,
+    trailingActivated: trade.trailingActivated,
+    highestPrice: trade.highestPrice,
+    lowestPrice: trade.lowestPrice,
   };
 }
 

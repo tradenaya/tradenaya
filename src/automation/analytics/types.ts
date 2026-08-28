@@ -79,6 +79,14 @@ export interface ClosedTradeRow {
   exitReason: string;
   realizedPnl: number;
   fees: number;
+  /** Price-move profit before costs (may be 0 for pre-accounting rows). */
+  grossProfit: number;
+  /** Entry + exit commission. */
+  commission: number;
+  /** Funding fees accrued while open. */
+  fundingFee: number;
+  /** True net P&L = grossProfit - commission - fundingFee. */
+  netPnl: number;
   positionSize: number;
   closedAt: string;
   createdAt: string;
@@ -89,6 +97,8 @@ export interface ClosedTradeRow {
   highestPrice: number | null;
   lowestPrice: number | null;
   leverage: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
 }
 
 export interface OpenPositionRow {
@@ -234,12 +244,20 @@ export interface ClosedTradeSummary {
   realizedPnl: number;
   fees: number;
   netPnl: number;
+  grossProfit: number;
+  commission: number;
+  fundingFee: number;
   entryTime: string;
   exitTime: string;
   durationMs: number;
   exitReason: string;
   leverage: number | null;
   strategy: string;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  trailingActivated: boolean;
+  highestPrice: number | null;
+  lowestPrice: number | null;
 }
 
 export interface TradeDetail extends ClosedTradeSummary {

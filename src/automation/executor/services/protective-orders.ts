@@ -18,7 +18,7 @@ export class ProtectiveOrdersService {
     const slPlaced = await this.placeStopLoss(execution);
     const tpPlaced = await this.placeTakeProfit(execution, filledQuantity);
 
-    const status: ProtectiveStatus = slPlaced && tpPlaced ? "PLACED" : slPlaced || tpPlaced ? "SL_ONLY" : tpPlaced ? "TP_ONLY" : "FAILED";
+    const status: ProtectiveStatus = slPlaced && tpPlaced ? "PLACED" : slPlaced ? "SL_ONLY" : tpPlaced ? "TP_ONLY" : "FAILED";
 
     await this.store.updateProtectiveStatus(execution.id, status);
 
@@ -72,7 +72,13 @@ export class ProtectiveOrdersService {
       const ref = await this.client.placeOrder(userId, params);
       if (!ref.orderId) return null;
       return ref;
-    } catch {
+    } catch (error) {
+      console.error("ProtectiveOrders: placeOrder failed — order may be live on exchange without DB record", {
+        symbol: params.symbol,
+        side: params.side,
+        triggerPrice: params.triggerPrice,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

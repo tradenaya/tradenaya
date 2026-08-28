@@ -39,6 +39,28 @@ export function isPermanentOrderError(message: string): boolean {
   return PERMANENT_ERROR_MARKERS.some((marker) => normalized.includes(marker.toLowerCase()));
 }
 
+/** Recognise an exchange "insufficient balance / margin" rejection. */
+export function isInsufficientBalanceError(message: string): boolean {
+  const normalized = normalizeErrorMessage(message).toLowerCase();
+  return (
+    normalized.includes("insufficient") &&
+    (normalized.includes("balance") || normalized.includes("margin") || normalized.includes("fund"))
+  );
+}
+
+/** Rewrite cryptic exchange rejections into a clear, actionable message. */
+export function clarifyOrderError(message: string): string {
+  const normalized = normalizeErrorMessage(message);
+  if (isInsufficientBalanceError(normalized)) {
+    return (
+      `The exchange rejected the order for insufficient available balance. Your USDT may be locked in open ` +
+      `orders/positions or the required margin exceeds your free balance. Check your futures wallet (Available vs ` +
+      `Blocked/In Positions) — free up margin or reduce capital allocation / leverage. (Exchange: ${normalized})`
+    );
+  }
+  return normalized;
+}
+
 export interface AnalysisCycleDependencies {
   store: SchedulerStore;
   stateManager: SchedulerStateManager;
@@ -226,7 +248,8 @@ export class AnalysisCycleRunner {
   }
 
   async handleCycleError(bot: BotRuntimeState, error: unknown): Promise<CycleResult> {
-    const message = error instanceof Error ? error.message : String(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const message = clarifyOrderError(rawMessage);
 
     if (isPermanentOrderError(message)) {
       await this.deps.lifecycle.setRetryCount(bot.id, 0);

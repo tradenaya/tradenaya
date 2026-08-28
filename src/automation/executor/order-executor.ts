@@ -18,6 +18,17 @@ export function floorToStep(value: number, step: number, precision: number): num
   return Number(rounded.toFixed(precision));
 }
 
+/**
+ * Highest allocation (as a percentage of the available balance) that still
+ * leaves the configured headroom + fee buffer untouched, so the order's margin
+ * can never consume the entire free balance.
+ */
+export function maxSafeAllocationPct(available: number, headroom: number, feeBuffer: number): number {
+  if (!(available > 0)) return 0;
+  const override = (available * (1 - headroom) - feeBuffer) / available;
+  return Math.max(0, override) * 100;
+}
+
 interface NormalizedEntry {
   ok: boolean;
   message: string;
@@ -96,6 +107,23 @@ export function normalizeEntryOrder(
   return { ok: true, message: "ok", quantity, plan };
 }
 
+/**
+ * Reserve a small buffer on top of the raw margin to cover maker/taker fees
+ * and CoinSwitch's minimum-notional rounding, so the preflight guard does not
+ * pass only for the exchange to reject at placement.
+ */
+export const MARGIN_FEE_BUFFER = 0.01;
+
+/**
+ * Fraction of the free (available) balance that must be left untouched when
+ * placing an order. At 100% allocation the required margin equals the whole
+ * available balance, leaving zero headroom, so even a few cents of fees or
+ * rounding makes the exchange reject with "Insufficient balance". Enforcing
+ * this keeps a deterministic clear pre-trade block instead of a cryptic
+ * exchange rejection. This is why 75% allocation "works" but 100% fails.
+ */
+export const MARGIN_HEADROOM = 0.02;
+
 export class OrderExecutorService {
   private readonly client: CoinSwitchClient;
   private readonly store: ExecutionStore;
@@ -124,6 +152,28 @@ export class OrderExecutorService {
 
     const instrument = await this.client.getInstrumentInfo(input.userId, input.plan.symbol ?? "").catch(() => null);
     const normalized = normalizeEntryOrder(instrument, input);
+
+    // Preflight margin guard: verify the order's required exchange margin is
+    // covered by the account's *available* (free, unlocked) balance. Without
+    // this, the exchange silently rejects with a cryptic "Insufficient balance"
+    // that becomes a confusing bot.lastError, even though the user sees USDT in
+    // their wallet (some of which can be locked in open orders/positions).
+    const preflight = await this.checkFreeMargin(input, normalized);
+    if (!preflight.ok) {
+      await this.notify("ENTRY_CANCELLED", input, -1, preflight.message);
+      return {
+        success: false,
+        executionId: null,
+        state: "CANCELLED",
+        entryOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        filledQuantity: null,
+        protectiveStatus: "NONE",
+        requiresEmergencyProtection: false,
+        message: preflight.message,
+      };
+    }
 
     const executionId = await this.store.createExecution({
       botId: input.botId,
@@ -194,6 +244,95 @@ export class OrderExecutorService {
       await this.notify("ENTRY_FAILED", input, executionId, `Execution failed: ${message}`);
       return this.result(executionId, "FAILED", null, "NONE", false, message);
     }
+  }
+
+  /**
+   * Verify the account's *available* balance can cover the exchange margin the
+   * order will require (notional / leverage). Returns ok:false with an
+   * actionable message when it cannot.
+   */
+  private async checkFreeMargin(
+    input: OrderExecutorInput,
+    normalized: NormalizedEntry,
+  ): Promise<{ ok: boolean; message: string }> {
+    if (!input.leverage || input.leverage <= 0) {
+      return { ok: false, message: "Cannot verify order margin: leverage must be greater than zero." };
+    }
+    if (!normalized.ok || normalized.quantity === undefined || !normalized.plan) {
+      return { ok: false, message: normalized.message };
+    }
+
+    const price =
+      normalized.plan.limitPrice ??
+      input.plan.limitPrice ??
+      input.plan.entryPrice ??
+      null;
+    if (price == null || !(price > 0)) {
+      // A market entry has no fixed execution price, so we cannot size margin
+      // up front — skip the preflight and let the exchange decide.
+      return { ok: true, message: "ok" };
+    }
+
+    const notional = normalized.quantity * price;
+    const requiredMargin = notional / input.leverage + MARGIN_FEE_BUFFER;
+
+    const available = await this.client.getWalletBalance(input.userId).catch(() => null);
+
+    const symbol = input.plan.symbol ?? "";
+    // Leave a safety fraction of the free balance untouched. Required margin may
+    // otherwise equal the whole available balance at high allocation, so any fee
+    // or rounding overage makes the exchange reject with a cryptic
+    // "Insufficient balance". Enforcing headroom turns that into a clear,
+    // deterministic pre-trade block.
+    const headroom = MARGIN_HEADROOM;
+    const spendable = available != null && Number.isFinite(available) ? available * (1 - headroom) : NaN;
+    const rawLog = {
+      event: "preflight-margin",
+      symbol,
+      side: input.plan.side ?? input.plan.action,
+      quantity: normalized.quantity,
+      price,
+      leverage: input.leverage,
+      notional: Number(notional.toFixed(4)),
+      requiredMargin: Number(requiredMargin.toFixed(4)),
+      feeBuffer: MARGIN_FEE_BUFFER,
+      headroomPct: headroom * 100,
+      available,
+      spendableAtHeadroom: Number.isFinite(spendable) ? Number(spendable.toFixed(4)) : null,
+      wouldNeedFullNotionalAt1x: Number(notional.toFixed(4)),
+    };
+    // If the exchange rejects while we see a full available balance, the most
+    // likely cause is that it reserves more margin than notional/leverage
+    // (fees + rounding, or a higher margin rate than configured). Log the real
+    // numbers so it can be confirmed from the server log.
+    if (available != null && Number.isFinite(available) && requiredMargin <= spendable + 1e-9) {
+      console.warn("[preflight] margin looks affordable within headroom, but the exchange may still reject —", rawLog);
+    } else {
+      console.log("[preflight] margin check", rawLog);
+    }
+
+    // If we cannot read the live balance (e.g. a transient API failure), do not
+    // block the trade here — let the exchange decide, and the clearer
+    // error-mapping in the cycle layer will explain any rejection.
+    if (available == null || !Number.isFinite(available)) {
+      return { ok: true, message: "ok" };
+    }
+
+    // Tolerate exact-equality/floating-point at the headroom boundary.
+    const EXCESS_TOLERANCE = 1e-9;
+
+    if (requiredMargin > spendable + EXCESS_TOLERANCE) {
+      return {
+        ok: false,
+        message:
+          `Cannot open ${symbol} safely: this order needs ~${requiredMargin.toFixed(4)} USDT in margin ` +
+          `(${normalized.quantity} @ ${price}, 1/${input.leverage}x, fees included) but leaving a ${(headroom * 100).toFixed(0)}% headroom ` +
+          `only ${spendable.toFixed(4)} USDT of your ${available.toFixed(4)} USDT free balance is usable. ` +
+          `Reduce your capital allocation (e.g. to ~${maxSafeAllocationPct(available, headroom, MARGIN_FEE_BUFFER).toFixed(0)}%) or lower leverage so the order no longer consumes the whole available balance.`,
+      };
+    }
+
+    return { ok: true, message: "ok" };
   }
 
   private async emergencyProtect(executionId: number): Promise<boolean> {
