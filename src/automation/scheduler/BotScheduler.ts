@@ -13,6 +13,7 @@ import { SchedulerEventBus } from "./SchedulerEventBus";
 import { SchedulerRecovery } from "./SchedulerRecovery";
 import { AnalysisCycleRunner } from "./AnalysisCycleRunner";
 import { DEFAULT_SCHEDULER_CONFIG, type SchedulerConfig, type SchedulerState } from "./SchedulerTypes";
+import { sendTelegramAsync, telegramBotStarted, telegramBotStopped } from "@/lib/telegram";
 
 export interface BotSchedulerDependencies {
   config?: SchedulerConfig;
@@ -208,6 +209,13 @@ export class BotScheduler {
     await this.events.emit({ type: "BOT_STARTED", botId, userId, message: `Bot started for ${config.symbol}` });
 
     const bot = await this.lifecycle.getBotById(botId);
+    sendTelegramAsync(telegramBotStarted({
+      symbol: config.symbol,
+      timeframe: config.timeframe,
+      leverage: config.leverage,
+      capital: config.capital,
+      strategy: bot?.strategy ?? "TradiAuraSmartV1",
+    }));
     if (bot) {
       if (this.started) {
         await this.recovery.recoverBot(bot);
@@ -234,6 +242,10 @@ export class BotScheduler {
     }
     await this.lifecycle.setRuntimeError(botId, null);
     await this.events.emit({ type: "BOT_STOPPED", botId, userId, message: "Bot stopped; no new trades will be created" });
+    sendTelegramAsync(telegramBotStopped({
+      symbol: bot.symbol,
+      reason: "User stopped automation",
+    }));
   }
 
   async pauseBot(userId: number, botId: number): Promise<void> {
@@ -255,7 +267,23 @@ export class BotScheduler {
     await this.lifecycle.setRuntimeError(botId, null);
     await this.events.emit({ type: "BOT_RESUMED", botId, userId, message: "Bot resumed" });
     const fresh = await this.lifecycle.getBotById(botId);
+    sendTelegramAsync(telegramBotStarted({
+      symbol: fresh?.symbol ?? bot.symbol,
+      timeframe: this.timeframeOf(fresh?.configJson ?? bot.configJson),
+      leverage: fresh?.leverage ?? bot.leverage,
+      capital: fresh?.capital ?? bot.capital,
+      strategy: fresh?.strategy ?? bot.strategy,
+    }));
     if (fresh) await this.recovery.recoverBot(fresh);
+  }
+
+  private timeframeOf(configJson?: string | null): string {
+    try {
+      const parsed = configJson ? (JSON.parse(configJson) as { timeframe?: string }) : null;
+      return parsed?.timeframe ?? "n/a";
+    } catch {
+      return "n/a";
+    }
   }
 
   private validateConfig(config: AutomationConfig): void {

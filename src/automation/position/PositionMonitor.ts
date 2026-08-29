@@ -19,6 +19,14 @@ import { evaluateEntryValidity } from "./EntryValidity";
 import { serverMarketDataService } from "@/automation/market/service";
 import { normalizeInterval } from "@/automation/market/normalizer";
 import { liveActivityHub } from "@/automation/scheduler/LiveActivityHub";
+import { dispatchTelegram } from "@/lib/telegram-dispatch";
+import {
+  telegramTakeProfit,
+  telegramStopLoss,
+  telegramManualClose,
+  telegramPositionClosed,
+  telegramUnprotected,
+} from "@/lib/telegram";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 const ENTRY_VISIBILITY_GRACE_MS = 10 * 60_000;
@@ -388,6 +396,10 @@ export class PositionMonitor {
       if (wasProtected && (await this.stateManager.transition(position.id, position.state, "UNPROTECTED", protection.issues.join("; ")))) {
         await this.log(position, "UNPROTECTED", `position unprotected: ${protection.issues.join("; ")}`);
         await this.notify(position, "POSITION_UNPROTECTED", `position ${position.symbol} is UNPROTECTED: ${protection.issues.join("; ")}`);
+        void dispatchTelegram(`exec:${position.executionId}:unprotected`, "POSITION_UNPROTECTED", telegramUnprotected({
+          symbol: position.symbol,
+          reason: protection.issues.join("; "),
+        }));
       }
 
       await this.log(position, "UNPROTECTED", `protection missing: ${protection.issues.join("; ")}`);
@@ -536,6 +548,49 @@ export class PositionMonitor {
       ENTRY_CANCELLED: "ENTRY_CANCELLED",
     };
     await this.notify(current, typeMap[close.reason] ?? "POSITION_CLOSED", `${current.symbol} closed via ${close.reason} at ${exitPrice ?? "n/a"} pnl=${pnl.realizedPnl ?? 0}`);
+
+    // Telegram: use the existing reconciled accounting (gross profit, entry+exit
+    // commission, funding, net P&L) so the message matches what the app reports.
+    const qtyClose = current.filledQuantity ?? current.quantity ?? 0;
+    const margin =
+      pnl.entryPrice && qtyClose && current.leverage ? (pnl.entryPrice * qtyClose) / current.leverage : 0;
+    const roi = margin > 0 && accounting.realizedPnl != null ? (accounting.realizedPnl / margin) * 100 : null;
+    const closePayload = {
+      symbol: current.symbol,
+      side: current.side,
+      entry: pnl.entryPrice,
+      exit: exitPrice,
+      gross: accounting.grossProfit,
+      commission: accounting.commission,
+      net: accounting.realizedPnl,
+      roi,
+      reason: close.reason,
+    };
+    const dedupeKey = `exec:${current.executionId}:close`;
+    if (close.reason === "TAKE_PROFIT") {
+      void dispatchTelegram(dedupeKey, "POSITION_TAKE_PROFIT", telegramTakeProfit(closePayload));
+    } else if (close.reason === "STOP_LOSS") {
+      void dispatchTelegram(dedupeKey, "POSITION_STOP_LOSS", telegramStopLoss({
+        symbol: current.symbol,
+        side: current.side,
+        entry: pnl.entryPrice,
+        exit: exitPrice,
+        pnl: accounting.realizedPnl,
+        roi,
+      }));
+    } else if (close.reason === "MANUAL_CLOSE") {
+      void dispatchTelegram(dedupeKey, "POSITION_MANUAL_CLOSE", telegramManualClose({
+        symbol: current.symbol,
+        side: current.side,
+        entry: pnl.entryPrice,
+        exit: exitPrice,
+        pnl: accounting.realizedPnl,
+        roi,
+      }));
+    } else {
+      void dispatchTelegram(dedupeKey, "POSITION_CLOSED", telegramPositionClosed(closePayload));
+    }
+
     await this.releaseBot(current);
   }
 

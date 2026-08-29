@@ -15,6 +15,8 @@ import { liveActivityHub } from "./LiveActivityHub";
 import { backoffMs, intervalMsFromTimeframe } from "./SchedulerTime";
 import type { CycleResult, SchedulerConfig, SchedulerState } from "./SchedulerTypes";
 import { clientOrderId } from "@/automation/executor/order-id";
+import { dispatchTelegram } from "@/lib/telegram-dispatch";
+import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
 
@@ -261,6 +263,12 @@ export class AnalysisCycleRunner {
         userId: bot.userId,
         message: `Bot marked ERROR — account-level error that retries cannot fix: ${message}. Fix the CoinSwitch subaccount association for ${bot.symbol} or pick a different market.`,
       });
+      void dispatchTelegram(`bot:${bot.id}:error:permanent`, "BOT_ERROR", telegramCoinSwitchError({
+        endpoint: "futures/order",
+        symbol: bot.symbol,
+        error: message,
+        kind: "permanent",
+      }));
       liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message: `Bot marked ERROR — ${message}` });
       return { executed: false, state: "ERROR", action: "ERROR", message };
     }
@@ -273,6 +281,12 @@ export class AnalysisCycleRunner {
     if (retryCount > maxFailures) {
       await this.deps.stateManager.transition(bot.id, this.asState(bot.status), "ERROR");
       await this.deps.events.emit({ type: "BOT_ERROR", botId: bot.id, userId: bot.userId, message: `Bot marked ERROR after ${maxFailures} consecutive failures: ${message}` });
+      void dispatchTelegram(`bot:${bot.id}:error:consecutive`, "BOT_ERROR", telegramCoinSwitchError({
+        endpoint: "futures",
+        symbol: bot.symbol,
+        error: `Bot marked ERROR after ${maxFailures} consecutive failures: ${message}`,
+        kind: "api",
+      }));
       return { executed: false, state: "ERROR", action: "ERROR", message };
     }
 
@@ -292,6 +306,18 @@ export class AnalysisCycleRunner {
     await this.deps.lifecycle.setRetryCount(bot.id, 0);
     await this.deps.lifecycle.scheduleNextRun(bot.id, new Date(Date.now() + interval));
     await this.deps.events.emit({ type: "ANALYSIS_COMPLETED", botId: bot.id, userId: bot.userId, message, data: { status } });
+
+    // Only notify for meaningful terminal outcomes. A plain "no opportunity"
+    // (WAIT) is routine and would spam every analysis cycle — skip it.
+    if (status !== "WAIT") {
+      const statusLabel =
+        status === "RISK_REJECTED" ? "Analysis completed (risk rejected)" : "Analysis completed (cancelled)";
+      void dispatchTelegram(`bot:${bot.id}:analysis:${status}`, "ANALYSIS_COMPLETED", telegramAnalysis({
+        symbol: bot.symbol,
+        status: statusLabel,
+        detail: message,
+      }));
+    }
   }
 
   private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number }> {

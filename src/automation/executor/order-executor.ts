@@ -11,6 +11,13 @@ import type {
   OrderExecutorResult,
 } from "./types";
 import type { TradePlan } from "@/automation/planner/types";
+import { dispatchTelegram } from "@/lib/telegram-dispatch";
+import {
+  telegramEntryOrder,
+  telegramPositionOpened,
+  telegramProtected,
+  telegramOrderFailed,
+} from "@/lib/telegram";
 
 export function floorToStep(value: number, step: number, precision: number): number {
   if (step <= 0) return Number(value.toFixed(precision));
@@ -205,6 +212,14 @@ export class OrderExecutorService {
           ? `Entry order submitted for ${input.plan.symbol ?? ""}`
           : normalized.message,
       );
+      void dispatchTelegram(`exec:${executionId}:entry`, "ENTRY_SUBMITTED", telegramEntryOrder({
+        symbol: input.plan.symbol,
+        side: input.plan.side ?? input.plan.action,
+        type: input.plan.entryType === "LIMIT" && input.plan.limitPrice ? "LIMIT" : "MARKET",
+        entryPrice: normalized.plan?.limitPrice ?? input.plan.limitPrice,
+        quantity: normalized.quantity,
+        leverage: input.leverage,
+      }));
 
       const { filled, filledQuantity } = await this.lifecycle.pollEntryUntilFilled(executionId, input.userId, orderId);
 
@@ -214,6 +229,15 @@ export class OrderExecutorService {
       }
 
       await this.notify("ENTRY_FILLED", input, executionId, `Entry filled for ${input.plan.symbol ?? ""}`);
+      const openedQty = filledQuantity ?? normalized.quantity;
+      void dispatchTelegram(`exec:${executionId}:position_open`, "POSITION_OPENED", telegramPositionOpened({
+        symbol: input.plan.symbol,
+        side: input.plan.side ?? input.plan.action,
+        entry: normalized.plan?.limitPrice ?? input.plan.limitPrice ?? input.plan.entryPrice,
+        quantity: openedQty,
+        leverage: input.leverage,
+        margin: input.plan.limitPrice && openedQty ? (openedQty * input.plan.limitPrice) / input.leverage : undefined,
+      }));
 
       const execution = await this.store.getExecution(executionId);
       if (!execution) {
@@ -227,6 +251,13 @@ export class OrderExecutorService {
         if (recovered) {
           await this.store.updateState(executionId, "ENTRY_FILLED");
           await this.notify("PROTECTED", input, executionId, "Protective orders placed after retry");
+          const trailingAfterRecovery = await this.readTrailingEnabled(input.botId);
+          void dispatchTelegram(`exec:${executionId}:protected`, "PROTECTED", telegramProtected({
+            symbol: input.plan.symbol,
+            sl: input.plan.stopLoss,
+            tp: input.plan.takeProfit,
+            trailing: trailingAfterRecovery,
+          }));
           return this.result(executionId, "ENTRY_FILLED", filledQuantity, "PLACED", false, "Entry filled, protective orders placed after retry");
         }
         await this.store.updateState(executionId, "UNPROTECTED", "Protective orders failed");
@@ -236,12 +267,24 @@ export class OrderExecutorService {
 
       await this.store.updateState(executionId, "ENTRY_FILLED");
       await this.notify("PROTECTED", input, executionId, `Protective orders placed for ${input.plan.symbol ?? ""}`);
+      const trailingEnabled = await this.readTrailingEnabled(input.botId);
+      void dispatchTelegram(`exec:${executionId}:protected`, "PROTECTED", telegramProtected({
+        symbol: input.plan.symbol,
+        sl: input.plan.stopLoss,
+        tp: input.plan.takeProfit,
+        trailing: trailingEnabled,
+      }));
 
       return this.result(executionId, "ENTRY_FILLED", filledQuantity, protectiveStatus, false, `Entry filled, protective orders ${protectiveStatus}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.store.updateState(executionId, "FAILED", message);
       await this.notify("ENTRY_FAILED", input, executionId, `Execution failed: ${message}`);
+      void dispatchTelegram(`exec:${executionId}:failed`, "ENTRY_FAILED", telegramOrderFailed({
+        symbol: input.plan.symbol,
+        orderType: input.plan.entryType === "LIMIT" && input.plan.limitPrice ? "LIMIT" : "MARKET",
+        reason: message,
+      }));
       return this.result(executionId, "FAILED", null, "NONE", false, message);
     }
   }
@@ -359,6 +402,19 @@ export class OrderExecutorService {
       executionId,
       message,
     });
+  }
+
+  /** Read the bot's saved trailing-stop config for the PROTECTED message. Best-effort. */
+  private async readTrailingEnabled(botId: number): Promise<boolean> {
+    const svc = this.botState as unknown as { getBotById?: (id: number) => Promise<{ configJson?: string | null } | null> };
+    try {
+      const bot = svc?.getBotById ? await svc.getBotById(botId) : null;
+      if (!bot?.configJson) return false;
+      const parsed = JSON.parse(bot.configJson) as { enableTrailingStop?: boolean };
+      return Boolean(parsed.enableTrailingStop);
+    } catch {
+      return false;
+    }
   }
 
   private async result(
