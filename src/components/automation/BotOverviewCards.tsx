@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, type BotView } from "./bot-config";
+import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, type BotView } from "./bot-config";
 
 export function BotOverviewCards() {
   const router = useRouter();
@@ -70,6 +70,8 @@ export function BotOverviewCards() {
               const offline = schedulerActive === false && (live || isRunning(bot.status));
               const st = statusMeta(bot.status);
               const lastError = bot.lastError && !live ? bot.lastError : null;
+              const sym = displaySymbol(bot, config);
+              const dir = sideLabel(config.side);
               return (
                 <button
                   key={bot.id}
@@ -84,10 +86,18 @@ export function BotOverviewCards() {
                           live && !offline ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground",
                         )}
                       >
-                        {bot.symbol.slice(0, 1)}
+                        {sym.slice(0, 1) || bot.symbol.slice(0, 1)}
                       </div>
                       <div>
-                        <div className="font-semibold text-foreground">{bot.symbol}</div>
+                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                          <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
+                          {config.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                          {dir && (
+                            <span className={cn("text-[10px] font-bold", dir === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
+                              {dir}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                           <span>{config.timeframe}</span>
                           <span>·</span>

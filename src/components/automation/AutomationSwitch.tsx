@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { parseBotConfig, displaySymbol, sideLabel } from "@/components/automation/bot-config";
 
 interface BotRecord {
   id: number;
@@ -21,6 +22,7 @@ interface BotRecord {
   status: string;
   desiredStatus: string;
   lastError: string | null;
+  configJson?: string | null;
 }
 
 const runningStates = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
@@ -219,12 +221,23 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
           <div className="flex flex-wrap gap-2">
             {botList.map((bot) => {
               const live = runningStates.includes(bot.desiredStatus ?? bot.status);
+              const cfg = parseBotConfig(bot);
+              const sym = displaySymbol(bot, cfg);
+              const dir = sideLabel(cfg.side);
               return (
                 <div
                   key={bot.id}
                   className={`rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-muted/40"}`}
                 >
-                  <div className="font-medium text-foreground">{bot.symbol}</div>
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-medium text-foreground">
+                    <span>{sym.replace(/USDT$/, "") || "Auto"}</span>
+                    {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                    {dir && (
+                      <span className={`text-[10px] font-bold ${dir === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
+                        {dir}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     {bot.timeframe} · {bot.leverage}x · {bot.capital} USDT
                   </div>

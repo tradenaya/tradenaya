@@ -32,6 +32,20 @@ function txTypeOf(t: any): string {
   return "P&L";
 }
 
+/**
+ * Normalize a transaction "type" filter to CoinSwitch's strict uppercase enum
+ * (PNL / COMMISSION / FUNDING_FEE). Callers historically pass display labels
+ * like "P&L", "commission", and "funding fee"; sending those raw makes the API
+ * answer 500 with an invalid-enum error.
+ */
+function normalizeTransactionType(type: string): string {
+  const upper = String(type).trim().toUpperCase().replace(/[^A-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  if (upper === "PNL" || upper === "PL" || upper === "P" || upper === "R_L" || upper === "RL") return "PNL";
+  if (upper === "FUNDING" || upper === "FUNDING_FEE" || upper === "FEE") return "FUNDING_FEE";
+  if (upper === "COMMISSION" || upper === "FEES") return "COMMISSION";
+  return upper;
+}
+
 
 export interface PlaceOrderParams {
   symbol: string;
@@ -295,10 +309,15 @@ export class CoinSwitchClient {
   ): Promise<FuturesTransaction[]> {
     const params: Record<string, any> = { exchange: "EXCHANGE_2" };
     if (opts.symbol) params.symbol = opts.symbol.toLowerCase();
-    if (opts.type) params.type = opts.type;
-    if (opts.fromTime != null) params.from_time = opts.fromTime;
-    if (opts.toTime != null) params.to_time = opts.toTime;
-    if (opts.limit != null) params.limit = opts.limit;
+    // CoinSwitch's transaction "type" is a strict uppercase enum
+    // (PNL/COMMISSION/FUNDING_FEE) while the app historically used display
+    // labels ("P&L", "commission", "funding fee") which the API rejects with a
+    // 500, so normalize to the enum values here.
+    if (opts.type) params.type = normalizeTransactionType(opts.type);
+    // The transactions endpoint rejects from_time/to_time/limit — the only
+    // time-window params it accepts are start_time/end_time.
+    if (opts.fromTime != null) params.start_time = opts.fromTime;
+    if (opts.toTime != null) params.end_time = opts.toTime;
     const data = await this.call("GET", "/futures/transactions", params, userId);
     const rows: any[] = this.extractList(data);
     return rows.map((t: any) => {

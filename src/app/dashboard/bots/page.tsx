@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Eye, Loader2, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CandlestickChart, Check, Eye, Loader2, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import { EditBotDialog } from "@/components/automation/EditBotDialog";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { parseBotConfig, statusMeta, type BotView } from "@/components/automation/bot-config";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
-import { fmtMoney } from "@/components/automation/bot-config";
+import { fmtMoney, displaySymbol, sideLabel } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
@@ -127,10 +128,12 @@ function LiveBotCard({
   bot,
   position,
   onDetails,
+  onViewChart,
 }: {
   bot: BotView;
   position: OpenPositionAnalytics | null;
   onDetails: (bot: BotView) => void;
+  onViewChart: (bot: BotView) => void;
 }) {
   const cfg = parseBotConfig(bot);
   const inPhase = STEP_ORDER.includes(bot.status);
@@ -138,23 +141,42 @@ function LiveBotCard({
   const current = position?.currentPrice ?? null;
   const sl = position?.stopLoss ?? null;
   const tp = position?.takeProfit ?? null;
+  const sym = displaySymbol(bot, cfg);
+  const dir = sideLabel(cfg.side);
 
   return (
     <Card className="border border-border bg-card">
       <CardHeader className="gap-2.5 border-b pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xl font-bold text-foreground">{bot.symbol.replace(/USDT$/, "")}</span>
-            {position && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xl font-bold text-foreground">
+              {sym.replace(/USDT$/, "") || "Auto-select"}
+            </span>
+            {cfg.autoSelect && (
+              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500/80">AUTO</span>
+            )}
+            {dir ? (
+              <Badge className={dir === "Long" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}>
+                {dir}
+              </Badge>
+            ) : position ? (
               <Badge className={position.side === "BUY" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}>
                 {position.side === "BUY" ? "Long" : "Short"}
               </Badge>
-            )}
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">
               {cfg.timeframe} · {cfg.strategy} · {cfg.leverage}x
             </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={() => onViewChart(bot)}
+            >
+              <CandlestickChart size={13} /> View Chart
+            </Button>
             <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" onClick={() => onDetails(bot)}>
               <Eye size={13} /> Details
             </Button>
@@ -196,10 +218,12 @@ function LiveOverview({
   bots,
   positions,
   onDetails,
+  onViewChart,
 }: {
   bots: BotView[];
   positions: BotPosition[];
   onDetails: (bot: BotView) => void;
+  onViewChart: (bot: BotView) => void;
 }) {
   const running = useMemo(() => bots.filter(isLive), [bots]);
 
@@ -224,6 +248,7 @@ function LiveOverview({
           bot={bot}
           position={positions.find((p) => p.botId === bot.id)?.position ?? null}
           onDetails={onDetails}
+          onViewChart={onViewChart}
         />
       ))}
     </div>
@@ -231,6 +256,7 @@ function LiveOverview({
 }
 
 export default function AutomationPage() {
+  const router = useRouter();
   const [bots, setBots] = useState<BotView[]>([]);
   const [positions, setPositions] = useState<BotPosition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -400,7 +426,7 @@ export default function AutomationPage() {
         {loading && bots.length === 0 ? (
           <Skeleton className="h-40 w-full rounded-lg" />
         ) : (
-          <LiveOverview bots={bots} positions={positions} onDetails={setDetailBot} />
+          <LiveOverview bots={bots} positions={positions} onDetails={setDetailBot} onViewChart={(bot) => router.push(`/trade/${displaySymbol(bot, parseBotConfig(bot))}`)} />
         )}
       </section>
 
@@ -476,12 +502,18 @@ export default function AutomationPage() {
                         live && !offline ? "bg-emerald-400/15 text-emerald-400" : "bg-muted text-muted-foreground",
                       )}
                     >
-                      {bot.symbol.slice(0, 1)}
+                      {displaySymbol(bot, cfg).slice(0, 1) || bot.symbol.slice(0, 1)}
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                        <span className="truncate">{bot.symbol.replace(/USDT$/, "")}</span>
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold text-foreground">
+                        <span className="truncate">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
+                        {cfg.autoSelect && <span className="shrink-0 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                        {sideLabel(cfg.side) && (
+                          <span className={cn("shrink-0 text-[10px] font-bold", sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
+                            {sideLabel(cfg.side)}
+                          </span>
+                        )}
                         {offline && <span className="shrink-0 text-[10px] font-normal text-amber-400">offline</span>}
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground">

@@ -3,6 +3,7 @@ import { coinswitchClient, CoinSwitchClient } from "@/automation/executor/client
 import { orderExecutor, OrderExecutorService, maxSafeAllocationPct, MARGIN_HEADROOM, MARGIN_FEE_BUFFER } from "@/automation/executor/order-executor";
 import { AutomationEngine } from "@/automation/engine/automation-engine";
 import { serverMarketDataService } from "@/automation/market/service";
+import { CoinAutoSelector } from "@/automation/coinauto/coin-auto-selector";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import { BotLifecycleService, type BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { AutomationConfig } from "@/automation/types";
@@ -35,6 +36,7 @@ export class BotScheduler {
   private readonly events: SchedulerEventBus;
   private readonly recovery: SchedulerRecovery;
   private readonly cycles: AnalysisCycleRunner;
+  private readonly coinAutoSelector: CoinAutoSelector;
   private readonly inProcess = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
   private started = false;
@@ -48,6 +50,10 @@ export class BotScheduler {
     this.events = deps.events ?? new SchedulerEventBus((event) => store.saveEvent(event));
     this.stateManager = deps.stateManager ?? new SchedulerStateManager(this.lifecycle);
     this.lock = new SchedulerLock(this.lifecycle, this.config.leaseTtlSeconds);
+    this.coinAutoSelector = new CoinAutoSelector({
+      client,
+      marketData: (userId) => serverMarketDataService.adapterFor(userId),
+    });
     this.cycles = new AnalysisCycleRunner({
       store,
       stateManager: this.stateManager,
@@ -59,6 +65,7 @@ export class BotScheduler {
       executor: deps.executor ?? orderExecutor,
       config: this.config,
       refreshLease: (botId) => this.lock.refresh(botId),
+      coinAutoSelector: this.coinAutoSelector,
     });
     this.recovery = new SchedulerRecovery({ store, stateManager: this.stateManager, events: this.events, lifecycle: this.lifecycle, client, cycles: this.cycles });
   }
@@ -180,6 +187,17 @@ export class BotScheduler {
     return this.lifecycle.deleteBot(botId);
   }
 
+  /** Seed the DB symbol column for an auto-select bot with the current best coin. */
+  private async resolveInitialSymbol(userId: number, config: AutomationConfig): Promise<string> {
+    try {
+      const selected = await this.coinAutoSelector.selectBestOpportunity(userId, config, { limit: 30 });
+      if (selected) return selected.symbol;
+    } catch (error) {
+      console.error("[auto-select] initial symbol resolution failed", error);
+    }
+    return "AUTO";
+  }
+
   async startBot(userId: number, config: AutomationConfig): Promise<{ botId: number }> {
     await this.ensureStarted();
     const keys = await getKeysForUser(userId);
@@ -190,9 +208,18 @@ export class BotScheduler {
 
     await this.validateLiveConstraints(userId, config);
 
+    // Auto-select best coin: seed the symbol column with the current best
+    // opportunity when one exists; otherwise fall back to the placeholder the
+    // UI sent. The DAU symbol is only used for display — trades always use the
+    // per-cycle selected coin (config.symbol is resolved every analysis).
+    const initialSymbol =
+      config.autoSelect && this.coinAutoSelector
+        ? await this.resolveInitialSymbol(userId, config)
+        : config.symbol;
+
     const botId = await this.lifecycle.createBot({
       userId,
-      symbol: config.symbol,
+      symbol: initialSymbol,
       strategy: "TradiAuraSmartV1",
       leverage: config.leverage,
       capital: config.capital,
@@ -206,11 +233,11 @@ export class BotScheduler {
     await this.lifecycle.setRuntimeError(botId, null);
     await this.lifecycle.updateHeartbeatAt(botId);
     await this.lifecycle.scheduleNextRun(botId, new Date());
-    await this.events.emit({ type: "BOT_STARTED", botId, userId, message: `Bot started for ${config.symbol}` });
+    await this.events.emit({ type: "BOT_STARTED", botId, userId, message: `Bot started for ${config.autoSelect ? "auto-selected best coin" : initialSymbol}` });
 
     const bot = await this.lifecycle.getBotById(botId);
     sendTelegramAsync(telegramBotStarted({
-      symbol: config.symbol,
+      symbol: config.autoSelect ? (initialSymbol === "AUTO" ? "Auto-select mode" : initialSymbol) : config.symbol,
       timeframe: config.timeframe,
       leverage: config.leverage,
       capital: config.capital,
@@ -299,13 +326,27 @@ export class BotScheduler {
     if (config.capitalMode === "percent" && (config.walletPercent ?? 0) > 100) {
       throw new Error("Wallet percent cannot exceed 100%");
     }
+    if (config.autoSelect && config.leverageMode === "manual") {
+      const pct = Number(config.leveragePercent);
+      if (!Number.isFinite(pct) || pct <= 0) {
+        throw new Error("Manual leverage % must be greater than zero when auto-select is on and leverage is manual.");
+      }
+      if (pct > 100) {
+        throw new Error("Manual leverage % cannot exceed the coin's maximum (≤100% of max leverage).");
+      }
+    }
   }
 
   /** Fetch live wallet balance + instrument rules and reject if the bot cannot actually trade. */
   private async validateLiveConstraints(userId: number, config: AutomationConfig): Promise<void> {
+    // In auto-select mode the fixed symbol is a placeholder and leverage is
+    // resolved per selected coin each cycle — skip instrument-specific checks
+    // and rely on per-cycle resolveLeverage to always pick a valid value.
     const [balance, instrument] = await Promise.all([
       coinswitchClient.getWalletBalance(userId).catch(() => null),
-      coinswitchClient.getInstrumentInfo(userId, config.symbol).catch(() => null),
+      config.autoSelect
+        ? Promise.resolve(null)
+        : coinswitchClient.getInstrumentInfo(userId, config.symbol).catch(() => null),
     ]);
 
     if (balance == null) {

@@ -7,6 +7,14 @@ export interface AutomationConfig {
   symbol: string;
   timeframe: string;
   leverage: number;
+  /** Auto-select the strongest current coin opportunity instead of a fixed symbol. */
+  autoSelect?: boolean;
+  /** Last selected direction for an auto-select bot (persisted each cycle). */
+  side?: "LONG" | "SHORT";
+  /** Leverage resolution mode when auto-select is active. */
+  leverageMode?: "auto" | "manual";
+  /** Manual leverage preference as a % of the selected coin's max leverage. */
+  leveragePercent?: number;
   capital: number;
   capitalMode: "fixed" | "percent";
   walletPercent?: number;

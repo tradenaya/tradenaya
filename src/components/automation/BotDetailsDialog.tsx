@@ -1,10 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fmtMoney, parseBotConfig, statusMeta, type BotView } from "./bot-config";
+import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, type BotView } from "./bot-config";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 
 export interface BotDetailsDialogProps {
@@ -24,16 +27,38 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetailsDialogProps) {
+  const router = useRouter();
   const cfg = parseBotConfig(bot);
   const st = statusMeta(bot.status);
+  const sym = displaySymbol(bot, cfg);
+  const dir = sideLabel(position?.side ?? cfg.side) ?? null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[98vw] max-w-7xl max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card p-0">
         <DialogHeader className="border-b border-border px-6 py-4">
-          <DialogTitle className="flex items-center gap-2 text-lg">
-            {bot.symbol} automation
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-4">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              {sym ? `${sym.replace(/USDT$/, "")} automation` : "Auto-select automation"}
+              {cfg.autoSelect && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+              {dir && (
+                <Badge className={cn("text-[10px]", dir === "Long" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400")}>
+                  {dir}
+                </Badge>
+              )}
+            </DialogTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 gap-1.5 px-2.5 text-xs"
+              onClick={() => {
+                onOpenChange(false);
+                router.push(`/trade/${sym || bot.symbol}`);
+              }}
+            >
+              <CandlestickChart size={13} /> View Chart
+            </Button>
+          </div>
           <DialogDescription>
             {fmtMoney(cfg.capital)} USDT capital · {cfg.leverage}x leverage · {cfg.timeframe} · {cfg.strategy}
           </DialogDescription>
@@ -55,7 +80,8 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Configuration</p>
-              <Field label="Symbol">{bot.symbol}</Field>
+              <Field label="Symbol">{sym || "Auto-select"}</Field>
+              <Field label="Auto-select">{cfg.autoSelect ? "On" : "Off"}</Field>
               <Field label="Timeframe">{cfg.timeframe}</Field>
               <Field label="Leverage">{cfg.leverage}x</Field>
               <Field label="Capital">{fmtMoney(cfg.capital)} USDT</Field>

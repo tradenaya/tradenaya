@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sheet,
   SheetContent,
@@ -9,7 +10,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
 
@@ -80,6 +83,7 @@ interface Props {
 }
 
 export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
+  const router = useRouter();
   const [detail, setDetail] = useState<AutomationPositionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -189,6 +193,17 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               : "Active futures position"}
           </SheetDescription>
         </SheetHeader>
+
+        <Button
+          variant="outline"
+          className="mx-4 mb-3 flex items-center gap-1.5"
+          onClick={() => {
+            onOpenChange(false);
+            router.push(`/trade/${position.symbol}`);
+          }}
+        >
+          <CandlestickChart size={14} /> View Chart
+        </Button>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-6">
           {loading ? (

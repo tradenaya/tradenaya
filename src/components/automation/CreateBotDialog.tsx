@@ -71,6 +71,9 @@ const DEFAULT_SETTINGS = {
   symbol: "BTCUSDT",
   timeframe: "1h",
   leverage: "5",
+  autoSelect: false,
+  leverageMode: "auto" as "auto" | "manual",
+  leveragePercent: "50",
   capital: "100",
   maxRiskPerTrade: "1",
   dailyLossLimit: "5",
@@ -83,6 +86,19 @@ const DEFAULT_SETTINGS = {
   enableTrailingStop: false,
   trailingDistancePercent: "",
 };
+
+interface AutoSelectionPreview {
+  symbol: string;
+  side: string;
+  score: number;
+  price: number | null;
+  confidence: number;
+  atrPct: number | null;
+  trend: string;
+  leverage: number;
+  maxLeverage: number | null;
+  minLeverage: number | null;
+}
 
 interface CreateBotDialogProps {
   open: boolean;
@@ -105,6 +121,49 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
   const [analyzingCoins, setAnalyzingCoins] = useState(false);
   const [coinAnalysis, setCoinAnalysis] = useState<CoinAnalysis[] | null>(null);
   const [analysisError, setAnalysisError] = useState("");
+
+  // ---- Auto-select best coin ----
+  const [autoPreview, setAutoPreview] = useState<AutoSelectionPreview | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoError, setAutoError] = useState("");
+
+  const autoPreviewUrl = useMemo(() => {
+    if (!settings.autoSelect) return "";
+    const params = new URLSearchParams({
+      timeframe: settings.timeframe,
+      leverageMode: settings.leverageMode,
+      leveragePercent: settings.leveragePercent,
+      capital: String(Number(settings.capital) || 0),
+      maxRiskPerTrade: String(Number(settings.maxRiskPerTrade) || 1),
+    });
+    return `/api/bots/auto-selection?${params.toString()}`;
+  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade]);
+
+  useEffect(() => {
+    if (!settings.autoSelect || !open) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setAutoLoading(true);
+      setAutoError("");
+    });
+    fetch(autoPreviewUrl, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.success) setAutoPreview(json.data?.best ?? null);
+        else setAutoError(json.message || "Failed to preview auto-selection");
+      })
+      .catch(() => {
+        if (!cancelled) setAutoError("Failed to preview auto-selection");
+      })
+      .finally(() => {
+        if (!cancelled) setAutoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoPreviewUrl, settings.autoSelect, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -223,13 +282,18 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     }
 
     const lev = num(settings.leverage);
-    if (lev == null || !(lev > 0)) errs.leverage = "Leverage must be a positive number.";
-    else if (instrument) {
-      const minL = Number(instrument.min_leverage);
-      const maxL = Number(instrument.max_leverage);
-      if (Number.isFinite(minL) && Number.isFinite(maxL) && (lev < minL || lev > maxL)) {
-        errs.leverage = `Leverage must be ${minL}x–${maxL}x for ${symbol}.`;
+    if (!settings.autoSelect) {
+      if (lev == null || !(lev > 0)) errs.leverage = "Leverage must be a positive number.";
+      else if (instrument) {
+        const minL = Number(instrument.min_leverage);
+        const maxL = Number(instrument.max_leverage);
+        if (Number.isFinite(minL) && Number.isFinite(maxL) && (lev < minL || lev > maxL)) {
+          errs.leverage = `Leverage must be ${minL}x–${maxL}x for ${symbol}.`;
+        }
       }
+    } else if (settings.leverageMode === "manual") {
+      const pct = num(settings.leveragePercent);
+      if (pct == null || pct <= 0 || pct > 100) errs.leverage = "Manual leverage % must be between 1% and 100%.";
     }
 
     const risk = num(settings.maxRiskPerTrade);
@@ -331,9 +395,16 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     }
 
     const symbol = settings.symbol.trim().toUpperCase();
-    if (!symbol) return "Trading symbol is required.";
+    if (!settings.autoSelect && !symbol) return "Trading symbol is required.";
 
-    if (instrument) {
+    if (settings.autoSelect && settings.leverageMode === "manual") {
+      const pct = Number(settings.leveragePercent);
+      if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+        return "Manual leverage % must be between 1% and 100% of the selected coin's maximum.";
+      }
+    }
+
+    if (!settings.autoSelect && instrument) {
       const minL = Number(instrument.min_leverage);
       const maxL = Number(instrument.max_leverage);
       const lev = Number(settings.leverage);
@@ -359,11 +430,11 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       }
     }
 
-    if (minOrderIssue) {
+    if (minOrderIssue && !settings.autoSelect) {
       return `Cannot start automation — ${minOrderIssue}`;
     }
 
-    if (notActiveIssue) {
+    if (notActiveIssue && !settings.autoSelect) {
       return `Cannot start automation — ${notActiveIssue}`;
     }
 
@@ -381,6 +452,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       symbol,
       timeframe: settings.timeframe,
       leverage: Number(settings.leverage),
+      autoSelect: settings.autoSelect,
+      leverageMode: settings.leverageMode,
+      leveragePercent: settings.leverageMode === "manual" ? Number(settings.leveragePercent) : undefined,
       capitalMode,
       capital: allocated,
       walletPercent: capitalMode === "percent" ? Number(walletPercent) : undefined,
@@ -442,7 +516,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         <DialogHeader>
           <DialogTitle>Automated trading setup</DialogTitle>
           <DialogDescription>
-            TradeNaya trades {settings.symbol} using your strategy with fixed SL and TP protection. You can adjust this later.
+            {settings.autoSelect
+              ? "TradeNaya continuously analyzes eligible coins and trades the strongest current opportunity (LONG or SHORT), rotating as the market changes."
+              : `TradeNaya trades ${settings.symbol} using your strategy with fixed SL and TP protection. You can adjust this later.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -473,6 +549,131 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             )}
           </div>
 
+          <div className="md:col-span-2">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id="auto-select-toggle"
+                  type="checkbox"
+                  checked={settings.autoSelect}
+                  onChange={(e) => setSettings((s) => ({ ...s, autoSelect: e.target.checked }))}
+                  className="h-4 w-4 rounded border-border accent-emerald-500"
+                />
+                <Label htmlFor="auto-select-toggle" className="mb-0">Auto-select best coin</Label>
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {settings.autoSelect
+                ? "The bot will automatically select the strongest current trading opportunity (LONG or SHORT) and rotate as the market changes."
+                : "The bot trades the fixed symbol you select below."}
+            </p>
+          </div>
+
+          {settings.autoSelect && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-3 md:col-span-2">
+              <div className="space-y-1.5">
+                <Label>Leverage mode</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSettings((s) => ({ ...s, leverageMode: "auto" }))}
+                    className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                      settings.leverageMode === "auto"
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                        : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettings((s) => ({ ...s, leverageMode: "manual" }))}
+                    className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                      settings.leverageMode === "manual"
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                        : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    Manual %
+                  </button>
+                </div>
+              </div>
+
+              {settings.leverageMode === "manual" ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label>Leverage preference</Label>
+                    <span className="font-semibold text-foreground">{settings.leveragePercent}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={leveragePercentValue(settings.leveragePercent)}
+                    onChange={(e) => setSettings((s) => ({ ...s, leveragePercent: e.target.value }))}
+                    className="w-full accent-emerald-500"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {settings.leveragePercent}% of the selected coin&apos;s maximum leverage.
+                    {autoPreview?.maxLeverage
+                      ? ` If the coin supports ${autoPreview.maxLeverage}x → bot uses ≈ ${Math.round(
+                          (autoPreview.maxLeverage * Number(settings.leveragePercent || 50)) / 100,
+                        )}x.`
+                      : " The leverage scales per coin automatically (e.g. 50% of a 100x coin → 50x, 50% of a 50x coin → 25x)."}
+                  </p>
+                  {fieldErrors.leverage && <FieldError>{fieldErrors.leverage}</FieldError>}
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Leverage will be calculated automatically for each selected coin based on its maximum
+                  leverage, market conditions and risk.
+                </p>
+              )}
+
+              <div className="space-y-1.5 rounded-lg border border-border bg-background/40 p-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Live preview</span>
+                  {autoLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                  ) : (
+                    <span className="text-muted-foreground">•</span>
+                  )}
+                </div>
+                {autoError ? (
+                  <p className="text-red-400">{autoError}</p>
+                ) : autoLoading && !autoPreview ? (
+                  <p className="text-muted-foreground">Analyzing market opportunities…</p>
+                ) : autoPreview ? (
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <span className="text-muted-foreground">Best opportunity</span>
+                    <span className="font-medium text-foreground">
+                      {autoPreview.symbol} · {autoPreview.side}
+                    </span>
+                    <span className="text-muted-foreground">Market confidence</span>
+                    <span className="font-medium text-foreground">
+                      {autoPreview.confidence != null ? `${Math.round(autoPreview.confidence * 100)}%` : "—"}
+                    </span>
+                    <span className="text-muted-foreground">Score</span>
+                    <span className="font-medium text-foreground">{autoPreview.score}/100</span>
+                    <span className="text-muted-foreground">Maximum allowed leverage</span>
+                    <span className="font-medium text-foreground">
+                      {autoPreview.maxLeverage != null ? `${autoPreview.maxLeverage}x` : "—"}
+                    </span>
+                    <span className="text-muted-foreground">Selected leverage</span>
+                    <span className="font-medium text-foreground">{autoPreview.leverage}x</span>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">
+                    No suitable trading opportunity currently meets the bot&apos;s requirements. It will wait
+                    and re-check on the next analysis cycle.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!settings.autoSelect && (
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="auto-symbol">Symbol</Label>
             <CoinSearchSelect
@@ -486,7 +687,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             />
             {fieldErrors.symbol && <FieldError>{fieldErrors.symbol}</FieldError>}
           </div>
+          )}
 
+          {!settings.autoSelect && (
           <div className="md:col-span-2">
             <div className="flex items-center justify-between gap-2">
               <Label>Coin analyzer</Label>
@@ -576,6 +779,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               </div>
             )}
           </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Timeframe</Label>
@@ -593,6 +797,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             </Select>
           </div>
 
+          {!settings.autoSelect && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="auto-leverage">Leverage</Label>
@@ -617,6 +822,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 : "1x – 100x available"}
             </p>
           </div>
+          )}
 
           <div className="space-y-1.5 md:col-span-2">
             <Label>Capital mode</Label>
@@ -882,6 +1088,12 @@ function leverageValue(current: string, instrument: InstrumentInfo | null): numb
   const value = Number(current);
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function leveragePercentValue(current: string): number {
+  const value = Number(current);
+  if (!Number.isFinite(value)) return 50;
+  return Math.min(100, Math.max(1, Math.round(value)));
 }
 
 function clampLeverage(current: string, instrument: InstrumentInfo): string {

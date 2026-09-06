@@ -76,7 +76,7 @@ export class ProtectiveOrdersService {
 
     if (orderRef) {
       await this.store.updateProtectiveRef(execution.id, "sl", orderRef);
-      await this.syncPositionRefs(execution.id);
+      await this.syncPositionRefs(execution);
       this.recordProtective(execution, "STOP_MARKET", orderRef, "OPEN").catch(() => null);
       return true;
     }
@@ -106,7 +106,7 @@ export class ProtectiveOrdersService {
 
     if (orderRef) {
       await this.store.updateProtectiveRef(execution.id, "tp", orderRef);
-      await this.syncPositionRefs(execution.id);
+      await this.syncPositionRefs(execution);
       this.recordProtective(execution, "TAKE_PROFIT_MARKET", orderRef, "OPEN").catch(() => null);
       return true;
     }
@@ -121,14 +121,14 @@ export class ProtectiveOrdersService {
    * verify a filled TP/SL (position stuck as PROTECTED). Best effort — never
    * allowed to fail protective placement.
    */
-  private async syncPositionRefs(executionId: number): Promise<void> {
+  private async syncPositionRefs(execution: ExecutionRecord): Promise<void> {
     try {
-      const position = await this.positions.getPositionByExecutionId(executionId);
+      const position = await this.positions.getPositionByExecutionId(execution.id);
       if (!position) return;
       await this.positions.updateProtection(
         position.id,
-        position.stopLossOrderId,
-        position.takeProfitOrderId,
+        execution.stopLossOrder.orderId,
+        execution.takeProfitOrder.orderId,
       );
     } catch {
       // best-effort: position sync must never break protective placement

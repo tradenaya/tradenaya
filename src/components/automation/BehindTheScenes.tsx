@@ -22,6 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
+import { displaySymbol, sideLabel } from "./bot-config";
 
 interface BotRecord {
   id: number;
@@ -33,6 +34,7 @@ interface BotRecord {
   status: string;
   desiredStatus: string;
   lastError: string | null;
+  configJson?: string | null;
 }
 
 interface ActivityEntry {
@@ -276,7 +278,13 @@ export function BehindTheScenes() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Bot size={14} className="text-emerald-400" />
-                      <span className="text-sm font-semibold text-foreground">{bot.symbol}</span>
+                      <span className="text-sm font-semibold text-foreground">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
+                      {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                      {sideLabel(cfg.side) && (
+                        <span className={`text-[10px] font-bold ${sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
+                          {sideLabel(cfg.side)}
+                        </span>
+                      )}
                       <span className="text-[11px] text-muted-foreground">
                         {cfg.timeframe} · {bot.leverage}x · {bot.capital} USDT
                       </span>

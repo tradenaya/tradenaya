@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, ChevronRight, Layers, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { Bot, CandlestickChart, ChevronRight, Eye, Layers, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import WalletSummary from "@/components/WalletSummary";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { PositionDetailSheet, type ExchangePosition } from "@/components/positions/PositionDetailSheet";
 import { formatTimestamp } from "@/components/analytics/format";
-import { parseBotConfig, statusMeta, type BotView, fmtMoney } from "@/components/automation/bot-config";
+import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel } from "@/components/automation/bot-config";
 
 type Position = ExchangePosition;
 
@@ -201,6 +201,8 @@ export default function DashboardPage() {
               {runningBots.slice(0, 4).map((bot) => {
                 const cfg = parseBotConfig(bot);
                 const st = statusMeta(bot.status);
+                const sym = displaySymbol(bot, cfg);
+                const dir = sideLabel(cfg.side);
                 return (
                   <div
                     key={bot.id}
@@ -208,10 +210,14 @@ export default function DashboardPage() {
                   >
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-sm font-bold">
-                        {bot.symbol.slice(0, 1)}
+                        {sym.slice(0, 1) || bot.symbol.slice(0, 1)}
                       </div>
                       <div>
-                        <div className="font-semibold text-foreground">{bot.symbol.replace(/USDT$/, "")}</div>
+                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                          <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
+                          {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                          {dir && <Badge className={sideBadge(dir === "Long" ? "LONG" : "SHORT")}>{dir}</Badge>}
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} USDT
                         </div>
@@ -275,6 +281,24 @@ export default function DashboardPage() {
                             {up ? "+" : ""}{money(p.unrealised_pnl)} USDT ({up ? "+" : ""}{_pct.toFixed(2)}%)
                           </span>
                         </div>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 flex-1 gap-1.5 text-xs"
+                          onClick={() => router.push(`/trade/${p.symbol}`)}
+                        >
+                          <CandlestickChart size={13} /> View Chart
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 flex-1 gap-1.5 text-xs"
+                          onClick={() => setSelected(p)}
+                        >
+                          <Eye size={13} /> Details
+                        </Button>
                       </div>
                     </div>
                   );

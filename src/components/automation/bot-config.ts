@@ -23,9 +23,15 @@ export interface BotView {
 }
 
 export interface BotConfig {
+  symbol: string;
   timeframe: string;
   strategy: string;
   leverage: number;
+  autoSelect: boolean;
+  /** Last selected direction for an auto-select bot (LONG/SHORT). */
+  side?: "LONG" | "SHORT";
+  leverageMode: "auto" | "manual";
+  leveragePercent: number;
   capital: number;
   capitalMode: string;
   walletPercent: number | null;
@@ -82,7 +88,7 @@ export function isPaused(statusValue: string): boolean {
   return (PAUSED_STATES as readonly string[]).includes(statusValue);
 }
 
-export function parseBotConfig(bot: Pick<BotView, "configJson" | "leverage" | "capital" | "capitalMode" | "walletPercent" | "strategy">): BotConfig {
+export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "leverage" | "capital" | "capitalMode" | "walletPercent" | "strategy">): BotConfig {
   const raw: Record<string, unknown> = {};
   if (bot.configJson) {
     try {
@@ -92,9 +98,14 @@ export function parseBotConfig(bot: Pick<BotView, "configJson" | "leverage" | "c
     }
   }
   return {
+    symbol: raw.symbol != null ? String(raw.symbol) : String(bot.symbol ?? ""),
     timeframe: String(raw.timeframe ?? "5m"),
     strategy: String(raw.strategy ?? bot.strategy ?? "TradiAuraSmartV1"),
     leverage: Number(raw.leverage ?? bot.leverage),
+    autoSelect: Boolean(raw.autoSelect),
+    side: raw.side === "SHORT" || raw.side === "SELL" ? "SHORT" : raw.side === "LONG" || raw.side === "BUY" ? "LONG" : undefined,
+    leverageMode: raw.leverageMode === "auto" ? "auto" : "manual",
+    leveragePercent: raw.leveragePercent != null ? Number(raw.leveragePercent) : 50,
     capital: Number(raw.capital ?? bot.capital),
     capitalMode: String(raw.capitalMode ?? bot.capitalMode ?? "fixed"),
     walletPercent: raw.walletPercent != null ? Number(raw.walletPercent) : bot.walletPercent ?? null,
@@ -135,4 +146,26 @@ export function fmtMoney(value: number | string | null | undefined, digits?: num
     digits = abs >= 1000 ? 2 : abs >= 1 ? 4 : abs === 0 ? 2 : 6;
   }
   return num.toLocaleString("en-US", { maximumFractionDigits: digits });
+}
+
+/**
+ * The symbol to display for a bot. Auto-select bots store a placeholder in the
+ * `symbol` column but the real currently-selected coin in `config_json`, so we
+ * prefer the config value and only fall back to the DB column when missing.
+ */
+export function displaySymbol(bot: Pick<BotView, "symbol">, cfg: BotConfig): string {
+  const configured = String(cfg.symbol ?? "").trim();
+  if (configured && configured.toUpperCase() !== "AUTO" && configured.toLowerCase() !== "auto-select mode") {
+    return configured.toUpperCase();
+  }
+  const fallback = String(bot.symbol ?? "").trim();
+  return fallback.toUpperCase() === "AUTO" || fallback.toLowerCase() === "auto-select mode" ? "" : fallback.toUpperCase();
+}
+
+/** Normalizes a direction (LONG/SHORT/BUY/SELL) into a Long/Short label, or null. */
+export function sideLabel(side?: string | null): "Long" | "Short" | null {
+  const s = String(side ?? "").toUpperCase();
+  if (s === "LONG" || s === "BUY") return "Long";
+  if (s === "SHORT" || s === "SELL") return "Short";
+  return null;
 }

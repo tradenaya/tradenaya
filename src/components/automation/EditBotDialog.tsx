@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bot } from "lucide-react";
+import { Bot, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,19 @@ import { toast } from "sonner";
 import { parseBotConfig, type BotConfig, type BotView } from "./bot-config";
 import { computeTradePreview, type TradePreview } from "./trade-preview";
 import { TradePreviewPanel } from "./TradePreviewPanel";
+
+interface AutoSelectionPreview {
+  symbol: string;
+  side: string;
+  score: number;
+  price: number | null;
+  confidence: number;
+  atrPct: number | null;
+  trend: string;
+  leverage: number;
+  maxLeverage: number | null;
+  minLeverage: number | null;
+}
 
 export interface EditBotDialogProps {
   bot: BotView;
@@ -81,6 +94,49 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
     });
   }, [wallet, cfg.capitalMode, cfg.capital, cfg.walletPercent, cfg.leverage, cfg.maxRiskPerTrade, price]);
 
+  // ---- Auto-select best coin ----
+  const [autoPreview, setAutoPreview] = useState<AutoSelectionPreview | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoError, setAutoError] = useState("");
+
+  const autoPreviewUrl = useMemo(() => {
+    if (!cfg.autoSelect) return "";
+    const params = new URLSearchParams({
+      timeframe: cfg.timeframe ?? "1h",
+      leverageMode: cfg.leverageMode,
+      leveragePercent: String(cfg.leveragePercent ?? 50),
+      capital: String(cfg.capital || 0),
+      maxRiskPerTrade: String(cfg.maxRiskPerTrade ?? 1),
+    });
+    return `/api/bots/auto-selection?${params.toString()}`;
+  }, [cfg.autoSelect, cfg.timeframe, cfg.leverageMode, cfg.leveragePercent, cfg.capital, cfg.maxRiskPerTrade]);
+
+  useEffect(() => {
+    if (!cfg.autoSelect || !open) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setAutoLoading(true);
+      setAutoError("");
+    });
+    fetch(autoPreviewUrl, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.success) setAutoPreview(json.data?.best ?? null);
+        else setAutoError(json.message || "Failed to preview auto-selection");
+      })
+      .catch(() => {
+        if (!cancelled) setAutoError("Failed to preview auto-selection");
+      })
+      .finally(() => {
+        if (!cancelled) setAutoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoPreviewUrl, cfg.autoSelect, open]);
+
   function update(field: keyof BotConfig, value: unknown) {
     setCfg((prev) => ({ ...prev, [field]: value }));
   }
@@ -97,6 +153,9 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         symbol: bot.symbol,
         timeframe: cfg.timeframe,
         leverage: cfg.leverage,
+        autoSelect: cfg.autoSelect,
+        leverageMode: cfg.leverageMode,
+        leveragePercent: cfg.leverageMode === "manual" ? cfg.leveragePercent : undefined,
         capital: cfg.capital,
         capitalMode: cfg.capitalMode === "percent" ? "percent" : "fixed",
         walletPercent: cfg.capitalMode === "percent" ? cfg.walletPercent : undefined,
@@ -158,16 +217,141 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
+          {/* Auto-select best coin */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="edit-auto-select"
+                  type="checkbox"
+                  checked={cfg.autoSelect}
+                  onChange={(e) => update("autoSelect", e.target.checked)}
+                  className="h-4 w-4 rounded border-border accent-emerald-500"
+                />
+                <Label htmlFor="edit-auto-select" className="mb-0">
+                  Auto-select best coin
+                </Label>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {cfg.autoSelect
+                ? "The bot will automatically select the strongest current trading opportunity and rotate coins each cycle when a better setup exists."
+                : "The bot trades the fixed symbol configured below."}
+            </p>
+
+            {cfg.autoSelect && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Leverage mode</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => update("leverageMode", "auto")}
+                      className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                        cfg.leverageMode === "auto"
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                          : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      Auto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => update("leverageMode", "manual")}
+                      className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                        cfg.leverageMode === "manual"
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                          : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      Manual %
+                    </button>
+                  </div>
+                </div>
+
+                {cfg.leverageMode === "manual" ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label>Leverage preference</Label>
+                      <span className="font-semibold text-foreground">{cfg.leveragePercent}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={cfg.leveragePercent ?? 50}
+                      onChange={(e) => update("leveragePercent", Number(e.target.value))}
+                      className="w-full accent-emerald-500"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {cfg.leveragePercent}% of the selected coin&apos;s maximum leverage.
+                      {autoPreview?.maxLeverage
+                        ? ` If the coin supports ${autoPreview.maxLeverage}x → bot uses ≈ ${Math.round(
+                            (autoPreview.maxLeverage * (cfg.leveragePercent ?? 50)) / 100,
+                          )}x.`
+                        : " The leverage scales to each coin automatically."}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Leverage will be calculated automatically for each selected coin based on its maximum
+                    leverage, market conditions and risk.
+                  </p>
+                )}
+
+                {/* Live preview */}
+                <div className="space-y-1.5 rounded-lg border border-border bg-background/40 p-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Live preview</span>
+                    {autoLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                    ) : (
+                      <span className="text-muted-foreground">•</span>
+                    )}
+                  </div>
+                  {autoError ? (
+                    <p className="text-red-400">{autoError}</p>
+                  ) : autoLoading && !autoPreview ? (
+                    <p className="text-muted-foreground">Analyzing market opportunities…</p>
+                  ) : autoPreview ? (
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                      <span className="text-muted-foreground">Best opportunity</span>
+                      <span className="font-medium text-foreground">
+                        {autoPreview.symbol} · {autoPreview.side}
+                      </span>
+                      <span className="text-muted-foreground">Score</span>
+                      <span className="font-medium text-foreground">{autoPreview.score}/100</span>
+                      <span className="text-muted-foreground">Selected leverage</span>
+                      <span className="font-medium text-foreground">{autoPreview.leverage}x</span>
+                      <span className="text-muted-foreground">Max leverage</span>
+                      <span className="font-medium text-foreground">
+                        {autoPreview.maxLeverage != null ? `${autoPreview.maxLeverage}x` : "—"}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      No suitable trading opportunity currently meets the bot&apos;s requirements. It will wait
+                      and re-check on the next cycle.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
           <div className="grid gap-1.5">
             <Label>Timeframe</Label>
             <Input value={cfg.timeframe ?? ""} onChange={(e) => update("timeframe", e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="grid gap-1.5">
-              <Label>Leverage</Label>
-              <Input type="number" min={1} value={cfg.leverage ?? ""} onChange={(e) => update("leverage", Number(e.target.value))} />
-            </div>
+          <div className={`grid gap-3.5 ${cfg.autoSelect ? "grid-cols-1" : "grid-cols-2"}`}>
+            {!cfg.autoSelect && (
+              <div className="grid gap-1.5">
+                <Label>Leverage</Label>
+                <Input type="number" min={1} value={cfg.leverage ?? ""} onChange={(e) => update("leverage", Number(e.target.value))} />
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label>Capital (USDT)</Label>
               <Input type="number" min={0} value={cfg.capital ?? ""} onChange={(e) => update("capital", Number(e.target.value))} />

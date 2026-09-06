@@ -5,6 +5,7 @@ import { OrderExecutorService } from "@/automation/executor/order-executor";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import type { OpenOrderSnapshot, OpenPositionSnapshot, RiskDecision, RiskManagerInput } from "@/automation/risk/types";
 import type { AutomationConfig } from "@/automation/types";
+import type { CoinAutoSelector, SelectedOpportunity } from "@/automation/coinauto/coin-auto-selector";
 import type { BotLifecycleService, BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { ExecutionRecord } from "@/automation/executor/types";
 import type { PositionManagerConfig } from "@/automation/position/PositionManagerTypes";
@@ -74,6 +75,8 @@ export interface AnalysisCycleDependencies {
   executor: OrderExecutorService;
   config: Required<SchedulerConfig>;
   refreshLease?: (botId: number) => Promise<boolean>;
+  /** Server-side coin auto selector (auto-select best coin mode). */
+  coinAutoSelector?: CoinAutoSelector;
 }
 
 export class AnalysisCycleRunner {
@@ -108,13 +111,46 @@ export class AnalysisCycleRunner {
       return this.handleCycleError(bot, error);
     }
 
+    // Auto-select best coin: resolve the strongest current opportunity before
+    // running the engine. Every downstream step (planner, risk, executor) keys
+    // off config.symbol / plan.symbol, so overriding them here routes the whole
+    // trade to the selected coin without touching position-manager logic. If no
+    // valid opportunity exists, wait for the next analysis cycle (rotation).
+    let selected: SelectedOpportunity | undefined;
+    if (config.autoSelect && this.deps.coinAutoSelector) {
+      const instrumentResult = await this.deps.coinAutoSelector
+        .selectBestOpportunity(bot.userId, config)
+        .catch((error) => {
+          console.error(`[auto-select] failed for bot ${bot.id}`, error);
+          return null;
+        });
+      if (!instrumentResult) {
+        const message = "No suitable trading opportunity currently meets the bot's requirements. Will re-check next cycle.";
+        await this.completeAnalysis(bot, "WAIT", message);
+        liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
+        return { executed: true, state: "RUNNING", action: "ANALYZED", message };
+      }
+      selected = instrumentResult;
+      config = { ...config, symbol: instrumentResult.symbol, leverage: instrumentResult.leverage };
+      await this.deps.events.emit({
+        type: "ANALYSIS_STARTED",
+        botId: bot.id,
+        userId: bot.userId,
+        message: `Auto-selected ${instrumentResult.side} ${instrumentResult.symbol} (${instrumentResult.leverage}x, score ${instrumentResult.opportunity.score})`,
+        data: { selectedSymbol: instrumentResult.symbol, side: instrumentResult.side, leverage: instrumentResult.leverage },
+      });
+      void this.persistAutoSelection(bot.id, instrumentResult);
+    }
+    // Use the selected coin for messaging when auto-select is active.
+    const cycleSymbol = selected ? selected.symbol : bot.symbol;
+
     let engineResult;
     try {
       engineResult = await this.deps.engine(bot.userId).run(config, (step) => {
         liveActivityHub.publish({
           botId: bot.id,
           userId: bot.userId,
-          symbol: bot.symbol,
+          symbol: cycleSymbol,
           phase: step.phase,
           message: step.message,
           detail: step.detail,
@@ -127,9 +163,9 @@ export class AnalysisCycleRunner {
     await this.deps.refreshLease?.(bot.id);
 
     if (engineResult.signal === "WAIT" || !engineResult.plan) {
-      const message = engineResult.analysis?.summary ?? `No valid opportunity for ${bot.symbol}`;
+      const message = engineResult.analysis?.summary ?? `No valid opportunity for ${cycleSymbol}`;
       await this.completeAnalysis(bot, "WAIT", message);
-      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
+      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message });
       return { executed: true, state: "RUNNING", action: "ANALYZED", message };
     }
 
@@ -138,8 +174,8 @@ export class AnalysisCycleRunner {
     const entry = plan.limitPrice ?? plan.entryPrice ?? engineResult.analysis?.price;
     const priceText = entry != null && Number.isFinite(entry) ? `@ ${entry}` : "";
     const confidenceText = plan.confidence != null ? `, confidence ${Math.round(plan.confidence * 100)}%` : "";
-    await this.deps.events.emit({ type: "TRADE_PLANNED", botId: bot.id, userId: bot.userId, message: `${plan.side ?? plan.action} ${bot.symbol} ${priceText}${confidenceText}`, data: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence, analysis: engineResult.analysis } });
-    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "plan", message: `${plan.side ?? plan.action} ${bot.symbol} ${priceText}${confidenceText}`, detail: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence } });
+    await this.deps.events.emit({ type: "TRADE_PLANNED", botId: bot.id, userId: bot.userId, message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, data: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence, analysis: engineResult.analysis } });
+    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "plan", message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, detail: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence } });
 
     const risk = await this.evaluateRisk(bot, config, plan);
     if (!risk.decision.approved || risk.decision.positionSize <= 0) {
@@ -462,6 +498,34 @@ export class AnalysisCycleRunner {
   private async toDesiredTerminal(bot: BotRuntimeState): Promise<void> {
     const desired = bot.desiredStatus ?? "RUNNING";
     await this.deps.stateManager.transition(bot.id, this.asState(bot.status), desired === "PAUSED" ? "PAUSED" : "STOPPED");
+  }
+
+  /**
+   * Persist the currently selected auto coin so that after a restart the bot
+   * reflects its latest symbol / direction / leverage / cycle state without
+   * waiting for the next analysis to complete.
+   */
+  private async persistAutoSelection(botId: number, selected: SelectedOpportunity): Promise<void> {
+    try {
+      const current = await this.deps.store.getBot(botId);
+      if (!current) return;
+      let config: AutomationConfig;
+      try {
+        config = this.loadConfig(current);
+      } catch {
+        return;
+      }
+      const updated: AutomationConfig = {
+        ...config,
+        symbol: selected.symbol,
+        side: selected.side,
+        leverage: selected.leverage,
+        leverageMode: config.leverageMode ?? "auto",
+      };
+      await this.deps.lifecycle.setConfig(botId, JSON.stringify(updated));
+    } catch (error) {
+      console.error(`[auto-select] failed to persist selection for bot ${botId}`, error);
+    }
   }
 
   private skipped(message: string): CycleResult {
