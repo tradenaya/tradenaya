@@ -7,12 +7,16 @@ export async function register() {
     } catch (e) {
       console.error("PositionManager bootstrap: failed to ensure tables", e);
     }
-    // ensureStarted is idempotent — it restarts the monitor after a hot reload
-    // while never double-starting it. Recovery never assumes positions finished
-    // just because this process was previously stopped.
-    positionMonitor.ensureStarted().catch((e) => {
-      console.error("PositionManager: failed to start monitor", e);
-    });
+    // Reconciliation MUST finish before the scheduler's first analysis cycle so
+    // a bot whose position was already closed on the exchange is never re-entered
+    // into a new trade while the DB still thinks it is active. ensureStarted is
+    // idempotent (never double-starts after hot reload) and runs the full
+    // exchange→DB recovery sweep synchronously before resolving.
+    try {
+      await positionMonitor.ensureStarted();
+    } catch (e) {
+      console.error("PositionManager: failed to start monitor (recovery sweep aborted — scheduler will still start)", e);
+    }
 
     const { botScheduler } = await import("@/automation/scheduler/BotScheduler");
     botScheduler.start().catch((e) => {

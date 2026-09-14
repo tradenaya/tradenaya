@@ -1,6 +1,5 @@
 import type { CoinSwitchClientLike, CloseDetectionResult, PositionSnapshot } from "./PositionManagerTypes";
-
-const FILLED_STATUSES = new Set(["FILLED", "CLOSED", "ALL_DONE", "EXECUTED", "FILLED_CLOSED"]);
+import { isFullyFilled } from "@/automation/executor/order-status";
 
 export class SLMonitor {
   constructor(private readonly client: CoinSwitchClientLike) {}
@@ -23,7 +22,7 @@ export class SLMonitor {
     const order = await this.client.getOrderStatus(position.userId, position.stopLossOrderId).catch(() => null);
     const status = order?.status ?? "";
 
-    if (FILLED_STATUSES.has(status)) {
+    if (isFullyFilled(order?.status)) {
       return {
         shouldClose: true,
         reason: "STOP_LOSS",

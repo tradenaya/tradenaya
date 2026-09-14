@@ -66,6 +66,10 @@ export interface ExecutionRecord {
   takeProfit: number | null;
   quantity: number | null;
   filledQuantity: number | null;
+  /** Quantity still resting on the exchange (quantity minus filled). Persisted so partial fills survive restarts. */
+  remainingQuantity: number | null;
+  /** Actual average fill price reported by the exchange (persisted, survives restarts). */
+  avgEntryPrice: number | null;
   leverage: number | null;
   expiresAt: number | null;
   positionId: string | null;
@@ -86,6 +90,8 @@ export interface OrderExecutorResult {
   slOrderId: string | null;
   tpOrderId: string | null;
   filledQuantity: number | null;
+  /** Quantity still resting on the exchange (order quantity minus filled), or null when not computable. */
+  remainingQuantity?: number | null;
   protectiveStatus: ProtectiveStatus;
   requiresEmergencyProtection: boolean;
   message: string;
@@ -104,6 +110,7 @@ export interface ExecutionNotification {
     | "POSITION_TAKE_PROFIT"
     | "POSITION_STOP_LOSS"
     | "POSITION_MANUAL_CLOSE"
+    | "POSITION_LIQUIDATED"
     | "POSITION_UNPROTECTED"
     | "POSITION_TRAILING";
   botId: number;

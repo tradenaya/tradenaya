@@ -1,6 +1,6 @@
 import { ExecutionStore } from "@/automation/executor/store";
 import type { ExecutionNotification } from "@/automation/executor/types";
-import type { CloseDetectionResult, PositionManagerConfig, PositionRecord, PositionSnapshot } from "./PositionManagerTypes";
+import type { CloseDetectionResult, PositionManagerConfig, PositionRecord, PositionSnapshot, PositionSyncSummary } from "./PositionManagerTypes";
 import { PositionStateManager } from "./PositionStateManager";
 import { PositionPnLCalculator } from "./PositionPnLCalculator";
 import { ProtectionValidator } from "./ProtectionValidator";
@@ -11,10 +11,11 @@ import { PositionRecovery } from "./PositionRecovery";
 import { PositionStore } from "./PositionStore";
 import { ProtectiveOrdersService } from "@/automation/executor/services/protective-orders";
 import { coinswitchClient, CoinSwitchClient, type ExchangeOrder, type ExchangePosition } from "@/automation/executor/client";
+import { classifyStatus } from "@/automation/executor/order-status";
 import { reconcileClose } from "./close-accounting";
 import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import { executionStore } from "@/automation/executor/store";
-import { detectExecutedClose, confirmExternalClose } from "./executed-close";
+import { confirmExternalClose, detectExecutedClose, detectLiquidation } from "./executed-close";
 import { evaluateEntryValidity } from "./EntryValidity";
 import { serverMarketDataService } from "@/automation/market/service";
 import { normalizeInterval } from "@/automation/market/normalizer";
@@ -84,7 +85,6 @@ export class PositionMonitor {
     // Shutdown must NEVER close an open position or cancel SL/TP orders.
     // Exchange-side protective orders are independent of this server and remain
     // active on CoinSwitch after this process exits.
-    console.log("[SHUTDOWN] PositionMonitor stopped — NO position close / order cancel performed. Exchange-side SL/TP remain active.");
   }
 
   /**
@@ -95,6 +95,17 @@ export class PositionMonitor {
    */
   async ensureStarted(): Promise<void> {
     if (!this.running) await this.start();
+  }
+
+  /**
+   * Manual exchange→DB reconciliation sweep, exposed to the "Sync Exchange"
+   * button / API endpoint. Waits for the monitor loop to be up, then runs the
+   * exact same recovery pass as the boot-time sweep and returns what changed.
+   * Idempotent: an already-consistent position is verified and left untouched.
+   */
+  async syncFromExchange(): Promise<PositionSyncSummary> {
+    await this.ensureStarted();
+    return await this.recovery.recoverAllActive();
   }
 
   async tick(): Promise<void> {
@@ -205,19 +216,60 @@ export class PositionMonitor {
       return;
     }
 
+    const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
     const order = await this.client.getOrderStatus(position.userId, orderId).catch(() => null);
     const status = order?.status ?? "";
-    const open = order ? !["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"].includes(status) : true;
+    const kind = classifyStatus(order?.status);
+    const open = kind === "OPEN" || kind === "UNKNOWN";
 
-    if (["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(status)) {
+    if (kind === "FILLED") {
+      // Full fill — the order is done and the position is open for the full quantity.
       const entryPrice = snapshot.exchangePosition?.entryPrice ?? order?.raw?.avg_execution_price ?? order?.raw?.avg_price ?? null;
-      await this.store.updateEntry(position.id, entryPrice, snapshot.exchangePosition?.quantity ?? order?.raw?.exec_quantity ?? null, snapshot.exchangePosition?.positionId ?? null, orderId);
-      await this.stateManager.transition(position.id, "ENTRY_PENDING", "ENTRY_EXECUTED");
+      const filledQuantity = this.filledQuantityFromOrder(order, snapshot);
+      await this.store.updateEntry(position.id, entryPrice, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null, snapshot.exchangePosition?.positionId ?? null, orderId);
+      // Full fill → no resting remainder; persist the split + avg fill price.
+      await this.store.updateFillQuantities(position.id, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null, 0);
+      if (filledQuantity != null) await this.executionStore.updateFill(position.executionId, filledQuantity, 0, entryPrice);
       await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
-      await this.log(position, "ENTRY_EXECUTED", `entry order ${orderId} filled`);
-    } else if (["CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"].includes(status)) {
+      await this.stateManager.transition(position.id, "ENTRY_PENDING", "ENTRY_EXECUTED");
+      await this.log(position, "ENTRY_EXECUTED", `entry order ${orderId} filled (${filledQuantity ?? "n/a"})`);
+    } else if (kind === "PARTIAL") {
+      // Partial fill: a position exists for the filled portion while the
+      // remainder keeps resting. Track the ACTUAL filled quantity and the
+      // remaining quantity instead of treating the order as fully filled; the
+      // remainder continues to be monitored to fill/expiry (handleOpenPosition).
+      const filledQuantity = this.filledQuantityFromOrder(order, snapshot);
+      const quantity = execution?.quantity ?? position.quantity ?? snapshot.exchangePosition?.quantity ?? null;
+      const remainingQuantity = filledQuantity != null && quantity != null ? Math.max(0, quantity - filledQuantity) : null;
+      const entryPrice = snapshot.exchangePosition?.entryPrice ?? order?.raw?.avg_execution_price ?? order?.raw?.avg_price ?? null;
+      await this.store.updateEntry(position.id, entryPrice, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null, snapshot.exchangePosition?.positionId ?? null, orderId);
+      await this.store.updateFillQuantities(position.id, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null, remainingQuantity);
+      if (filledQuantity != null) await this.executionStore.updateFill(position.executionId, filledQuantity, remainingQuantity, entryPrice);
+      await this.executionStore.updateState(position.executionId, "PARTIALLY_FILLED");
+      await this.stateManager.transition(position.id, "ENTRY_PENDING", "ENTRY_EXECUTED");
+      await this.log(position, "PARTIAL_EXECUTION", `entry order ${orderId} partially filled: ${filledQuantity ?? "n/a"}${remainingQuantity != null ? ` (${remainingQuantity} remaining — remainder stays resting until fill or expiry)` : ""}`);
+    } else if (kind === "CANCELLED") {
       await this.closeUnfilledEntry(position, `entry order ${status}`);
     } else if (open) {
+      // Configured expiry first (deterministic, orderExpiryMinutes persisted as
+      // expires_at); only then the existing adaptive EntryValidity rules.
+      if (this.restingEntryExpired(position, execution)) {
+        const cancelled = await this.client.cancelOrder(position.userId, orderId).catch(() => false);
+        if (cancelled) {
+          await this.closeUnfilledEntry(position, "entry order expired (configured orderExpiryMinutes elapsed)");
+          liveActivityHub.publish({
+            botId: position.botId,
+            userId: position.userId,
+            symbol: position.symbol,
+            phase: "lifecycle",
+            message: `Resting entry expired after the configured orderExpiryMinutes and was cancelled. Re-planning on next cycle.`,
+          });
+        } else {
+          await this.log(position, "ENTRY_EXPIRY", `cancel failed on expiry — will re-check on the next validity cycle`);
+        }
+        return;
+      }
+
       const reason = await this.entryInvalidReason(position, snapshot.currentPrice);
       if (!reason) return;
       const cancelled = await this.client.cancelOrder(position.userId, orderId).catch(() => false);
@@ -234,6 +286,54 @@ export class PositionMonitor {
         await this.log(position, "ENTRY_EXPIRY", `cancel failed — ${reason}; will re-check on the next validity cycle`);
       }
     }
+  }
+
+  /**
+   * Cancel a still-resting ENTRY order remainder once its configured expiry
+   * (orderExpiryMinutes → expires_at) is reached. This covers partial fills:
+   * the position for the filled portion is already being managed, but the
+   * unfilled remainder must not sit on the exchange forever — it is cancelled
+   * exactly at the configured expiry like any other resting LIMIT entry.
+   */
+  private async expireRestingEntryRemainder(snapshot: PositionSnapshot): Promise<void> {
+    const { position } = snapshot;
+    const orderId = position.entryOrderId;
+    if (!orderId) return;
+
+    const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
+    if (!execution?.expiresAt || Date.now() < execution.expiresAt) return;
+
+    const order = await this.client.getOrderStatus(position.userId, orderId).catch(() => null);
+    const kind = classifyStatus(order?.status);
+    if (kind === "FILLED" || kind === "CANCELLED") return;
+
+    const cancelled = await this.client.cancelOrder(position.userId, orderId).catch(() => false);
+    if (cancelled) {
+      await this.log(position, "ENTRY_EXPIRY", `entry order remainder expired after the configured orderExpiryMinutes and was cancelled (remaining ${this.remainingQuantity(position, execution) ?? "n/a"})`);
+    } else {
+      await this.log(position, "ENTRY_EXPIRY", `expiry cancel failed for entry order remainder ${orderId}; will retry`);
+    }
+  }
+
+  /** Total order quantity minus the actual filled quantity, when both are known. */
+  private remainingQuantity(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord | null): number | null {
+    const quantity = execution?.quantity ?? position.quantity ?? null;
+    const filled = position.filledQuantity ?? null;
+    return quantity != null && filled != null ? Math.max(0, quantity - filled) : null;
+  }
+
+  /** Actual executed quantity reported by the exchange for the entry order. */
+  private filledQuantityFromOrder(order: { raw?: unknown } | null, snapshot: PositionSnapshot): number | null {
+    const raw = (order?.raw ?? {}) as Record<string, unknown>;
+    const value = raw.exec_quantity ?? raw.filled_quantity ?? raw.executed_quantity;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    return snapshot.exchangePosition?.quantity ?? null;
+  }
+
+  private restingEntryExpired(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord | null): boolean {
+    if (!execution?.expiresAt) return false;
+    return Date.now() >= execution.expiresAt;
   }
 
   /**
@@ -320,6 +420,8 @@ export class PositionMonitor {
 
   private async handleOpenPosition(snapshot: PositionSnapshot): Promise<void> {
     const { position } = snapshot;
+
+    await this.expireRestingEntryRemainder(snapshot);
 
     if (position.state === "CLOSING") {
       const current = await this.store.getPosition(position.id);
@@ -482,17 +584,39 @@ export class PositionMonitor {
       return;
     }
 
-    await this.stateManager.transition(position.id, position.state, "CLOSING", "position no longer exists on exchange (close confirmed)");
+    let reason: CloseDetectionResult["reason"] = confirmed.reason ?? "MANUAL_CLOSE";
+    let exitPrice: number | null = confirmed.price ?? snapshot.currentPrice ?? snapshot.exchangePosition?.markPrice ?? null;
+    let closeDetail = "position closed externally on exchange";
+    let closedAtMs: number | null = confirmed.closedAtMs;
+
+    // Liquidation forensic check: an unclassified close whose live price has
+    // already traded past the estimated liquidation boundary (or whose realized
+    // P&L wiped the full margin) was an exchange LIQUIDATION, not a manual
+    // close. Book it honestly so analytics reflect the true failure mode (an SL
+    // beyond the liquidation boundary is the classic "placeholder stop" that can
+    // never execute and silently drains the account as price blows through it).
+    if (reason === "MANUAL_CLOSE") {
+      const liq = await detectLiquidation(this.client, position.userId, position, snapshot.currentPrice);
+      if (liq.suspected) {
+        reason = "LIQUIDATION";
+        exitPrice = exitPrice ?? liq.boundary;
+        closeDetail = `price traded beyond the liquidation boundary (~${liq.boundary ?? "unknown"}) — position was liquidated on the exchange`;
+        closedAtMs = closedAtMs ?? liq.closedAtMs;
+        await this.log(position, "POSITION_LIQUIDATED", `${position.symbol} was liquidated on the exchange: ${liq.reasoning}`);
+      }
+    }
+
+    await this.stateManager.transition(position.id, position.state, "CLOSING", closeDetail);
     const close: CloseDetectionResult = {
       shouldClose: true,
-      reason: confirmed.reason ?? "MANUAL_CLOSE",
-      exitPrice: confirmed.price ?? snapshot.currentPrice ?? snapshot.exchangePosition?.markPrice ?? null,
-      detail: "position manually closed on exchange",
+      reason,
+      exitPrice,
+      detail: closeDetail,
     };
-    await this.finalizeClose(snapshot, close);
+    await this.finalizeClose(snapshot, close, closedAtMs != null ? new Date(closedAtMs).toISOString() : undefined);
   }
 
-  private async finalizeClose(snapshot: PositionSnapshot, close: CloseDetectionResult): Promise<void> {
+  private async finalizeClose(snapshot: PositionSnapshot, close: CloseDetectionResult, closedAt?: string): Promise<void> {
     const { position } = snapshot;
     const current = await this.store.getPosition(position.id);
     if (!current || current.state === "CLOSED") return;
@@ -524,7 +648,7 @@ export class PositionMonitor {
       estimated: true,
     }));
 
-    await this.store.markClose(current.id, exitPrice ?? 0, close.reason, accounting.realizedPnl, accounting.commission);
+    await this.store.markClose(current.id, exitPrice ?? 0, close.reason, accounting.realizedPnl, accounting.commission, closedAt);
     await this.store.recordCloseSummary({
       position: current,
       exitPrice,
@@ -598,7 +722,7 @@ export class PositionMonitor {
     const cancelIds: string[] = [];
     if (reason === "TAKE_PROFIT" && position.stopLossOrderId) cancelIds.push(position.stopLossOrderId);
     if (reason === "STOP_LOSS" && position.takeProfitOrderId) cancelIds.push(position.takeProfitOrderId);
-    if (reason === "MANUAL_CLOSE") {
+    if (reason === "MANUAL_CLOSE" || reason === "LIQUIDATION") {
       if (position.stopLossOrderId) cancelIds.push(position.stopLossOrderId);
       if (position.takeProfitOrderId) cancelIds.push(position.takeProfitOrderId);
     }

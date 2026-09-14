@@ -11,6 +11,7 @@ import type {
   OrderExecutorResult,
 } from "./types";
 import type { TradePlan } from "@/automation/planner/types";
+import { evaluateLiquidationSafety } from "@/automation/risk/liquidation-safety";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import {
   telegramEntryOrder,
@@ -160,14 +161,22 @@ export class OrderExecutorService {
     const instrument = await this.client.getInstrumentInfo(input.userId, input.plan.symbol ?? "").catch(() => null);
     const normalized = normalizeEntryOrder(instrument, input);
 
-    // Preflight margin guard: verify the order's required exchange margin is
-    // covered by the account's *available* (free, unlocked) balance. Without
-    // this, the exchange silently rejects with a cryptic "Insufficient balance"
-    // that becomes a confusing bot.lastError, even though the user sees USDT in
-    // their wallet (some of which can be locked in open orders/positions).
-    const preflight = await this.checkFreeMargin(input, normalized);
-    if (!preflight.ok) {
-      await this.notify("ENTRY_CANCELLED", input, -1, preflight.message);
+    // Liquidation-safety gate: re-verify at the point of no return. Once the
+    // entry order is on the book the stop-loss path cannot be changed, so a
+    // stop that sits beyond the liquidation boundary MUST block the entry here
+    // (after liquidation the placeholder but live SL keeps draining the account).
+    // This is MANDATORY and unconditional: ANY !ok verdict — including a boundary
+    // that cannot be determined — rejects the trade (fail safe), with no
+    // configuration able to disable or weaken the check.
+    const liq = evaluateLiquidationSafety({
+      side: (input.plan.side ?? input.plan.action) as "BUY" | "SELL",
+      entryPrice: normalized.plan?.limitPrice ?? input.plan.limitPrice,
+      stopLoss: input.plan.stopLoss,
+      leverage: input.leverage,
+    });
+    if (!liq.ok) {
+      const message = `Order blocked by the liquidation-safety gate: ${liq.reason}`;
+      await this.notify("ENTRY_CANCELLED", input, 0, message);
       return {
         success: false,
         executionId: null,
@@ -176,10 +185,53 @@ export class OrderExecutorService {
         slOrderId: null,
         tpOrderId: null,
         filledQuantity: null,
+        remainingQuantity: null,
+        protectiveStatus: "NONE",
+        requiresEmergencyProtection: false,
+        message,
+      };
+    }
+
+    // Preflight margin guard: verify the order's required exchange margin is
+    // covered by the account's *available* (free, unlocked) balance. Without
+    // this, the exchange silently rejects with a cryptic "Insufficient balance"
+    // that becomes a confusing bot.lastError, even though the user sees USDT in
+    // their wallet (some of which can be locked in open orders/positions).
+    const preflight = await this.checkFreeMargin(input, normalized);
+    if (!preflight.ok) {
+      await this.notify("ENTRY_CANCELLED", input, 0, preflight.message);
+      return {
+        success: false,
+        executionId: null,
+        state: "CANCELLED",
+        entryOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        filledQuantity: null,
+        remainingQuantity: null,
         protectiveStatus: "NONE",
         requiresEmergencyProtection: false,
         message: preflight.message,
       };
+    }
+
+    const executionKey = this.buildKey(input);
+
+    // Idempotency fast-path: if a LIVE execution already exists for this exact
+    // fingerprint (same user/bot/symbol/side/price), never create a competing
+    // one. A retry, a duplicate worker, or an overlap across a restart must
+    // return the existing in-flight entry's state instead of submitting again.
+    const existingActive = await this.store.getActiveByExecutionKey(executionKey).catch(() => null);
+    if (existingActive) {
+      return this.result(
+        existingActive.id,
+        existingActive.state,
+        existingActive.filledQuantity,
+        existingActive.protectiveStatus,
+        false,
+        `Duplicate entry prevented — an identical entry for ${input.plan.symbol ?? ""} is already in flight (execution ${existingActive.id}).`,
+        existingActive.remainingQuantity,
+      );
     }
 
     const executionId = await this.store.createExecution({
@@ -187,7 +239,7 @@ export class OrderExecutorService {
       userId: input.userId,
       symbol: input.plan.symbol ?? "",
       side: (input.plan.side ?? input.plan.action) as "BUY" | "SELL",
-      executionKey: this.buildKey(input),
+      executionKey,
       limitPrice: normalized.plan?.limitPrice ?? input.plan.limitPrice,
       stopLoss: input.plan.stopLoss,
       takeProfit: input.plan.takeProfit,
@@ -195,6 +247,22 @@ export class OrderExecutorService {
       leverage: input.leverage,
       expiresAt: input.plan.expiryTime,
     });
+
+    // Atomic claim on the fingerprint BEFORE any order placement. Exactly one
+    // worker wins; a losing worker cancels its own execution row and never
+    // touches the exchange — guaranteeing concurrent workers cannot submit the
+    // same order simultaneously even if the fast-path check raced.
+    const claim = await this.store
+      .claimSubmission({ userId: input.userId, botId: input.botId, executionKey, executionId })
+      .catch(() => null);
+    if (!claim || !claim.ok) {
+      const message = claim?.holderExecutionId
+        ? `Duplicate entry prevented — an identical entry is already being placed by execution ${claim.holderExecutionId}.`
+        : "Duplicate entry prevented — an identical entry is already in flight.";
+      await this.store.updateState(executionId, "CANCELLED", message);
+      await this.notify("ENTRY_CANCELLED", input, executionId, message);
+      return this.result(executionId, "CANCELLED", null, "NONE", false, message);
+    }
 
     try {
       if (!normalized.ok || normalized.quantity === undefined || !normalized.plan) {
@@ -221,14 +289,36 @@ export class OrderExecutorService {
         leverage: input.leverage,
       }));
 
-      const { filled, filledQuantity } = await this.lifecycle.pollEntryUntilFilled(executionId, input.userId, orderId);
+      const poll = await this.lifecycle.pollEntryUntilFilled(
+        executionId,
+        input.userId,
+        orderId,
+        { quantity: normalized.ok && normalized.quantity !== undefined ? normalized.quantity : input.quantity },
+      );
 
-      if (!filled) {
-        await this.notify("ENTRY_CANCELLED", input, executionId, "Entry order was not filled and has been cancelled");
-        return this.result(executionId, "CANCELLED", null, "NONE", false, "Entry order was not filled and has been cancelled");
+      // Exchange reported a terminal outcome (cancelled / rejected / expired).
+      if (poll.terminal) {
+        await this.notify("ENTRY_CANCELLED", input, executionId, `Entry order ${poll.terminal}`);
+        return this.result(executionId, "CANCELLED", null, "NONE", false, `Entry order ${poll.terminal}`, poll.remainingQuantity);
       }
 
+      // The order is still resting on the exchange (not yet filled, possibly
+      // partially filled). Never cancel it here just because the short inline
+      // polling window ended — the server-side PositionMonitor keeps watching
+      // it until it fills, invalidates, is explicitly cancelled, or reaches the
+      // configured orderExpiryMinutes (persisted as expires_at).
+      if (poll.resting) {
+        const message =
+          poll.filledQuantity != null
+            ? `Entry partially filled (${poll.filledQuantity}${poll.remainingQuantity != null ? `, ${poll.remainingQuantity} remaining` : ""}); remainder resting on the exchange — monitored server-side until fill or expiry`
+            : `Entry order resting for ${input.plan.symbol ?? ""} — monitored server-side until fill, invalidation, cancellation or expiry`;
+        await this.notify("ENTRY_SUBMITTED", input, executionId, message);
+        return this.result(executionId, "MONITORING_ENTRY", poll.filledQuantity, "NONE", false, message, poll.remainingQuantity);
+      }
+
+      // Fully filled.
       await this.notify("ENTRY_FILLED", input, executionId, `Entry filled for ${input.plan.symbol ?? ""}`);
+      const filledQuantity = poll.filledQuantity ?? normalized.quantity;
       const openedQty = filledQuantity ?? normalized.quantity;
       void dispatchTelegram(`exec:${executionId}:position_open`, "POSITION_OPENED", telegramPositionOpened({
         symbol: input.plan.symbol,
@@ -351,7 +441,6 @@ export class OrderExecutorService {
     if (available != null && Number.isFinite(available) && requiredMargin <= spendable + 1e-9) {
       console.warn("[preflight] margin looks affordable within headroom, but the exchange may still reject —", rawLog);
     } else {
-      console.log("[preflight] margin check", rawLog);
     }
 
     // If we cannot read the live balance (e.g. a transient API failure), do not
@@ -424,6 +513,7 @@ export class OrderExecutorService {
     protectiveStatus: OrderExecutorResult["protectiveStatus"],
     requiresEmergencyProtection: boolean,
     message: string,
+    remainingQuantity: number | null = null,
   ): Promise<OrderExecutorResult> {
     const execution = await this.store.getExecution(executionId);
     return {
@@ -434,6 +524,7 @@ export class OrderExecutorService {
       slOrderId: execution?.stopLossOrder.orderId ?? null,
       tpOrderId: execution?.takeProfitOrder.orderId ?? null,
       filledQuantity: filledQuantity ?? execution?.filledQuantity ?? null,
+      remainingQuantity: remainingQuantity ?? null,
       protectiveStatus,
       requiresEmergencyProtection,
       message,

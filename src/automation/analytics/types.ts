@@ -513,6 +513,7 @@ export function normalizeExitReason(reason: string | null | undefined, trailingA
     case "MANUAL":
       return "MANUAL_CLOSE";
     case "EXCHANGE_CLOSE":
+    case "LIQUIDATION":
       return "EXCHANGE_CLOSE";
     case "END_OF_BACKTEST":
       return "END_OF_BACKTEST";

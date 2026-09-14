@@ -16,7 +16,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: any) {
-    console.log("TICKER ERROR", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

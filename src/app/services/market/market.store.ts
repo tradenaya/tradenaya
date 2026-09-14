@@ -20,10 +20,6 @@ export function updateMarketPrice(
   };
 
 
-  console.log(
-    "PRICE UPDATED",
-    prices[symbol]
-  );
 
 }
 

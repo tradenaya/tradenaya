@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Power, Settings2 } from "lucide-react";
+import { Loader2, Power, RefreshCw, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { CreateBotDialog } from "@/components/automation/CreateBotDialog";
 
@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
-import { parseBotConfig, displaySymbol, sideLabel } from "@/components/automation/bot-config";
+import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 
 interface BotRecord {
   id: number;
@@ -22,6 +22,7 @@ interface BotRecord {
   status: string;
   desiredStatus: string;
   lastError: string | null;
+  name?: string | null;
   configJson?: string | null;
 }
 
@@ -31,6 +32,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
   const [bots, setBots] = useState<BotRecord[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [confirmTurnOff, setConfirmTurnOff] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [schedulerActive, setSchedulerActive] = useState<boolean | null>(null);
@@ -146,6 +148,37 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
     onCreated?.();
   }
 
+  /**
+   * Manual exchange→DB reconciliation. Runs a full recovery sweep server-side:
+   * every active position is verified against the exchange and any position the
+   * exchange reports as gone is closed in the DB with its true exit. Safe to
+   * press repeatedly.
+   */
+  async function syncFromExchange() {
+    setSyncing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/bots/sync", { method: "POST", cache: "no-store" });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message || "Sync failed");
+      const s = json.data ?? {};
+      const parts: string[] = [];
+      if (s.confirmedClosed > 0) parts.push(`${s.confirmedClosed} closed`);
+      if (s.keptOpen > 0) parts.push(`${s.keptOpen} open`);
+      if (s.failed > 0) parts.push(`${s.failed} failed`);
+      const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+      toast.success(`Synced ${s.positionsChecked ?? 0} position(s) with the exchange${detail}`);
+      await loadBots();
+      onCreated?.();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to sync with exchange";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const runningCount = botList.filter((b) => runningStates.includes(b.desiredStatus ?? b.status)).length;
 
   if (bots === null) {
@@ -185,13 +218,22 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
               {serverOffline && anyRunning
                 ? "The trading engine is not running on the server. Start the server and keep it open — automation only runs while the server is online."
                 : anyRunning
-                  ? `${runningCount} bot${runningCount === 1 ? "" : "s"} active — TradeNaya trades for you.`
-                  : "TradeNaya trades for you. Turn it on and it runs your strategy automatically."}
+                  ? `${runningCount} bot${runningCount === 1 ? "" : "s"} active — Tradenaya trades for you.`
+                  : "Tradenaya trades for you. Turn it on and it runs your strategy automatically."}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void syncFromExchange()}
+            disabled={syncing || busy}
+            title="Reconcile positions with the exchange — any position the exchange reports as closed is reflected here"
+          >
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync Exchange
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} title="Edit strategy settings">
             <Settings2 size={14} /> Settings
           </Button>
@@ -224,12 +266,14 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
               const cfg = parseBotConfig(bot);
               const sym = displaySymbol(bot, cfg);
               const dir = sideLabel(cfg.side);
+              const name = botName(bot, cfg);
               return (
                 <div
                   key={bot.id}
                   className={`rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-muted/40"}`}
                 >
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-medium text-foreground">
+                    {name && <span className="max-w-40 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                     <span>{sym.replace(/USDT$/, "") || "Auto"}</span>
                     {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
                     {dir && (

@@ -36,4 +36,6 @@ export interface AutomationConfig {
   hardCapCandles?: number;
   /** Ignore regime EMA flips smaller than this % when deciding trend direction. Default 0.3. */
   regimeTolerancePct?: number;
+  /** User-assigned display name for this bot (optional). */
+  name?: string;
 }

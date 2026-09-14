@@ -22,7 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
-import { displaySymbol, sideLabel } from "./bot-config";
+import { displaySymbol, sideLabel, botName } from "./bot-config";
 
 interface BotRecord {
   id: number;
@@ -273,11 +273,13 @@ export function BehindTheScenes() {
           <div className="space-y-2">
             {liveBots.map((bot) => {
               const cfg = parseBotConfig(bot as BotView);
+              const name = botName(bot as BotView, cfg);
               return (
                 <div key={bot.id} className="rounded-lg border border-border bg-background/40 p-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Bot size={14} className="text-emerald-400" />
+                      {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                       <span className="text-sm font-semibold text-foreground">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
                       {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
                       {sideLabel(cfg.side) && (

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, type BotView } from "./bot-config";
+import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 
 export interface BotDetailsDialogProps {
@@ -32,6 +32,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
   const st = statusMeta(bot.status);
   const sym = displaySymbol(bot, cfg);
   const dir = sideLabel(position?.side ?? cfg.side) ?? null;
+  const name = botName(bot, cfg);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -39,7 +40,18 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
         <DialogHeader className="border-b border-border px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <DialogTitle className="flex items-center gap-2 text-lg">
-              {sym ? `${sym.replace(/USDT$/, "")} automation` : "Auto-select automation"}
+              {name ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  {name}
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {sym ? `${sym.replace(/USDT$/, "")} automation` : "Auto-select automation"}
+                  </span>
+                </span>
+              ) : sym ? (
+                `${sym.replace(/USDT$/, "")} automation`
+              ) : (
+                "Auto-select automation"
+              )}
               {cfg.autoSelect && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
               {dir && (
                 <Badge className={cn("text-[10px]", dir === "Long" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400")}>
@@ -81,6 +93,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Configuration</p>
               <Field label="Symbol">{sym || "Auto-select"}</Field>
+              <Field label="Name">{name || "—"}</Field>
               <Field label="Auto-select">{cfg.autoSelect ? "On" : "Off"}</Field>
               <Field label="Timeframe">{cfg.timeframe}</Field>
               <Field label="Leverage">{cfg.leverage}x</Field>

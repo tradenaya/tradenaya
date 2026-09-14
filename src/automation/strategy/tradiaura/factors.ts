@@ -13,11 +13,20 @@ import {
   smaSeries,
   supertrendSeries,
   vwapSeries,
-  type Series,
-  type MacdSeries,
-  type BollingerSeries,
-  type SupertrendSeries,
 } from "@/automation/indicators/series";
+import {
+  stochRsiSeries,
+  keltnerSeries,
+  ichimokuSeries,
+  psarSeries,
+  cciSeries,
+  mfiSeries,
+  obvSeries,
+  williamsRSeries,
+  adxPdiMdiSeries,
+  lastRich,
+} from "@/automation/indicators/rich";
+import { detectPatterns } from "@/automation/indicators/patterns";
 import { REASON, type ReasonCode, type TradiAuraThresholds } from "./config";
 import type { FactorResult, MarketView, SupportResistanceLevels, SwingPoint, TrendDirection } from "./types";
 
@@ -103,6 +112,8 @@ export function buildMarketView(candles: MarketCandle[], thresholds: TradiAuraTh
   const atrValue = lastValue(atr) ?? price * 0.004;
 
   const swings = detectSwings(highs, lows, thresholds.swingLookback);
+  const levels = detectSupportResistance(candles, swings, price, atrValue, thresholds);
+  const patterns = detectPatterns(candles, atrValue, thresholds.supportResistanceWindow);
 
   return {
     candles,
@@ -120,11 +131,21 @@ export function buildMarketView(candles: MarketCandle[], thresholds: TradiAuraTh
     bollinger: bollingerSeries(closes, thresholds.bollingerPeriod, thresholds.bollingerMult),
     supertrend: supertrendSeries(highs, lows, closes, thresholds.supertrendPeriod, thresholds.supertrendMult),
     vwap: vwapSeries(candles, thresholds.volumePeriod),
+    stochRsi: stochRsiSeries(closes, thresholds.rsiPeriod, 14, 3, 3),
+    keltner: keltnerSeries(candles, thresholds.emaFast, thresholds.atrPeriod, 2),
+    ichimoku: ichimokuSeries(candles, 9, 26, 52, 26),
+    psar: psarSeries(candles),
+    cci: cciSeries(candles, thresholds.volumePeriod),
+    mfi: mfiSeries(candles, thresholds.rsiPeriod),
+    obv: obvSeries(candles),
+    williamsR: williamsRSeries(candles, thresholds.rsiPeriod),
+    adxDetails: adxPdiMdiSeries(candles, thresholds.adxPeriod),
     roc14: rocSeries(closes, 14),
     roc50: rocSeries(closes, 50),
     volumeAverage: smaSeries(volumes, thresholds.volumePeriod),
     swings,
-    levels: detectSupportResistance(candles, swings, price, atrValue, thresholds),
+    levels,
+    patterns,
     price,
     atrValue,
   };
@@ -210,7 +231,7 @@ export interface StructureResult {
 }
 
 /** Market structure: higher-high/higher-low vs lower-high/lower-low, plus breakouts. */
-export function evaluateStructure(view: MarketView, thresholds: TradiAuraThresholds): StructureResult {
+export function evaluateStructure(view: MarketView): StructureResult {
   const { highs, lows } = view.swings;
   if (highs.length < 2 || lows.length < 2) return { score: 0, code: REASON.STRUCTURE_CONSOLIDATION };
 
@@ -421,26 +442,100 @@ export interface RiskRewardResult extends FactorResult {
   ratio: number;
 }
 
-/** Reward/risk from structure + ATR-based stop and target for one side. */
+/**
+ * Volume-flow / trend-confirmation factor: OBV slope, MFI zone and CCI.
+ * Positive orientation favors LONG, negative favors SHORT. It is a confirmation
+ * factor (like volume), so its contribution is always positive for the tested
+ * side when it agrees and small when it doesn't.
+ */
+export function evaluateFlow(view: MarketView, thresholds: TradiAuraThresholds): FactorResult {
+  const cci = lastRich(view.cci);
+  const mfi = lastRich(view.mfi);
+  const wr = lastRich(view.williamsR);
+  const obv = view.obv;
+  const obvNow = lastRich(obv);
+  const obvPrev = obv.length > 1 ? obv[obv.length - 2] : null;
+  const obvSlope = obvPrev != null && obvNow != null ? obvNow - obvPrev : 0;
+  const atr = view.atrValue;
+
+  let flowScore = 0;
+
+  // OBV direction (scaled by ATR to keep it comparable across coins).
+  if (obvSlope !== 0 && atr > 0) {
+    flowScore += clamp(obvSlope / Math.max(atr, 1e-9), -1, 1) * 0.4;
+  }
+
+  // MFI zone.
+  if (mfi != null) {
+    if (mfi > thresholds.mfiOverbought) flowScore -= 0.2; // overheated — fade longs
+    else if (mfi >= 50) flowScore += 0.25;
+    else if (mfi > thresholds.mfiOversold) flowScore -= 0.1;
+    else flowScore += 0.2; // deep oversold — favour reversion longs
+  }
+
+  // CCI.
+  if (cci != null) {
+    if (cci >= thresholds.cciBuy) flowScore += 0.25;
+    else if (cci <= thresholds.cciSell) flowScore -= 0.25;
+    else flowScore += clamp(cci / 100, -0.15, 0.15) * 0.2;
+  }
+
+  // Williams %R as a secondary sentiment check.
+  if (wr != null) {
+    if (wr > -20) flowScore += 0.1;
+    else if (wr < -80) flowScore -= 0.1;
+  }
+
+  flowScore = clamp(flowScore, -1, 1);
+  if (flowScore > 0.15) return { code: REASON.FLOW_BULLISH, score: flowScore, magnitude: Math.min(flowScore, 1) };
+  if (flowScore < -0.15) return { code: REASON.FLOW_BEARISH, score: flowScore, magnitude: Math.min(Math.abs(flowScore), 1) };
+  return { code: REASON.FLOW_NEUTRAL, score: flowScore, magnitude: Math.abs(flowScore) };
+}
+
+/**
+ * Reward/risk from structure + ATR-based stop and target for one side.
+ *
+ * Smarter stop placement: the stop sits BEYOND the nearest structural swing /
+ * support-resistance with an ATR buffer, but is clamped so it is never tighter
+ * than `minStopPct` (protects against premature stop-outs) and never wider than
+ * `maxStopPct` (keeps risk capped). The target is the more conservative of the
+ * target R-multiple and the nearest opposing structural level, guaranteeing an
+ * RR of at least `rrMin` when a signal is emitted.
+ */
 export function evaluateRiskReward(view: MarketView, side: "LONG" | "SHORT", thresholds: TradiAuraThresholds): RiskRewardResult {
   const price = view.price;
   const atr = view.atrValue;
-  const { support, resistance } = view.levels;
+  const { support, resistance, swingHigh, swingLow } = view.levels;
   const epsilon = price * 1e-6;
 
   if (side === "LONG") {
-    const stop = Math.min(support != null ? support - 0.3 * atr : Number.POSITIVE_INFINITY, price - thresholds.stopAtrMult * atr);
+    const minStopDist = Math.max(thresholds.stopAtrMult * atr, price * thresholds.minStopPct);
+    const maxStopDist = Math.max(minStopDist, price * thresholds.maxStopPct);
+    const structuralStop =
+      support != null ? support - thresholds.stopBeyondStructureAtr * atr :
+      swingLow != null ? swingLow - thresholds.stopBeyondStructureAtr * atr :
+      price - minStopDist;
+    const stop = clamp(Math.max(structuralStop, price - maxStopDist), price - maxStopDist, price - minStopDist);
     const stopDist = Math.max(price - stop, epsilon);
     const targetBase = price + stopDist * thresholds.targetRMultiple;
-    const target = resistance != null ? Math.max(targetBase, resistance) : targetBase;
+    // Nearest reachable target: the R-multiple target capped by resistance, so
+    // the reported RR reflects what the trade can realistically be filled at.
+    const target = resistance != null ? Math.min(targetBase, resistance) : targetBase;
     const ratio = Math.max((target - price) / stopDist, 0);
     return scoreRatio(ratio, thresholds, REASON.RR_OK, REASON.RR_LOW, stop, target);
   }
 
-  const stop = Math.max(resistance != null ? resistance + 0.3 * atr : Number.NEGATIVE_INFINITY, price + thresholds.stopAtrMult * atr);
+  const minStopDist = Math.max(thresholds.stopAtrMult * atr, price * thresholds.minStopPct);
+  const maxStopDist = Math.max(minStopDist, price * thresholds.maxStopPct);
+  const structuralStop =
+    resistance != null ? resistance + thresholds.stopBeyondStructureAtr * atr :
+    swingHigh != null ? swingHigh + thresholds.stopBeyondStructureAtr * atr :
+    price + minStopDist;
+  const stop = clamp(Math.min(structuralStop, price + maxStopDist), price + minStopDist, price + maxStopDist);
   const stopDist = Math.max(stop - price, epsilon);
   const targetBase = price - stopDist * thresholds.targetRMultiple;
-  const target = support != null ? Math.min(targetBase, support) : targetBase;
+  // Nearest reachable target: the R-multiple target floored by support.
+  const target = support != null ? Math.max(targetBase, support) : targetBase;
   const ratio = Math.max((price - target) / stopDist, 0);
   return scoreRatio(ratio, thresholds, REASON.RR_OK, REASON.RR_LOW, stop, target);
 }

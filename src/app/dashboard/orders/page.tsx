@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ChevronLeft, ChevronRight, History, Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, History, RefreshCw, Search } from "lucide-react"
+import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { OrderHistoryRow, Paged } from "@/automation/order-history/types"
-import { apiGet } from "@/components/analytics/api"
+import { apiGet, apiSend } from "@/components/analytics/api"
 import { useAsyncData } from "@/components/analytics/use-data"
 import { formatDate, formatPrice, pnlText, signClass } from "@/components/analytics/format"
 import { orderTypeLabel, orderContextLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms"
@@ -53,6 +54,7 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -62,7 +64,7 @@ export default function OrdersPage() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  const { data, error, loading } = useAsyncData<Paged<OrderHistoryRow>>(
+  const { data, error, loading, refresh } = useAsyncData<Paged<OrderHistoryRow>>(
     () =>
       apiGet("/api/orders", {
         page,
@@ -71,6 +73,24 @@ export default function OrdersPage() {
       }),
     [page, search],
   )
+
+  const syncFromExchange = async () => {
+    if (syncing) return
+    setSyncing(true)
+    try {
+      const result = await apiSend<{ synced: number; total: number }>("/api/orders/sync", { method: "POST" })
+      toast.success(
+        result.total === 0
+          ? "No closed orders were found on the exchange"
+          : `${result.synced} new order${result.synced === 1 ? "" : "s"} synced from exchange`,
+      )
+      refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to sync order history")
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const orders = data?.items ?? []
   const total = data?.total ?? 0
@@ -92,14 +112,20 @@ export default function OrdersPage() {
               <CardTitle>Orders</CardTitle>
               <CardDescription>{total} total</CardDescription>
             </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Search symbol, status, order id…"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <div className="relative flex-1 sm:w-72 sm:flex-none">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search symbol, status, order id…"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                />
+              </div>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={syncFromExchange} disabled={syncing}>
+                <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+                {syncing ? "Syncing…" : "Sync from exchange"}
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -112,7 +138,9 @@ export default function OrdersPage() {
             <div className="flex flex-col items-center gap-3 py-12">
               <History className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
-                {search ? `No orders match "${search}".` : "No orders yet. They will appear once trades are placed."}
+                {search
+                  ? `No orders match "${search}".`
+                  : "No orders yet. Use “Sync from exchange” to pull your API trade history, or wait for automation to place trades."}
               </p>
             </div>
           ) : (

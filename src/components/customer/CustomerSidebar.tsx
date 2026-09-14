@@ -92,7 +92,7 @@ export default function CustomerSidebar({ open, onClose, tenantName }: Props) {
               T
             </span>
             <span className="text-xl font-bold" style={{ fontFamily: "var(--font-poppins)" }}>
-              {tenantName || "TradeNaya"}
+              {tenantName || "Tradenaya"}
             </span>
           </Link>
 
@@ -148,7 +148,7 @@ export default function CustomerSidebar({ open, onClose, tenantName }: Props) {
 
         <div className="p-4 border-t shrink-0" style={{ borderColor: "var(--border)" }}>
           <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-            TradeNaya · Automated crypto futures
+            Tradenaya · Automated crypto futures
           </p>
         </div>
       </aside>

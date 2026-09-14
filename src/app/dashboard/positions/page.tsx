@@ -126,7 +126,6 @@ export default function AllPositionsPage() {
       if (posJson.success) setPositions(normalizedPositions);
       if (ordJson.success) setOrders(normalizedOrders);
     } catch (err) {
-      console.log("LOAD ALL ERROR", err);
     } finally {
       setLoading(false);
     }
@@ -142,7 +141,6 @@ export default function AllPositionsPage() {
           if (ordJson.success) setOrders(normalizedOrders);
         }
       } catch (err) {
-        console.log("LOAD ALL ERROR", err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -183,9 +181,8 @@ export default function AllPositionsPage() {
       const payload = {
         symbol: position.symbol.toLowerCase(),
         side: position.position_side === "LONG" ? "SELL" : "BUY",
-        order_type: "LIMIT",
+        order_type: "MARKET",
         quantity: size,
-        price: Number(position.mark_price),
         reduce_only: true,
         order_context: "close_position",
       };

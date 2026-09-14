@@ -92,7 +92,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
     const reasons: ReasonCode[] = [...analysis.reasons, ...analysis.vetoes];
     if (reasons.length === 0) reasons.push(REASON.SCORE_NO_TRADE);
 
-    const structure = evaluateStructure(entryView, this.config.thresholds);
+    const structure = evaluateStructure(entryView);
     const indicators = this.buildIndicators(analysis, entryView, entryLabel, higherLabel, mediumLabel, structure);
 
     return {

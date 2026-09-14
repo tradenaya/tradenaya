@@ -42,7 +42,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: orders });
   } catch (error: any) {
-    console.log("ALL OPEN ORDERS ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

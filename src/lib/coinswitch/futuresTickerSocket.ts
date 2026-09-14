@@ -52,7 +52,6 @@ class FuturesTickerSocket {
       });
 
       this.socket.on("connect_error", (err) => {
-        console.log("❌ Ticker WS error", err.message);
       });
 
       this.socket.on("FETCH_TICKER_INFO_CS_PRO", (payload: Record<string, TickerData>) => {

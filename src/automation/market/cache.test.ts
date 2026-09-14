@@ -62,6 +62,25 @@ describe("MarketDataCache", () => {
     expect(cache.getCandles("BTCUSDT", "5")[0].close).toBe(12);
   });
 
+  it("upserts a live candle without wiping cached history", () => {
+    const cache = new MarketDataCache();
+    const history = [candle(1000, 10), candle(2000, 12), candle(3000, 13)];
+    cache.setCandles("BTCUSDT", "5", history);
+    // a live WS update for the in-progress candle must not clobber history
+    cache.upsertCandles("BTCUSDT", "5", [candle(3000, 14, 5)]);
+    const stored = cache.getCandles("BTCUSDT", "5");
+    expect(stored.map((c) => c.timestamp)).toEqual([1000, 2000, 3000]);
+    expect(stored[2].close).toBe(14);
+  });
+
+  it("upsert appends new candles and stays bounded", () => {
+    const cache = new MarketDataCache();
+    cache.setCandles("BTCUSDT", "5", [candle(1000, 10)], 2);
+    cache.upsertCandles("BTCUSDT", "5", [candle(2000, 11)], 2);
+    cache.upsertCandles("BTCUSDT", "5", [candle(3000, 12)], 2);
+    expect(cache.getCandles("BTCUSDT", "5").map((c) => c.timestamp)).toEqual([2000, 3000]);
+  });
+
   it("computes candle freshness from the latest close time", () => {
     const cache = new MarketDataCache({ now: () => 1000 });
     cache.setCandles("BTCUSDT", "5", [candle(1000 - 5 * 60_000, 10)]);

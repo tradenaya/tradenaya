@@ -41,7 +41,6 @@ class FuturesSocket {
     this.onCandleCallback = onCandle;
 
     if (!this.socket) {
-      console.log("🚀 Starting Futures WebSocket connection");
 
       this.socket = io("wss://ws.coinswitch.co/exchange_2", {
         path: "/pro/realtime-rates-socket/futures/exchange_2",
@@ -52,7 +51,6 @@ class FuturesSocket {
       });
 
       this.socket.on("connect", () => {
-        console.log("✅ Futures WebSocket Connected", this.socket?.id);
         // fresh connection means the server has forgotten any
         // previous subscription, so force a resubscribe
         this.currentPair = null;
@@ -60,11 +58,9 @@ class FuturesSocket {
       });
 
       this.socket.on("connect_error", (error) => {
-        console.log("❌ WebSocket Error", error.message);
       });
 
       this.socket.on("disconnect", (reason) => {
-        console.log("⚠️ WebSocket Disconnected", reason);
         this.currentPair = null;
       });
 
@@ -84,7 +80,6 @@ class FuturesSocket {
 
   private subscribe(pair: string) {
     if (!this.socket?.connected) {
-      console.log("⏳ Socket not connected yet");
       return;
     }
 
@@ -99,7 +94,6 @@ class FuturesSocket {
       pair,
     });
 
-    console.log("📡 Kline subscription sent", pair);
   }
 
   // Call this when a chart unmounts (or before switching symbol/interval)

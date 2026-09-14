@@ -40,6 +40,7 @@ function opportunity(overrides: Partial<CoinOpportunity> = {}): CoinOpportunity 
       volatility: 0.3,
       entryLocation: 0.7,
       riskReward: 0.8,
+      flow: 0.5,
     },
     vetoes: [],
     reasons: [],

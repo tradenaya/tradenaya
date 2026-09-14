@@ -14,7 +14,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
-    console.log("INSTRUMENT INFO ERROR", error);
     return NextResponse.json(
       { success: false, message: error.message },
       { status: 500 }

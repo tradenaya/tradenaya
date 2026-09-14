@@ -1,5 +1,5 @@
 import type { ExecutionRecord } from "@/automation/executor/types";
-import type { ExchangeOrder, ExchangePosition, FuturesTransaction } from "@/automation/executor/client";
+import type { ClosedOrderRecord, ExchangeOrder, ExchangePosition, FuturesTransaction } from "@/automation/executor/client";
 
 export type PositionState =
   | "WAITING_ENTRY"
@@ -12,7 +12,7 @@ export type PositionState =
   | "ERROR"
   | "UNPROTECTED";
 
-export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "MANUAL_CLOSE" | "ENTRY_CANCELLED" | "EXPIRED" | "ERROR";
+export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "MANUAL_CLOSE" | "ENTRY_CANCELLED" | "EXPIRED" | "ERROR" | "LIQUIDATION";
 
 export type PositionSide = "BUY" | "SELL";
 
@@ -38,6 +38,8 @@ export interface PositionRecord {
   state: PositionState;
   quantity: number | null;
   filledQuantity: number | null;
+  /** Quantity still resting on the exchange (planned minus filled). Persisted across restarts for partial fills. */
+  remainingQuantity: number | null;
   entryPrice: number | null;
   currentPrice: number | null;
   stopLoss: number | null;
@@ -119,6 +121,18 @@ export interface CloseDetectionResult {
   detail: string;
 }
 
+/** Result of one full exchange→DB position reconciliation sweep (startup or manual sync). */
+export interface PositionSyncSummary {
+  /** Active local positions that were verified against the exchange. */
+  positionsChecked: number;
+  /** Positions confirmed closed on the exchange and closed in the DB. */
+  confirmedClosed: number;
+  /** Positions that remain open locally (confirmed open or close not provable). */
+  keptOpen: number;
+  /** Positions whose reconciliation errored and were left untouched for retry. */
+  failed: number;
+}
+
 export interface PositionManagerDependencies {
   client: CoinSwitchClientLike;
   botState: BotStateServiceLike;
@@ -140,6 +154,7 @@ export interface CoinSwitchClientLike {
   cancelOrder(userId: number, orderId: string): Promise<boolean>;
   placeOrder(userId: number, params: any): Promise<ExchangeOrder>;
   getTransactions(userId: number, opts?: { symbol?: string; type?: string; fromTime?: number; toTime?: number; limit?: number }): Promise<FuturesTransaction[]>;
+  getClosedOrders(userId: number, opts?: { symbol?: string; status?: string; limit?: number; fromTime?: number; toTime?: number }): Promise<{ orders: ClosedOrderRecord[]; cursor: number | null }>;
 }
 
 export interface BotStateServiceLike {
@@ -148,7 +163,7 @@ export interface BotStateServiceLike {
 }
 
 export interface PositionRecoveryLike {
-  recoverAllActive(): Promise<void>;
+  recoverAllActive(): Promise<PositionSyncSummary>;
   emergencyProtect(executionId: number): Promise<boolean>;
 }
 
@@ -189,7 +204,7 @@ export interface PositionStoreLike {
   updateEntry(id: number, entryPrice: number | null, filledQuantity: number | null, positionId: string | null, entryOrderId: string | null): Promise<void>;
   updateProtection(id: number, stopLossOrderId: string | null, takeProfitOrderId: string | null): Promise<void>;
   updateTrailing(id: number, stopLoss: number | null, highestPrice: number | null, lowestPrice: number | null): Promise<void>;
-  markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number): Promise<void>;
+  markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number, closedAt?: string): Promise<void>;
   recordCloseSummary(input: CloseSummaryInput): Promise<void>;
   saveEvent(input: PositionEventInput): Promise<void>;
 }

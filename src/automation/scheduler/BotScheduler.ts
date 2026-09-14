@@ -98,7 +98,6 @@ export class BotScheduler {
     // Shutdown must NEVER close an open position or cancel SL/TP orders on the
     // exchange. Exchange-side protective orders remain active independently of
     // this server.
-    console.log("[SHUTDOWN] BotScheduler stopped — NO position close / order cancel performed. Exchange-side SL/TP remain active.");
   }
 
   /**
@@ -166,6 +165,7 @@ export class BotScheduler {
       capital: config.capital,
       capitalMode: config.capitalMode,
       walletPercent: config.walletPercent,
+      name: config.name,
       configJson: JSON.stringify(config),
     });
     await this.events.emit({ type: "BOT_CONFIG_UPDATED", botId, userId, message: `Bot ${botId} configuration updated` });
@@ -225,6 +225,7 @@ export class BotScheduler {
       capital: config.capital,
       capitalMode: config.capitalMode,
       walletPercent: config.walletPercent,
+      name: config.name,
       status: "STOPPED",
     });
     await this.lifecycle.setConfig(botId, JSON.stringify(config));
@@ -242,6 +243,7 @@ export class BotScheduler {
       leverage: config.leverage,
       capital: config.capital,
       strategy: bot?.strategy ?? "TradiAuraSmartV1",
+      name: bot?.name ?? config.name,
     }));
     if (bot) {
       if (this.started) {
@@ -300,6 +302,7 @@ export class BotScheduler {
       leverage: fresh?.leverage ?? bot.leverage,
       capital: fresh?.capital ?? bot.capital,
       strategy: fresh?.strategy ?? bot.strategy,
+      name: fresh?.name ?? bot.name,
     }));
     if (fresh) await this.recovery.recoverBot(fresh);
   }

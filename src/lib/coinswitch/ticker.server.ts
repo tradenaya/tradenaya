@@ -8,7 +8,6 @@ export async function startTicker() {
 
 
     if(started){
-        console.log("Ticker already running");
         return;
     }
 
@@ -16,7 +15,6 @@ export async function startTicker() {
     started = true;
 
 
-    console.log("Connecting CoinSwitch NATS ticker");
 
 
     try {
@@ -31,7 +29,6 @@ export async function startTicker() {
         });
 
 
-        console.log("✅ NATS CONNECTED");
 
 
         const sc = StringCodec();
@@ -42,17 +39,10 @@ export async function startTicker() {
         );
 
 
-        console.log(
-            "✅ TICKER SUBSCRIBED"
-        );
 
 
         for await(const msg of sub){
 
-            console.log(
-                "🔥 TICKER",
-                sc.decode(msg.data)
-            );
 
         }
 
@@ -60,10 +50,6 @@ export async function startTicker() {
     }
     catch(err){
 
-        console.log(
-            "❌ NATS FAILED",
-            err
-        );
 
         started=false;
 

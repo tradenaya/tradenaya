@@ -78,7 +78,7 @@ export default function AuthShell({
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl border border-white/10 bg-[#111111] shadow-lg">
             <img
               src="/logo/tradenaya-logo.png"
-              alt="TradeNaya"
+              alt="Tradenaya"
               className="h-11 w-11 object-contain"
             />
           </div>
@@ -109,7 +109,7 @@ export default function AuthShell({
       {/* Bottom branding */}
       <div className="absolute bottom-5 left-0 right-0 text-center">
         <span className="text-[11px] tracking-[0.2em] text-gray-600 uppercase">
-          TradeNaya
+          Tradenaya
         </span>
       </div>
     </main>

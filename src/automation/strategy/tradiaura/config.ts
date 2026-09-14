@@ -48,18 +48,20 @@ export interface FactorWeights {
   volatility: number;
   entryLocation: number;
   riskReward: number;
+  flow: number;
 }
 
 /** Relative importance of each factor. All weights sum to 1. */
 export const FACTOR_WEIGHTS: FactorWeights = {
   regime: 0.05,
   trend: 0.2,
-  structure: 0.2,
+  structure: 0.175,
   momentum: 0.15,
-  participation: 0.1,
+  participation: 0.075,
   volatility: 0.05,
   entryLocation: 0.15,
   riskReward: 0.1,
+  flow: 0.05,
 };
 
 export interface TradiAuraThresholds {
@@ -130,6 +132,22 @@ export interface TradiAuraThresholds {
   stopAtrMult: number;
   /** Take-profit as a multiple of the stop distance when no structure level exists. */
   targetRMultiple: number;
+  /** Minimum stop distance as a fraction of price (protects against ultra-tight stops). */
+  minStopPct: number;
+  /** Maximum stop distance as a fraction of price (keeps risk capped). */
+  maxStopPct: number;
+  /** Distance a stop sits beyond a structural swing, in ATR. */
+  stopBeyondStructureAtr: number;
+
+  /** MFI above this is overbought (flow favors the downside / long faded). */
+  mfiOverbought: number;
+  /** MFI below this is oversold (flow favors the upside). */
+  mfiOversold: number;
+
+  /** CCI above this is strong bullish flow. */
+  cciBuy: number;
+  /** CCI below this is strong bearish flow. */
+  cciSell: number;
 }
 
 export const TRADIAURA_THRESHOLDS: TradiAuraThresholds = {
@@ -179,6 +197,16 @@ export const TRADIAURA_THRESHOLDS: TradiAuraThresholds = {
   rrIdeal: 2,
   stopAtrMult: 1.5,
   targetRMultiple: 2.5,
+
+  minStopPct: 0.006,
+  maxStopPct: 0.06,
+  stopBeyondStructureAtr: 0.5,
+
+  mfiOverbought: 80,
+  mfiOversold: 20,
+
+  cciBuy: 100,
+  cciSell: -100,
 };
 
 export interface TradiAuraConfig {
@@ -231,6 +259,11 @@ export const REASON = {
   ENTRY_EXTENDED: "entry-location-extended",
   RR_OK: "risk-reward-ok",
   RR_LOW: "risk-reward-low",
+  FLOW_BULLISH: "flow-bullish",
+  FLOW_BEARISH: "flow-bearish",
+  FLOW_NEUTRAL: "flow-neutral",
+  PATTERN_BULLISH: "pattern-bullish",
+  PATTERN_BEARISH: "pattern-bearish",
   SCORE_LONG: "score-long",
   SCORE_SHORT: "score-short",
   SCORE_NO_TRADE: "score-no-trade",

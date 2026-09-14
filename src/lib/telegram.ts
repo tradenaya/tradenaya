@@ -143,8 +143,9 @@ export function telegramBotStarted(p: {
   leverage?: number | null;
   capital?: number | null;
   strategy?: string | null;
+  name?: string | null;
 }): string {
-  return [
+  const lines = [
     "🤖 <b>BOT STARTED</b>",
     ``,
     `Symbol: ${escapeHtml(String(p.symbol ?? "n/a")).toUpperCase()}`,
@@ -152,7 +153,10 @@ export function telegramBotStarted(p: {
     `Leverage: ${fmt(p.leverage, 0)}x`,
     `Capital: ${fmt(p.capital ?? p.capital, 2)} USDT`,
     `Strategy: ${escapeHtml(String(p.strategy ?? "n/a"))}`,
-  ].join("\n");
+  ];
+  const name = p.name?.trim() ? String(p.name).trim() : null;
+  if (name) lines.splice(3, 0, `Name: ${escapeHtml(name)}`);
+  return lines.join("\n");
 }
 
 export function telegramBotStopped(p: {

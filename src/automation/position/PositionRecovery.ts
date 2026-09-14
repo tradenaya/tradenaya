@@ -2,11 +2,20 @@ import { ExecutionStore } from "@/automation/executor/store";
 import { ProtectiveOrdersService } from "@/automation/executor/services/protective-orders";
 import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import type { ExchangePosition } from "@/automation/executor/client";
-import type { CoinSwitchClientLike, PositionManagerConfig, PositionRecord, PositionStoreLike } from "./PositionManagerTypes";
-import { detectExecutedClose, confirmExternalClose } from "./executed-close";
+import type { CoinSwitchClientLike, ExitReason, PositionManagerConfig, PositionRecord, PositionStoreLike, PositionSyncSummary } from "./PositionManagerTypes";
+import { detectExecutedClose, detectClosedOrderClose, confirmExternalClose, detectLiquidation } from "./executed-close";
 import { reconcileClose } from "./close-accounting";
+import { classifyStatus } from "@/automation/executor/order-status";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
+
+type ReconcileOutcome = "open" | "closed" | "kept_open" | "pending" | "skipped";
+
+function toNum(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export class PositionRecovery {
   constructor(
@@ -18,7 +27,7 @@ export class PositionRecovery {
     private readonly botState: { updateBotStatus(id: number, status: string, currentTrade?: string | null): Promise<void>; updateBotHeartbeat(id: number, lastAnalysisAt?: string | null, lastExecutionAt?: string | null): Promise<void> } = new BotLifecycleService(),
   ) {}
 
-  async recoverAllActive(): Promise<void> {
+  async recoverAllActive(): Promise<PositionSyncSummary> {
     const executions = await this.executionStore.getActiveExecutions();
     const activeStates = new Set(["MONITORING_ENTRY", "ENTRY_FILLED", "PARTIALLY_FILLED", "UNPROTECTED"]);
 
@@ -31,10 +40,22 @@ export class PositionRecovery {
       }
     }
 
+    const summary: PositionSyncSummary = { positionsChecked: 0, confirmedClosed: 0, keptOpen: 0, failed: 0 };
     const positions = await this.store.getActivePositions();
     for (const position of positions) {
-      await this.reconstruct(position);
+      summary.positionsChecked++;
+      try {
+        const outcome = await this.reconcile(position);
+        if (outcome === "closed") summary.confirmedClosed++;
+        else summary.keptOpen++;
+      } catch {
+        // A failure for one position must never abort the whole sweep; leave
+        // the position untouched so the PositionMonitor retries on the next
+        // cycle instead of double-processing or half-processing it.
+        summary.failed++;
+      }
     }
+    return summary;
   }
 
   async syncNewExecutions(): Promise<void> {
@@ -48,8 +69,8 @@ export class PositionRecovery {
     }
   }
 
-  private async reconstruct(position: PositionRecord): Promise<void> {
-    if (!ACTIVE_STATES.has(position.state)) return;
+  private async reconcile(position: PositionRecord): Promise<ReconcileOutcome> {
+    if (!ACTIVE_STATES.has(position.state)) return "skipped";
 
     // If the exchange is unreachable during recovery, leave the position
     // untouched and let the PositionMonitor retry — never close based on a
@@ -58,25 +79,26 @@ export class PositionRecovery {
     try {
       exchangePositions = await this.client.getPositions(position.userId, position.symbol);
     } catch {
-      return;
+      return "kept_open";
     }
 
     const live = exchangePositions.find((p) => p.symbol.toLowerCase() === position.symbol.toLowerCase()) ?? null;
     const price = await this.client.getCurrentPrice(position.userId, position.symbol).catch(() => null);
 
     if (!live) {
-      await this.reconcileMissingPosition(position, price);
-      return;
+      return await this.reconcileMissingPosition(position, price);
     }
 
     await this.store.updateEntry(
       position.id,
-      live?.entryPrice ?? position.entryPrice,
-      live?.quantity ?? position.filledQuantity,
-      live?.positionId ?? position.positionId,
+      live.entryPrice ?? position.entryPrice,
+      live.quantity ?? position.filledQuantity,
+      live.positionId ?? position.positionId,
       position.entryOrderId,
     );
 
+    // Back-fill protective order refs from the execution record so the monitor
+    // can keep tracking SL/TP after a restart.
     const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
     if (execution) {
       const slOrderId = execution.stopLossOrder.orderId ?? position.stopLossOrderId;
@@ -86,13 +108,12 @@ export class PositionRecovery {
       position.takeProfitOrderId = tpOrderId;
     }
 
-    await this.reconcileProtection(position);
-
     if (position.state === "ENTRY_PENDING") {
-      await this.recoverEntryFromLivePosition(position, execution);
+      await this.store.updateState(position.id, "ENTRY_EXECUTED");
+      await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
     }
 
-    await this.reconcileState(position);
+    return "open";
   }
 
   /**
@@ -103,23 +124,23 @@ export class PositionRecovery {
    *    cancelled while we were offline.
    * 2. A protective (SL/TP) order executed → record the close with the
    *    exchange's fill data.
-   * 3. Neither protective order executed (manual close on exchange, liquidation,
-   *    or no protective orders were placed) → still close the position so the
-   *    bot is released. We use the last known price as a best-effort exit.
+   * 3. The closed-order history proves a terminal reduce-only fill → record it.
+   * 4. The transaction ledger shows a realized P&L → closed externally
+   *    (manual close / liquidation).
+   * 5. None of the above can be proven → keep the position open and retry;
+   *    never fabricate a close reason on a transient read.
    */
-  private async reconcileMissingPosition(position: PositionRecord, price: number | null): Promise<void> {
-    if (position.state === "WAITING_ENTRY") return;
+  private async reconcileMissingPosition(position: PositionRecord, price: number | null): Promise<ReconcileOutcome> {
+    if (position.state === "WAITING_ENTRY") return "kept_open";
 
     if (position.state === "ENTRY_PENDING") {
-      await this.reconcilePendingEntry(position, price);
-      return;
+      return await this.reconcilePendingEntry(position);
     }
 
-    // Back-fill protective order refs from the execution record before any
-    // close confirmation. Without them the position keeps NULL sl/tp order ids
-    // (e.g. protected after the DB row was created) and we can never verify a
-    // filled TP/SL, leaving the position stuck as PROTECTED and the bot blocked
-    // from a new analysis cycle.
+    // Back-fill protective order refs from the execution record. Without them
+    // the position keeps NULL sl/tp order ids (e.g. protected after the DB row
+    // was created) and a filled SL/TP can never be verified, leaving the
+    // position stuck as PROTECTED and the bot blocked.
     const exec = await this.executionStore.getExecution(position.executionId).catch(() => null);
     if (exec) {
       const slOrderId = exec.stopLossOrder.orderId ?? position.stopLossOrderId;
@@ -133,23 +154,20 @@ export class PositionRecovery {
 
     // A read that succeeded and returned no position DOES mean the position is
     // gone from the exchange. But before we finalize a close we must confirm
-    // HOW it closed (protective fill, ledger realized P&L, or protective order
-    // cancelled) so we never fabricate a MANUAL_CLOSE for a transient state or
-    // a wrong recovery price. If we cannot confirm, we keep the position open
-    // and retry on the next cycle instead of booking a false close.
-    const execDetect = await detectExecutedClose(this.client, position.userId, position);
-    let closing: Awaited<ReturnType<typeof detectExecutedClose>> | null = execDetect;
-
+    // HOW it closed (protective fill, closed-order history, ledger realized
+    // P&L) so we never fabricate a MANUAL_CLOSE for a transient state or a
+    // wrong recovery price. If we cannot confirm, we keep the position open.
+    let closing = await detectExecutedClose(this.client, position.userId, position);
     if (!closing && (!position.stopLossOrderId || !position.takeProfitOrderId)) {
-      closing = await this.detectCloseFromExchangeOrders(position);
+      closing = await detectClosedOrderClose(this.client, position.userId, position);
     }
 
+    let closedAtMs: number | null = null;
     if (!closing) {
       const confirmed = await confirmExternalClose(this.client, position.userId, position);
       if (!confirmed.confirmed) {
-        console.log(`[RECOVERY] Position ${position.symbol} not returned by exchange but close could NOT be confirmed (reads/ledger transient) — keeping position open; will retry`);
         await this.saveEvent(position, "RECOVERY_UNAVAILABLE", `position not returned by exchange but close unconfirmed — keeping open and retrying`);
-        return;
+        return "kept_open";
       }
       closing = {
         reason: confirmed.reason ?? "MANUAL_CLOSE",
@@ -157,15 +175,37 @@ export class PositionRecovery {
         realizedPnl: confirmed.realizedPnl,
         fees: confirmed.fees,
       };
+      closedAtMs = confirmed.closedAtMs;
     }
 
-    const exitPrice = closing?.price ?? price ?? null;
-    const realizedPnl = closing?.realizedPnl ?? null;
-    const fees = closing?.fees ?? null;
-    const reason = closing?.reason ?? "MANUAL_CLOSE";
+    let reason = closing.reason ?? "MANUAL_CLOSE";
+    const exitPrice = closing.price ?? price ?? null;
 
-    console.log(`[RECOVERY] Position confirmed closed reason=${reason} price=${exitPrice ?? "n/a"}`);
+    // Liquidation forensic check: an unclassified close whose realized P&L
+    // wiped the full margin (or whose current price traded past the estimated
+    // liquidation boundary) was an exchange LIQUIDATION, not a manual close.
+    // Book it honestly so analytics reflect the true failure mode instead of a
+    // placeholder stop that could never fill.
+    if (reason === "MANUAL_CLOSE") {
+      const liq = await detectLiquidation(this.client, position.userId, position, price);
+      if (liq.suspected) {
+        reason = "LIQUIDATION";
+        closedAtMs = closedAtMs ?? liq.closedAtMs;
+        await this.saveEvent(position, "RECOVERY_LIQUIDATION", `${position.symbol} was liquidated on the exchange: ${liq.reasoning}`);
+      }
+    }
 
+    await this.finalizeClosed(position, reason, exitPrice, closedAtMs, closing);
+    return "closed";
+  }
+
+  private async finalizeClosed(
+    position: PositionRecord,
+    reason: ExitReason,
+    exitPrice: number | null,
+    closedAtMs: number | null,
+    closing: { realizedPnl: number | null; fees: number | null },
+  ): Promise<void> {
     // Reconcile gross profit, full commission and funding so the net P&L ties
     // to the wallet rather than a price-only estimate.
     const accounting = await reconcileClose(
@@ -175,14 +215,15 @@ export class PositionRecovery {
       position.entryPrice,
       exitPrice,
     ).catch(() => ({
-      grossProfit: realizedPnl ?? 0,
-      commission: fees ?? 0,
+      grossProfit: closing.realizedPnl ?? 0,
+      commission: closing.fees ?? 0,
       fundingFee: 0,
-      realizedPnl: realizedPnl ?? 0,
+      realizedPnl: closing.realizedPnl ?? 0,
       estimated: true,
     }));
 
-    await this.store.markClose(position.id, exitPrice ?? 0, reason, accounting.realizedPnl, accounting.commission);
+    const closedAt = closedAtMs != null ? new Date(closedAtMs).toISOString() : undefined;
+    await this.store.markClose(position.id, exitPrice ?? 0, reason, accounting.realizedPnl, accounting.commission, closedAt);
     await this.store.recordCloseSummary({
       position,
       exitPrice,
@@ -195,36 +236,35 @@ export class PositionRecovery {
       entryPrice: position.entryPrice,
     });
     await this.executionStore.updateState(position.executionId, "CLOSED");
-    await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${reason} (recovery: position missing from exchange, close confirmed) at ${exitPrice ?? "n/a"} pnl=${realizedPnl ?? "unknown"}`);
+    if (reason !== "LIQUIDATION") {
+      await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${reason} (recovery: position missing from exchange, close confirmed) at ${exitPrice ?? "n/a"} pnl=${accounting.realizedPnl ?? "unknown"}`);
+    }
     await this.releaseBot(position);
   }
 
   /**
    * During recovery the entry order was pending and no position exists on the
-   * exchange. Check whether the order was filled or cancelled while we were
+   * exchange. Check whether the order filled or was cancelled while we were
    * offline so we can reconcile the DB state accordingly.
    */
-  private async reconcilePendingEntry(position: PositionRecord, price: number | null): Promise<void> {
+  private async reconcilePendingEntry(position: PositionRecord): Promise<ReconcileOutcome> {
     const orderId = position.entryOrderId;
-    if (!orderId) return;
+    if (!orderId) return "kept_open";
 
     const order = await this.client.getOrderStatus(position.userId, orderId).catch(() => null);
-    const status = order?.status ?? "";
+    const kind = classifyStatus(order?.status ?? "");
 
-    const FILLED = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED"]);
-    const TERMINAL = new Set(["CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
-
-    if (FILLED.has(status)) {
-      const entryPrice = price ?? order?.raw?.avg_execution_price ?? order?.raw?.avg_price ?? null;
-      const quantity = order?.raw?.exec_quantity ?? position.filledQuantity ?? null;
+    if (kind === "FILLED" || kind === "PARTIAL") {
+      const entryPrice = toNum(order?.raw?.avg_execution_price) ?? toNum(order?.raw?.avg_price) ?? position.entryPrice;
+      const quantity = toNum(order?.raw?.exec_quantity) ?? position.filledQuantity ?? null;
       await this.store.updateEntry(position.id, entryPrice, quantity, null, orderId);
       await this.store.updateState(position.id, "ENTRY_EXECUTED");
       await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
       await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", `entry order ${orderId} was filled while offline`);
-      return;
+      return "open";
     }
 
-    if (TERMINAL.has(status)) {
+    if (kind === "CANCELLED") {
       await this.store.updateState(position.id, "CLOSED");
       await this.store.recordCloseSummary({
         position,
@@ -234,197 +274,13 @@ export class PositionRecovery {
         fees: 0,
         entryPrice: null,
       });
-      await this.executionStore.updateState(position.executionId, "CANCELLED", `entry order ${status} while offline`);
-      await this.saveEvent(position, "RECOVERY_ENTRY_CANCELLED", `entry order ${orderId} was ${status} while offline`);
+      await this.executionStore.updateState(position.executionId, "CANCELLED", `entry order ${order?.status ?? ""} while offline`);
+      await this.saveEvent(position, "RECOVERY_ENTRY_CANCELLED", `entry order ${orderId} was ${order?.status ?? ""} while offline`);
       await this.releaseBot(position);
-    }
-  }
-
-  /**
-   * During recovery the position state is ENTRY_PENDING but the position
-   * actually exists on the exchange — meaning the entry filled while the
-   * server was down and the fill was never recorded. Transition to
-   * ENTRY_EXECUTED. If the DB has no protective order IDs, search the
-   * exchange for reduce-only orders that could be the SL/TP.
-   */
-  private async recoverEntryFromLivePosition(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord | null): Promise<void> {
-    if (!execution) {
-      await this.store.updateState(position.id, "ENTRY_EXECUTED");
-      await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
-      await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", "entry was filled while offline (no execution record)");
-      return;
+      return "closed";
     }
 
-    const entryPrice = execution.entry.orderId ? null : position.entryPrice;
-    const quantity = execution.filledQuantity ?? position.filledQuantity;
-    await this.store.updateEntry(position.id, entryPrice ?? position.entryPrice, quantity, position.positionId, execution.entry.orderId ?? position.entryOrderId);
-    await this.store.updateState(position.id, "ENTRY_EXECUTED");
-    await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
-
-    if (!position.stopLossOrderId && !position.takeProfitOrderId && execution.stopLoss && execution.takeProfit) {
-      await this.recoverProtectiveOrdersFromExchange(position, execution);
-    }
-
-    await this.saveEvent(position, "RECOVERY_ENTRY_FILLED", "entry was filled while offline; position reconciled");
-  }
-
-  /**
-   * The entry filled and protective orders were placed on the exchange, but
-   * their IDs were never saved to the DB (server crashed between placement
-   * and persistence). Search the exchange for reduce-only orders and save
-   * their IDs so the monitor can track them.
-   */
-  private async recoverProtectiveOrdersFromExchange(position: PositionRecord, execution: import("@/automation/executor/types").ExecutionRecord): Promise<void> {
-    const opposite = position.side === "BUY" ? "SELL" : "BUY";
-
-    let openOrders;
-    try {
-      openOrders = await this.client.getOpenOrders(position.userId, position.symbol);
-    } catch {
-      return;
-    }
-
-    let slOrderId: string | null = null;
-    let tpOrderId: string | null = null;
-
-    for (const order of openOrders) {
-      const raw = order.raw ?? {};
-      const isReduceOnly = raw.reduce_only === true || raw.reduceOnly === true || String(raw.reduce_only) === "1";
-      const orderSide = String(raw.side ?? "").toUpperCase();
-      const orderType = String(raw.type ?? raw.order_type ?? "").toUpperCase();
-      if (!isReduceOnly || orderSide !== opposite || !order.orderId) continue;
-
-      if (orderType.includes("STOP") && !slOrderId) {
-        slOrderId = order.orderId;
-      } else if ((orderType.includes("PROFIT") || orderType.includes("LIMIT")) && !tpOrderId) {
-        tpOrderId = order.orderId;
-      }
-    }
-
-    if (slOrderId || tpOrderId) {
-      await this.store.updateProtection(position.id, slOrderId, tpOrderId);
-      await this.saveEvent(position, "RECOVERY_PROTECTIVE_RECOVERED", `recovered protective orders from exchange: SL=${slOrderId ?? "none"} TP=${tpOrderId ?? "none"}`);
-    }
-  }
-  private async detectCloseFromExchangeOrders(position: PositionRecord): Promise<import("./executed-close").ExecutedCloseInfo | null> {
-    const opposite = position.side === "BUY" ? "SELL" : "BUY";
-
-    let openOrders;
-    try {
-      openOrders = await this.client.getOpenOrders(position.userId, position.symbol);
-    } catch {
-      return null;
-    }
-
-    for (const order of openOrders) {
-      const raw = order.raw ?? {};
-      const isReduceOnly = raw.reduce_only === true || raw.reduceOnly === true || String(raw.reduce_only) === "1";
-      const orderSide = String(raw.side ?? "").toUpperCase();
-      if (!isReduceOnly || orderSide !== opposite) continue;
-
-      const status = await this.client.getOrderStatus(position.userId, order.orderId!).catch(() => null);
-      const s = String(status?.status ?? "");
-      if (["EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(s)) {
-        return {
-          reason: "STOP_LOSS",
-          price: Number(status?.raw?.avg_execution_price) || null,
-          realizedPnl: Number(status?.raw?.realised_pnl) || null,
-          fees: Number(status?.raw?.execution_fee) || null,
-        };
-      }
-    }
-
-    return null;
-  }
-
-  private async reconcileProtection(position: PositionRecord): Promise<void> {
-    let openOrders: Array<{ orderId: string | null; status?: string | null; raw?: Record<string, unknown> }> = [];
-    let openOrdersReadFailed = false;
-    try {
-      openOrders = (await this.client.getOpenOrders(position.userId, position.symbol)) ?? [];
-    } catch {
-      openOrdersReadFailed = true;
-    }
-
-    // A failed READ must never be treated as "the order is gone". If we cannot
-    // see open orders we cannot reconcile, so preserve the DB protection state
-    // and let the monitor retry later.
-    if (openOrdersReadFailed) {
-      console.log("[PROTECTION] open-orders read failed — protection state preserved (no change made) for position", position.id);
-      return;
-    }
-
-    const opposite = position.side === "BUY" ? "SELL" : "BUY";
-    const slOrder = openOrders.find((o) => o.orderId === position.stopLossOrderId);
-    const tpOrder = openOrders.find((o) => o.orderId === position.takeProfitOrderId);
-
-    if (position.stopLoss && position.stopLossOrderId && !slOrder) {
-      const state = await this.orderLifecycleState(position.userId, position.stopLossOrderId);
-      // Only release the DB reference when the order is genuinely terminal /
-      // cancelled. An OPEN / EXECUTED / unknown-on-transient-failure state must
-      // keep the reference so the monitor can keep tracking it.
-      if (state === "CANCELLED") {
-        console.log("[PROTECTION] SL confirmed cancelled on exchange — clearing SL reference", position.stopLossOrderId);
-        await this.store.updateProtection(position.id, null, position.takeProfitOrderId);
-      }
-    }
-    if (position.takeProfit && position.takeProfitOrderId && !tpOrder) {
-      const state = await this.orderLifecycleState(position.userId, position.takeProfitOrderId);
-      if (state === "CANCELLED") {
-        console.log("[PROTECTION] TP confirmed cancelled on exchange — clearing TP reference", position.takeProfitOrderId);
-        await this.store.updateProtection(position.id, position.stopLossOrderId, null);
-      }
-    }
-
-    const hasSl = Boolean(position.stopLoss && (slOrder || (await this.findReduceOnly(openOrders, position.stopLoss, opposite))));
-    const hasTp = Boolean(position.takeProfit && (tpOrder || (await this.findReduceOnly(openOrders, position.takeProfit, opposite))));
-
-    if (!hasSl || !hasTp) {
-      await this.store.saveEvent({
-        userId: position.userId,
-        botId: position.botId,
-        executionId: position.executionId,
-        positionId: position.id,
-        type: "RECOVERY_UNPROTECTED",
-        message: `Recovery found ${!hasSl ? "missing stop loss" : ""} ${!hasTp ? "missing take profit" : ""}`,
-      });
-    }
-  }
-
-  /**
-   * Determine the actual lifecycle of an order, distinguishing a genuine
-   * terminal "cancelled" state from a transient read failure (which must not
-   * lose protection). Returns "CANCELLED" only when the exchange confirms the
-   * order is terminal-cancelled.
-   */
-  private async orderLifecycleState(userId: number, orderId: string): Promise<"OPEN" | "EXECUTED" | "CANCELLED" | "UNKNOWN"> {
-    let order;
-    try {
-      order = await this.client.getOrderStatus(userId, orderId);
-    } catch {
-      // Transient read failure — do not assume anything about the order.
-      return "UNKNOWN";
-    }
-    const status = String(order?.status ?? "");
-    if (["OPEN", "NEW", "PARTIALLY_EXECUTED", "PENDING", "GTC", "FILLED_CLOSED"].includes(status)) return "OPEN";
-    if (["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED"].includes(status)) return "EXECUTED";
-    if (["CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"].includes(status)) return "CANCELLED";
-    return "UNKNOWN";
-  }
-
-  private async reconcileState(position: PositionRecord): Promise<void> {
-    if (position.state === "WAITING_ENTRY" || position.state === "ENTRY_PENDING") {
-      await this.store.updateState(position.id, "ENTRY_EXECUTED");
-    }
-  }
-
-  private async findReduceOnly(orders: Array<{ raw?: Record<string, unknown> }>, triggerPrice: number, side: string): Promise<{ raw?: Record<string, unknown> } | null> {
-    return orders.find((o) => {
-      const raw = o.raw ?? {};
-      const rawSide = String(raw.side ?? "").toUpperCase();
-      const isReduceOnly = raw.reduce_only === true || raw.reduceOnly === true || String(raw.reduce_only) === "1";
-      return isReduceOnly && rawSide === side;
-    }) ?? null;
+    return "kept_open";
   }
 
   private async saveEvent(position: PositionRecord, type: string, message: string): Promise<void> {

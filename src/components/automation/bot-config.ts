@@ -8,6 +8,7 @@ export interface BotView {
   capital: number;
   capitalMode?: string;
   walletPercent?: number | null;
+  name?: string | null;
   status: string;
   desiredStatus: string;
   currentTrade?: unknown | null;
@@ -28,6 +29,8 @@ export interface BotConfig {
   strategy: string;
   leverage: number;
   autoSelect: boolean;
+  /** User-assigned display name for this bot (optional). */
+  name?: string;
   /** Last selected direction for an auto-select bot (LONG/SHORT). */
   side?: "LONG" | "SHORT";
   leverageMode: "auto" | "manual";
@@ -88,7 +91,7 @@ export function isPaused(statusValue: string): boolean {
   return (PAUSED_STATES as readonly string[]).includes(statusValue);
 }
 
-export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "leverage" | "capital" | "capitalMode" | "walletPercent" | "strategy">): BotConfig {
+export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "leverage" | "capital" | "capitalMode" | "walletPercent" | "strategy" | "name">): BotConfig {
   const raw: Record<string, unknown> = {};
   if (bot.configJson) {
     try {
@@ -99,6 +102,7 @@ export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "lev
   }
   return {
     symbol: raw.symbol != null ? String(raw.symbol) : String(bot.symbol ?? ""),
+    name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : bot.name?.trim() || undefined,
     timeframe: String(raw.timeframe ?? "5m"),
     strategy: String(raw.strategy ?? bot.strategy ?? "TradiAuraSmartV1"),
     leverage: Number(raw.leverage ?? bot.leverage),
@@ -149,17 +153,29 @@ export function fmtMoney(value: number | string | null | undefined, digits?: num
 }
 
 /**
- * The symbol to display for a bot. Auto-select bots store a placeholder in the
- * `symbol` column but the real currently-selected coin in `config_json`, so we
- * prefer the config value and only fall back to the DB column when missing.
+ * The symbol to display for a bot. Auto-select bots seed the DB `symbol` column
+ * with the live best opportunity at start and re-sync it on every successful
+ * selection, so that column is the source of truth for display. The
+ * `config_json.symbol` is just the static placeholder the UI sent at creation
+ * (e.g. BTCUSDT) and must not be shown for auto bots.
  */
 export function displaySymbol(bot: Pick<BotView, "symbol">, cfg: BotConfig): string {
+  if (cfg.autoSelect) {
+    const live = String(bot.symbol ?? "").trim();
+    return live.toUpperCase() === "AUTO" || live.toLowerCase() === "auto-select mode" ? "" : live.toUpperCase();
+  }
   const configured = String(cfg.symbol ?? "").trim();
   if (configured && configured.toUpperCase() !== "AUTO" && configured.toLowerCase() !== "auto-select mode") {
     return configured.toUpperCase();
   }
   const fallback = String(bot.symbol ?? "").trim();
   return fallback.toUpperCase() === "AUTO" || fallback.toLowerCase() === "auto-select mode" ? "" : fallback.toUpperCase();
+}
+
+/** The user-assigned name for a bot, or null when none was set. */
+export function botName(bot: Pick<BotView, "name">, cfg?: { name?: string }): string | null {
+  const name = (cfg?.name ?? bot.name ?? "").trim();
+  return name || null;
 }
 
 /** Normalizes a direction (LONG/SHORT/BUY/SELL) into a Long/Short label, or null. */

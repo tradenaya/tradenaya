@@ -1,5 +1,7 @@
 import type { MarketCandle } from "@/automation/types";
 import type { Series, MacdSeries, BollingerSeries, SupertrendSeries } from "@/automation/indicators/series";
+import type { StochRsiSeries, KeltnerSeries, IchimokuSeries, AdxSeries } from "@/automation/indicators/rich";
+import type { PatternSignal } from "@/automation/indicators/patterns";
 import type { ReasonCode } from "./config";
 
 export type TradiAuraSignal = "LONG_SIGNAL" | "SHORT_SIGNAL" | "NO_TRADE";
@@ -26,6 +28,8 @@ export interface SideFactors {
   volatility: FactorResult;
   entryLocation: FactorResult;
   riskReward: FactorResult;
+  /** Volume-flow / trend-confirmation: OBV slope, MFI zone, CCI. */
+  flow: FactorResult;
 }
 
 /** Per-side evaluation: signed net score (positive = this side is favored). */
@@ -60,11 +64,22 @@ export interface MarketView {
   bollinger: BollingerSeries;
   supertrend: SupertrendSeries;
   vwap: Series;
+  stochRsi: StochRsiSeries;
+  keltner: KeltnerSeries;
+  ichimoku: IchimokuSeries;
+  psar: Series;
+  cci: Series;
+  mfi: Series;
+  obv: Series;
+  williamsR: Series;
+  adxDetails: AdxSeries;
   roc14: Series;
   roc50: Series;
   volumeAverage: Series;
   swings: { highs: SwingPoint[]; lows: SwingPoint[] };
   levels: SupportResistanceLevels;
+  /** Detected candlestick + chart patterns on the current candle. */
+  patterns: PatternSignal[];
   price: number;
   atrValue: number;
 }

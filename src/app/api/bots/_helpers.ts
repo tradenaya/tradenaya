@@ -31,6 +31,7 @@ export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig 
     symbol: body.symbol as string,
     timeframe: body.timeframe as string,
     leverage: n(body.leverage) as number,
+    name: typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 100) : undefined,
     autoSelect: body.autoSelect === true,
     leverageMode: body.leverageMode === "auto" ? "auto" : "manual",
     leveragePercent: n(body.leveragePercent),

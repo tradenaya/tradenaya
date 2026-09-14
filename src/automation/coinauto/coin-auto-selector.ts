@@ -213,6 +213,9 @@ export class CoinAutoSelector {
     await mapConcurrently(candidates, 4, async (candidate) => {
       try {
         const snapshot = await adapter.getSnapshot(candidate.symbol, timeframe);
+        if (snapshot.isFresh === "STALE" || snapshot.isFresh === "UNAVAILABLE") {
+          return;
+        }
         const candles =
           snapshot.candles[timeframe] ??
           snapshot.candles[candlesKey] ??

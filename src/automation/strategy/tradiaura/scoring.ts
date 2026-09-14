@@ -3,6 +3,7 @@ import { REASON, type ReasonCode, type TradiAuraConfig } from "./config";
 import { humanizeFactor } from "./humanize";
 import {
   evaluateEntryLocation,
+  evaluateFlow,
   evaluateMomentum,
   evaluateParticipation,
   evaluateRegime,
@@ -45,6 +46,7 @@ const FACTOR_ORDER: (keyof SideFactors)[] = [
   "volatility",
   "entryLocation",
   "riskReward",
+  "flow",
 ];
 
 function evaluateSide(
@@ -74,7 +76,7 @@ function evaluateSide(
   netScore += weights.trend * trendScore;
   report?.(`${side} · Trend: ${humanizeFactor(trend.code)} (${round(trendScore)}).`);
 
-  const structure = evaluateStructure(view, thresholds);
+  const structure = evaluateStructure(view);
   const structureScore = side === "LONG" ? structure.score : -structure.score;
   factors.structure = { code: structure.code, score: structureScore, magnitude: Math.abs(structure.score) };
   netScore += weights.structure * structureScore;
@@ -111,6 +113,12 @@ function evaluateSide(
   factors.riskReward = riskReward;
   netScore += weights.riskReward * riskReward.score;
   report?.(`${side} · Risk/Reward: ${humanizeFactor(riskReward.code)} (${round(riskReward.score)}).`);
+
+  const flow = evaluateFlow(view, thresholds);
+  const flowScore = side === "LONG" ? flow.score : -flow.score;
+  factors.flow = { code: flow.code, score: flowScore, magnitude: flow.magnitude };
+  netScore += weights.flow * flowScore;
+  report?.(`${side} · Flow: ${humanizeFactor(flow.code)} (${round(flowScore)}).`);
 
   report?.(`${side} net score: ${round(netScore)} (threshold ${thresholds.minNetScore}).`);
   return { side, netScore, factors, vetoes };

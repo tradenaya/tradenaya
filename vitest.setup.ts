@@ -1,10 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-console.log("SETUP RUNNING, DB_USER before:", process.env.DB_USER);
 
 const envPath = path.resolve(process.cwd(), ".env.local");
-console.log("SETUP envPath:", envPath, "exists:", fs.existsSync(envPath));try {
+try {
   const content = fs.readFileSync(envPath, "utf8");
   for (const line of content.split("\n")) {
     const trimmed = line.trim();

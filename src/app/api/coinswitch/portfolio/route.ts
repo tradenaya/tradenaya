@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
     const data = await response.json();
 
     if (!response.ok) {
-      console.log("PORTFOLIO ERROR:", data);
       throw new Error(JSON.stringify(data));
     }
 

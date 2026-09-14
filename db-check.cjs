@@ -18,14 +18,9 @@ for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
     database: env.DB_NAME,
   });
   const [before] = await db.query("SELECT COUNT(*) AS c, MAX(id) AS max_id FROM automation_scheduler_events");
-  console.log("EVENTS BEFORE:", JSON.stringify(before[0]));
-  console.log("Waiting 15s to see if the scheduler emits events...");
   await new Promise((r) => setTimeout(r, 15000));
   const [after] = await db.query("SELECT COUNT(*) AS c, MAX(id) AS max_id FROM automation_scheduler_events");
-  console.log("EVENTS AFTER:", JSON.stringify(after[0]));
   const [rows] = await db.query("SELECT id, type, message, created_at FROM automation_scheduler_events WHERE id > ? ORDER BY id ASC LIMIT 20", [before[0].max_id ?? 0]);
-  for (const e of rows) console.log("NEW EVENT:", JSON.stringify(e));
   const [b2] = await db.query("SELECT id, status, desired_status, heartbeat_at, last_analysis_at, next_run_at, lease_owner, lease_expires_at FROM automation_bots WHERE id = 2");
-  console.log("BOT2 AFTER:", JSON.stringify(b2[0]));
   await db.end();
 })().catch((e) => { console.error("ERROR:", e.message); process.exit(1); });

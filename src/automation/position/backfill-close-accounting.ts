@@ -40,7 +40,6 @@ async function main(): Promise<void> {
     );
     updated += 1;
   }
-  console.log(`Backfilled ${updated} closed-trade row(s).`);
 }
 
 function round(n: number): number {

@@ -1,6 +1,5 @@
 import type { CoinSwitchClientLike, CloseDetectionResult, PositionSnapshot } from "./PositionManagerTypes";
-
-const FILLED_STATUSES = new Set(["FILLED", "CLOSED", "ALL_DONE", "EXECUTED", "FILLED_CLOSED"]);
+import { isFullyFilled } from "@/automation/executor/order-status";
 
 export class TPMonitor {
   constructor(private readonly client: CoinSwitchClientLike) {}
@@ -23,7 +22,7 @@ export class TPMonitor {
     const order = await this.client.getOrderStatus(position.userId, position.takeProfitOrderId).catch(() => null);
     const status = order?.status ?? "";
 
-    if (FILLED_STATUSES.has(status)) {
+    if (isFullyFilled(order?.status)) {
       return {
         shouldClose: true,
         reason: "TAKE_PROFIT",

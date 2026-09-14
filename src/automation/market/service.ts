@@ -197,7 +197,12 @@ export class ServerMarketDataService {
     if (userId > 0) this.userIdsBySymbol.set(normalized, userId);
 
     let candles = this.cache.getCandles(normalized, String(minutes));
-    const needBackfill = candles.length < 2 || (options.startTime !== undefined && candles[0].timestamp > options.startTime);
+    // Backfill whenever the cached series is missing OR stale: a count-only gate
+    // lets old candles linger forever, re-selecting the same phantom coin.
+    const needBackfill =
+      candles.length < 2 ||
+      this.cache.candleFreshness(normalized, String(minutes)) !== "FRESH" ||
+      (options.startTime !== undefined && candles[0].timestamp > options.startTime);
 
     if (needBackfill) {
       const history = await this.restClient.getHistoricalCandles(userId, normalized, String(minutes), {
@@ -378,7 +383,7 @@ export class ServerMarketDataService {
         return;
       }
       if (!symbol) return;
-      this.cache.setCandles(symbol, candle.timeframe, [candle]);
+      this.cache.upsertCandles(symbol, candle.timeframe, [candle]);
       this.subscriptions.markSubscribed(symbol, true);
       this.emit("CANDLE", symbol, candle);
     });

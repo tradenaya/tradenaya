@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, type BotView } from "./bot-config";
+import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 
 export function BotOverviewCards() {
   const router = useRouter();
@@ -72,6 +72,7 @@ export function BotOverviewCards() {
               const lastError = bot.lastError && !live ? bot.lastError : null;
               const sym = displaySymbol(bot, config);
               const dir = sideLabel(config.side);
+              const name = botName(bot, config);
               return (
                 <button
                   key={bot.id}
@@ -90,6 +91,7 @@ export function BotOverviewCards() {
                       </div>
                       <div>
                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                          {name && <span className="max-w-40 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                           <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
                           {config.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
                           {dir && (

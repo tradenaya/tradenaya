@@ -45,7 +45,7 @@ export default function SigninPage() {
         customerLogin({
           tenantId: 1,
           tenantCode: "tradenaya",
-          tenantName: "TradeNaya",
+          tenantName: "Tradenaya",
           profileId: data.user.id,
           profileCode: `CUS-${data.user.id}`,
           firstName: data.user.firstName,
@@ -65,7 +65,7 @@ export default function SigninPage() {
   return (
     <AuthShell
       title="Welcome back"
-      subtitle="Sign in to your TradeNaya account"
+      subtitle="Sign in to your Tradenaya account"
       footer={
         <p className="text-center text-sm" style={{ color: "var(--muted-foreground)" }}>
           Don&apos;t have an account?{" "}

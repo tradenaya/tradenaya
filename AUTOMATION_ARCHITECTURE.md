@@ -1,10 +1,10 @@
-# TradeNaya Automation Architecture
+# Tradenaya Automation Architecture
 
 ## Purpose
 This document captures the automation architecture added on top of the existing manual futures trading flow so another developer or AI agent can understand the system quickly.
 
 ## Project Context
-TradeNaya already provides:
+Tradenaya already provides:
 - customer authentication
 - CoinSwitch account connection
 - futures market pages

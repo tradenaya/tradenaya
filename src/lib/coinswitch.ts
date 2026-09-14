@@ -86,13 +86,6 @@ export async function coinSwitchRequest(
   );
 
   // ... rest of the function stays exactly the same
-console.log("========== COINSWITCH REQUEST ==========");
-console.log("URL:", url);
-console.log("SIGN PATH:", signPath);
-console.log("METHOD:", method);
-console.log("EPOCH:", epoch);
-console.log("API KEY:", apiKey);
-console.log("========================================");
 
   const response = await fetch(url, {
 

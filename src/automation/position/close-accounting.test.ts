@@ -13,6 +13,7 @@ function position(overrides: Partial<PositionRecord> = {}): PositionRecord {
     state: "CLOSED",
     quantity: 13700,
     filledQuantity: 13700,
+    remainingQuantity: 0,
     entryPrice: 0.004887,
     currentPrice: null,
     stopLoss: null,

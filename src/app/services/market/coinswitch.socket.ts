@@ -8,12 +8,10 @@ export function startCoinSwitchSocket(coins: string[]) {
 
 
   if (socket) {
-    console.log("Socket already running");
     return;
   }
 
 
-  console.log("Creating CoinSwitch socket...");
 
 
   socket = io(
@@ -31,10 +29,6 @@ export function startCoinSwitchSocket(coins: string[]) {
     () => {
 
 
-      console.log(
-        "Connected:",
-        socket.id
-      );
 
 
       coins.forEach(
@@ -53,10 +47,6 @@ export function startCoinSwitchSocket(coins: string[]) {
           );
 
 
-          console.log(
-            "Subscribed",
-            pair
-          );
 
 
         }
@@ -70,11 +60,6 @@ export function startCoinSwitchSocket(coins: string[]) {
 
 socket.onAny((event:any, data:any)=>{
 
-  console.log(
-    "🔥 SOCKET EVENT RECEIVED:",
-    event,
-    data
-  );
 
 });
 
@@ -84,9 +69,6 @@ socket.onAny((event:any, data:any)=>{
     "disconnect",
     () => {
 
-      console.log(
-        "Socket disconnected"
-      );
 
       socket = null;
 

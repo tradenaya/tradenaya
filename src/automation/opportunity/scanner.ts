@@ -16,6 +16,7 @@ export interface CoinOpportunityFactors {
   volatility: number;
   entryLocation: number;
   riskReward: number;
+  flow: number;
 }
 
 export interface CoinOpportunity {
@@ -43,6 +44,8 @@ export interface CoinOpportunity {
   entryZone?: number;
   stopLoss?: number;
   takeProfit?: number;
+  /** Detected candlestick / chart pattern codes on the current candle. */
+  patterns?: string[];
   tradable: boolean;
   /** Populated by the analyzer route from the 24h ticker (not part of the scan). */
   quoteVolume24h?: number;
@@ -69,6 +72,7 @@ export const OPPORTUNITY_WEIGHTS: CoinOpportunityFactors = {
   volatility: 0.05,
   entryLocation: 0.15,
   riskReward: 0.1,
+  flow: 0.05,
 };
 
 const FACTOR_KEYS: (keyof CoinOpportunityFactors)[] = [
@@ -80,6 +84,7 @@ const FACTOR_KEYS: (keyof CoinOpportunityFactors)[] = [
   "volatility",
   "entryLocation",
   "riskReward",
+  "flow",
 ];
 
 const toFactor = (score: number): number => clamp(Number.isFinite(score) ? score : 0, 0, 1);
@@ -121,7 +126,7 @@ export function scanCandles(
       score: 0,
       trend: "SIDEWAYS",
       regime: "SIDEWAYS",
-      factors: { regime: 0, trend: 0, structure: 0, momentum: 0, participation: 0, volatility: 0, entryLocation: 0, riskReward: 0 },
+      factors: { regime: 0, trend: 0, structure: 0, momentum: 0, participation: 0, volatility: 0, entryLocation: 0, riskReward: 0, flow: 0 },
       vetoes: [],
       reasons: ["not enough market data yet"],
       reasonsText: "not enough market data yet",
@@ -216,6 +221,7 @@ export function scanCandles(
       volatility: round1(lead.factors.volatility.score),
       entryLocation: round1(lead.factors.entryLocation.score),
       riskReward: round1(lead.factors.riskReward.score),
+      flow: round1(lead.factors.flow.score),
     },
     vetoes: lead.vetoes.map(humanizeReason),
     reasons,
@@ -230,6 +236,7 @@ export function scanCandles(
     entryZone: analysis.entryZone != null ? round1(analysis.entryZone) : undefined,
     stopLoss: analysis.stopLossSuggestion != null ? round1(analysis.stopLossSuggestion) : undefined,
     takeProfit: analysis.takeProfitSuggestion != null ? round1(analysis.takeProfitSuggestion) : undefined,
+    patterns: entryView.patterns.map((p) => p.code),
     tradable: true,
   };
 }

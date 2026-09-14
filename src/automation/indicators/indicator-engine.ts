@@ -12,6 +12,8 @@ import {
   supertrendSeries,
   vwapSeries,
 } from "./series";
+import { lastRich, stochRsiSeries, keltnerSeries, ichimokuSeries, psarSeries, cciSeries, mfiSeries, obvSeries, williamsRSeries, adxPdiMdiSeries } from "./rich";
+import { detectPatterns } from "./patterns";
 
 export interface IndicatorEngine {
   compute(candles: MarketCandle[]): IndicatorBundle;
@@ -52,6 +54,15 @@ export class TechnicalIndicatorEngine implements IndicatorEngine {
     const average = lastValue(smaSeries(volumes, 20)) ?? undefined;
     const lastClose = closes[closes.length - 1];
 
+    const stoch = stochRsiSeries(closes, 14, 14, 3, 3);
+    const keltner = keltnerSeries(candles, 20, 10, 2);
+    const ichimoku = ichimokuSeries(candles, 9, 26, 52, 26);
+    const dm = adxPdiMdiSeries(candles, 14);
+    const obv = obvSeries(candles);
+    const obvNow = lastRich(obv);
+    const obvPrev = obv.length > 1 ? obv[obv.length - 2] : null;
+    const atrLast = lastRich(dm.adx) != null ? atr : undefined;
+
     return {
       ema: ema20,
       sma: sma50,
@@ -89,6 +100,26 @@ export class TechnicalIndicatorEngine implements IndicatorEngine {
       },
       roc14,
       roc50,
+      ta: {
+        stochRsiK: lastRich(stoch.k) ?? undefined,
+        stochRsiD: lastRich(stoch.d) ?? undefined,
+        cci: lastRich(cciSeries(candles, 20)) ?? undefined,
+        mfi: lastRich(mfiSeries(candles, 14)) ?? undefined,
+        obv: obvNow ?? undefined,
+        obvSlope: obvNow != null && obvPrev != null ? obvNow - obvPrev : undefined,
+        williamsR: lastRich(williamsRSeries(candles, 14)) ?? undefined,
+        psar: lastRich(psarSeries(candles)) ?? undefined,
+        pdi: lastRich(dm.pdi) ?? undefined,
+        mdi: lastRich(dm.mdi) ?? undefined,
+        keltnerUpper: lastRich(keltner.upper) ?? undefined,
+        keltnerMiddle: lastRich(keltner.middle) ?? undefined,
+        keltnerLower: lastRich(keltner.lower) ?? undefined,
+        ichimokuConversion: lastRich(ichimoku.conversion) ?? undefined,
+        ichimokuBase: lastRich(ichimoku.base) ?? undefined,
+        ichimokuSpanA: lastRich(ichimoku.spanA) ?? undefined,
+        ichimokuSpanB: lastRich(ichimoku.spanB) ?? undefined,
+        patterns: detectPatterns(candles, atrLast).map((p) => p.code),
+      },
     };
   }
 }

@@ -1,6 +1,7 @@
 import type { CoinSwitchClientLike, PositionSnapshot, PositionRecord, PositionStoreLike } from "./PositionManagerTypes";
 import { clientOrderId } from "@/automation/executor/order-id";
 import { OrderHistoryRepository, type OrderHistoryInsert } from "@/automation/order-history";
+import { validateStopLossBoundary } from "@/automation/risk/liquidation-safety";
 
 const TERMINAL_STATUSES = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
 
@@ -69,6 +70,24 @@ export class TrailingStopManager {
       return { moved: false, newStopLoss: current };
     }
 
+    // ── Mandatory liquidation-safety gate ───────────────────────────────
+    // A trailing SL must stay safely on the favorable side of the exchange's
+    // authoritative liquidation price: for a LONG the stop sits ABOVE it, for
+    // a SHORT BELOW it. When the exchange liquidation price is temporarily
+    // unavailable the boundary is indeterminate and the replacement is SKIPPED
+    // (the incumbent stop is kept) so the position is never left unprotected
+    // and never moves into a stop that could not fill before liquidation.
+    const gate = validateStopLossBoundary({
+      side: position.side,
+      stopLoss: candidate,
+      liquidationPrice: snapshot.exchangePosition?.liquidationPrice ?? null,
+      entryPrice: entry,
+    });
+    if (!gate.determinable || !gate.ok) {
+      await this.store.updateTrailing(position.id, current, highest, lowest);
+      return { moved: false, newStopLoss: current };
+    }
+
     const placed = await this.replaceStopOrder(position, candidate);
     if (!placed) {
       await this.store.updateTrailing(position.id, current, highest, lowest);
@@ -110,11 +129,9 @@ export class TrailingStopManager {
       newOrderId = order.orderId ?? null;
       if (!newOrderId) throw new Error("replacement SL placed but no order id returned");
     } catch (error) {
-      console.log(`[PROTECTION] Replacement SL create FAILED — keeping existing SL ${position.stopLossOrderId ?? "(none)"}`, error instanceof Error ? error.message : String(error));
+      void error;
       return false;
     }
-
-    console.log("[PROTECTION] Replacement SL created", newOrderId);
 
     let confirmed = false;
     try {
@@ -129,17 +146,14 @@ export class TrailingStopManager {
       // or it filled instantly). Cancel the just-created replacement and keep
       // the existing SL so the position is never left with a phantom/unverified
       // protection and is never left unprotected.
-      console.log("[PROTECTION] Replacement SL NOT confirmed — cancelling replacement and KEEPING existing SL", position.stopLossOrderId ?? "(none)");
       await this.client.cancelOrder(position.userId, newOrderId).catch(() => null);
       return false;
     }
-    console.log("[PROTECTION] Replacement SL confirmed active", newOrderId);
 
     // Only now is it safe to remove the obsolete SL.
     if (position.stopLossOrderId) {
       await this.client.cancelOrder(position.userId, position.stopLossOrderId).catch(() => null);
       this.recordProtective("STOP_MARKET", position, position.stopLossOrderId, "CANCELLED", newStop).catch(() => null);
-      console.log("[PROTECTION] Old SL cancelled", position.stopLossOrderId);
     }
 
     this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);

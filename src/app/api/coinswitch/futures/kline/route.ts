@@ -29,7 +29,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
-    console.log("KLINE ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

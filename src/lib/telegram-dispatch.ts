@@ -43,10 +43,10 @@ async function ensureTable(): Promise<void> {
 async function isAlreadySent(dedupeKey: string, type: string): Promise<boolean> {
   try {
     await ensureTable();
-    const [rows] = (await db.query(
+    const [rows] = await db.query<RowDataPacket[]>(
       `SELECT id FROM telegram_sent_log WHERE dedupe_key = ? AND type = ? LIMIT 1;`,
       [dedupeKey, type],
-    )) as [RowDataPacket[]];
+    );
     return rows.length > 0;
   } catch {
     // If the dedupe lookup fails, err on the side of sending (better to show a

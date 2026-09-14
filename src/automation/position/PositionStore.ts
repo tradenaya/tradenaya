@@ -23,6 +23,7 @@ export class PositionStore {
         state VARCHAR(30) NOT NULL,
         quantity DECIMAL(18,8) NULL,
         filled_quantity DECIMAL(18,8) NULL,
+        remaining_quantity DECIMAL(18,8) NULL,
         entry_price DECIMAL(18,8) NULL,
         current_price DECIMAL(18,8) NULL,
         stop_loss DECIMAL(18,8) NULL,
@@ -56,6 +57,27 @@ export class PositionStore {
         KEY idx_user_state (user_id, state)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Migrate execution_id from INT to BIGINT UNSIGNED if the table was created
+    // with the old narrower type.  CREATE TABLE IF NOT EXISTS won't fix it.
+    const [cols] = await db.query(
+      `SELECT DATA_TYPE FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'automation_positions' AND COLUMN_NAME = 'execution_id';`,
+    );
+    const currentType = (cols as any[])[0]?.DATA_TYPE;
+    if (currentType && currentType !== "bigint") {
+      await db.query(`ALTER TABLE automation_positions MODIFY COLUMN execution_id BIGINT UNSIGNED NOT NULL;`);
+    }
+
+    // Migrate tables created before the trade-fill columns existed.
+    const [fillCols] = await db.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'automation_positions';`,
+    );
+    const fillColumns = new Set((fillCols as Array<{ COLUMN_NAME: string }>).map((row) => row.COLUMN_NAME));
+    if (!fillColumns.has("remaining_quantity")) {
+      await db.query(`ALTER TABLE automation_positions ADD COLUMN remaining_quantity DECIMAL(18,8) NULL;`);
+    }
   }
 
   async ensureEventsTable() {
@@ -121,6 +143,17 @@ export class PositionStore {
     if (!columns.has("funding_fee")) pending.push("ADD COLUMN funding_fee DECIMAL(18,8) NULL DEFAULT 0");
     if (pending.length) {
       await db.query(`ALTER TABLE automation_closed_trades ${pending.join(", ")};`);
+    }
+
+    // Migrate execution_id from INT to BIGINT UNSIGNED if the table was created
+    // with the old narrower type.
+    const [execCol] = await db.query(
+      `SELECT DATA_TYPE FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'automation_closed_trades' AND COLUMN_NAME = 'execution_id';`,
+    );
+    const execType = (execCol as any[])[0]?.DATA_TYPE;
+    if (execType && execType !== "bigint") {
+      await db.query(`ALTER TABLE automation_closed_trades MODIFY COLUMN execution_id BIGINT UNSIGNED NOT NULL;`);
     }
   }
 
@@ -219,6 +252,15 @@ export class PositionStore {
     );
   }
 
+  /** Persist the actual filled + remaining resting quantity so partial fills survive restarts. */
+  async updateFillQuantities(id: number, filledQuantity: number | null, remainingQuantity: number | null) {
+    await this.ensureTable();
+    await db.query(
+      `UPDATE automation_positions SET filled_quantity = ?, remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
+      [filledQuantity, remainingQuantity, id],
+    );
+  }
+
   async updateProtection(id: number, stopLossOrderId: string | null, takeProfitOrderId: string | null) {
     await this.ensureTable();
     await db.query(
@@ -243,16 +285,17 @@ export class PositionStore {
     );
   }
 
-  async markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number) {
+  async markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number, closedAt?: string) {
     await this.ensureTable();
+    const closedAtTs = closedAt ?? new Date().toISOString();
     await db.query(
       `UPDATE automation_positions SET
         state = 'CLOSED', exit_price = ?, exit_reason = ?, realized_pnl = ?, fees = ?,
         sl_triggered = CASE WHEN ? = 'STOP_LOSS' THEN 1 ELSE sl_triggered END,
         tp_triggered = CASE WHEN ? = 'TAKE_PROFIT' THEN 1 ELSE tp_triggered END,
-        closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        closed_at = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?;`,
-      [exitPrice, reason, realizedPnl, fees, reason, reason, id],
+      [exitPrice, reason, realizedPnl, fees, reason, reason, closedAtTs, id],
     );
   }
 
@@ -363,6 +406,7 @@ export class PositionStore {
       state: row.state as PositionState,
       quantity: row.quantity != null ? Number(row.quantity) : null,
       filledQuantity: row.filled_quantity != null ? Number(row.filled_quantity) : null,
+      remainingQuantity: row.remaining_quantity != null ? Number(row.remaining_quantity) : null,
       entryPrice: row.entry_price != null ? Number(row.entry_price) : null,
       currentPrice: row.current_price != null ? Number(row.current_price) : null,
       stopLoss: row.stop_loss != null ? Number(row.stop_loss) : null,

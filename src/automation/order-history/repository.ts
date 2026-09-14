@@ -62,6 +62,7 @@ function mapRow(row: Record<string, unknown>): OrderHistoryRow {
 
 export interface IOrderHistoryRepository {
   getOrders(userId: number, query: OrderHistoryQuery): Promise<Paged<OrderHistoryRow>>;
+  findExistingExchangeOrderIds(userId: number, orderIds: string[]): Promise<Set<string>>;
 }
 
 export class OrderHistoryRepository implements IOrderHistoryRepository {
@@ -151,6 +152,26 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
         input.rawResponse,
       ],
     );
+  }
+
+  async findExistingExchangeOrderIds(userId: number, orderIds: string[]): Promise<Set<string>> {
+    await this.ensureTable();
+    const cleaned = [...new Set(orderIds.filter((id) => id && id.trim()))];
+    if (cleaned.length === 0) return new Set();
+    const existing = new Set<string>();
+    for (let i = 0; i < cleaned.length; i += 500) {
+      const chunk = cleaned.slice(i, i + 500);
+      const placeholders = chunk.map(() => "?").join(",");
+      const [rows] = await db.query(
+        `SELECT exchange_order_id FROM futures_orders_history
+         WHERE user_id = ? AND exchange_order_id IN (${placeholders});`,
+        [userId, ...chunk],
+      );
+      for (const row of rows as Array<{ exchange_order_id: string }>) {
+        if (row.exchange_order_id) existing.add(String(row.exchange_order_id));
+      }
+    }
+    return existing;
   }
 
   async getOrders(userId: number, query: OrderHistoryQuery): Promise<Paged<OrderHistoryRow>> {

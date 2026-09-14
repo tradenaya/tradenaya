@@ -51,7 +51,6 @@ export async function GET(req: NextRequest) {
     const filtered = positions.filter((p) => p && Number(p.position_size) > 0);
     return NextResponse.json({ success: true, data: filtered });
   } catch (error: any) {
-    console.log("ALL POSITIONS ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

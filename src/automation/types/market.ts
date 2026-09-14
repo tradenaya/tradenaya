@@ -81,4 +81,25 @@ export interface IndicatorBundle {
   roc14?: number;
   /** 50-period rate of change (%). */
   roc50?: number;
+  /** Richer technical indicators from the external TA library. */
+  ta?: {
+    stochRsiK?: number;
+    stochRsiD?: number;
+    cci?: number;
+    mfi?: number;
+    obv?: number;
+    obvSlope?: number;
+    williamsR?: number;
+    psar?: number;
+    pdi?: number;
+    mdi?: number;
+    keltnerUpper?: number;
+    keltnerMiddle?: number;
+    keltnerLower?: number;
+    ichimokuConversion?: number;
+    ichimokuBase?: number;
+    ichimokuSpanA?: number;
+    ichimokuSpanB?: number;
+    patterns?: string[];
+  };
 }

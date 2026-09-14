@@ -143,6 +143,31 @@ describe("ServerMarketDataService", () => {
     expect(cache.getSnapshot("BTCUSDT")).not.toBeNull();
   });
 
+  it("keeps REST history when a live WebSocket candle arrives", async () => {
+    const { service, socket } = buildService({
+      restTicker: { s: "BTCUSDT", c: "100", b: "99", a: "101" },
+      klines: [
+        klineRow(NOW - 600_000, 98),
+        klineRow(NOW - 360_000, 99),
+        klineRow(NOW - 120_000, 100),
+      ],
+    });
+
+    const before = await service.getSnapshot(1, "BTCUSDT", "5m");
+    expect(before.candles["5"]).toHaveLength(3);
+
+    // live WS update for the in-progress candle (same bucket key "5")
+    socket.pushCandle({
+      s: "BTCUSDT", i: "5", o: "100", h: "102", l: "99", c: "101",
+      v: "5", q: "", x: false, t: NOW - 60_000, T: NOW + 120_000, ts: NOW,
+    });
+
+    const after = await service.getSnapshot(1, "BTCUSDT", "5m");
+    expect(after.candles["5"].length).toBeGreaterThanOrEqual(4);
+    expect(after.candles["5"].length).toBeLessThanOrEqual(5);
+    expect(after.candles["5"].map((c) => c.timestamp)).toContain(NOW - 60_000);
+  });
+
   it("returns STALE when the cache is old and REST fails", async () => {
     const { service, cache } = buildService();
     // prime cache with an old ticker and old candles
@@ -159,6 +184,24 @@ describe("ServerMarketDataService", () => {
 
     const snapshot = await service.getSnapshot(1, "BTCUSDT", "5");
     expect(snapshot.isFresh).toBe("STALE");
+  });
+
+  it("re-backfills a stale cached series when REST recovers", async () => {
+    const { service, cache } = buildService({
+      restTicker: { s: "BTCUSDT", c: "100", b: "99", a: "101" },
+      klines: [klineRow(NOW - 60_000, 100), klineRow(NOW - 360_000, 98)],
+    });
+    // Simulate a long-lived process that cached candles hours ago and lost the
+    // exchange stream: count ≥ 2 so the old gate would have skipped REST.
+    cache.setCandles("BTCUSDT", "5", [klineRow(NOW - 3_600_000, 50)].map((r) => ({
+      timestamp: r[0], open: r[1], high: r[2], low: r[3], close: r[4], volume: r[5], timeframe: "5",
+    })));
+    expect(cache.candleFreshness("BTCUSDT", "5")).toBe("STALE");
+
+    const snapshot = await service.getSnapshot(1, "BTCUSDT", "5");
+    expect(snapshot.isFresh).toBe("FRESH");
+    expect(snapshot.candles["5"]).toHaveLength(2);
+    expect(cache.candleFreshness("BTCUSDT", "5")).toBe("FRESH");
   });
 
   it("publishes validated tickers from the WebSocket into the cache", () => {

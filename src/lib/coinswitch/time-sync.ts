@@ -34,11 +34,6 @@ async function fetchOffset(): Promise<number> {
     const offset = serverTime - localNow;
 
     if (isDev) {
-      console.log("[CoinSwitch TimeSync] fetched offset", {
-        serverTime,
-        localNow,
-        offset,
-      });
     }
 
     cachedOffset = offset;
@@ -74,13 +69,6 @@ export async function getCoinSwitchEpoch(): Promise<string> {
   if (isDev) {
     const localNow = Date.now();
     const diff = Number(epoch) - localNow;
-    console.log("[CoinSwitch TimeSync] epoch", {
-      localNow,
-      serverEstimate: localNow + offset,
-      offset,
-      epoch,
-      diffFromLocal: diff,
-    });
   }
 
   return epoch;

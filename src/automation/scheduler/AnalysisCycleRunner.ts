@@ -99,6 +99,7 @@ export class AnalysisCycleRunner {
     }
 
     await this.deps.stateManager.transition(bot.id, this.asState(bot.status), "ANALYZING");
+    await this.deps.lifecycle.setRuntimeError(bot.id, null);
     await this.deps.lifecycle.updateBotHeartbeat(bot.id, new Date().toISOString(), null);
     await this.deps.lifecycle.updateHeartbeatAt(bot.id);
     await this.deps.events.emit({ type: "ANALYSIS_STARTED", botId: bot.id, userId: bot.userId, message: `Analysis cycle started for ${bot.symbol}` });
@@ -214,6 +215,27 @@ export class AnalysisCycleRunner {
     await this.deps.lifecycle.updateHeartbeatAt(bot.id);
 
     switch (executionResult.state) {
+      case "MONITORING_ENTRY":
+        // The LIMIT entry is still resting on the exchange (possibly partially
+        // filled). Release this cycle; the server-side PositionMonitor keeps
+        // watching the order until it fills, invalidates, is explicitly
+        // cancelled, or reaches its configured orderExpiryMinutes (persisted
+        // as expires_at). handoff() creates/keeps the position row the monitor
+        // operates on and parks the bot in ORDER_PENDING so no duplicate entry
+        // order can be placed by the next analysis cycle.
+        await this.deps.lifecycle.setRetryCount(bot.id, 0);
+        await this.handoff(bot);
+        await this.deps.events.emit({
+          type: "ENTRY_ORDER_CREATED",
+          botId: bot.id,
+          userId: bot.userId,
+          message: executionResult.remainingQuantity != null
+            ? `Entry order for ${cycleSymbol} resting with ${executionResult.remainingQuantity} remaining — monitored until fill, invalidation, cancellation or expiry`
+            : `Entry order for ${cycleSymbol} resting on the exchange — monitored until fill, invalidation, cancellation or expiry`,
+          data: { executionId: executionResult.executionId, filledQuantity: executionResult.filledQuantity, remainingQuantity: executionResult.remainingQuantity },
+        });
+        liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message: executionResult.message });
+        return { executed: true, state: "ORDER_PENDING", action: "ANALYZED", message: executionResult.message };
       case "ENTRY_FILLED":
       case "PARTIALLY_FILLED":
         await this.deps.lifecycle.setRetryCount(bot.id, 0);
@@ -335,7 +357,12 @@ export class AnalysisCycleRunner {
 
   private async completeAnalysis(bot: BotRuntimeState, status: "WAIT" | "RISK_REJECTED" | "CANCELLED", message: string): Promise<void> {
     const config = this.tryLoadConfig(bot);
-    const interval = config ? intervalMsFromTimeframe(config.timeframe, this.deps.config.analysisIntervalMinutes * 60_000) : this.deps.config.analysisIntervalMinutes * 60_000;
+    const analysisIntervalMs = this.deps.config.analysisIntervalMinutes * 60_000;
+    const baseInterval = config ? intervalMsFromTimeframe(config.timeframe, analysisIntervalMs) : analysisIntervalMs;
+    // Auto-select bots rotate to the strongest current coin, so never wait a full
+    // long timeframe (1h/4h…) before noticing a better setup appeared. Re-check at
+    // least as often as the configured analysis interval.
+    const interval = config?.autoSelect ? Math.min(baseInterval, analysisIntervalMs) : baseInterval;
     await this.deps.lifecycle.updateBotHeartbeat(bot.id, new Date().toISOString(), null);
     await this.deps.lifecycle.updateHeartbeatAt(bot.id);
     await this.deps.stateManager.transition(bot.id, this.asState(bot.status), "RUNNING");
@@ -375,6 +402,22 @@ export class AnalysisCycleRunner {
         ? balance * ((Number(config.walletPercent) || 0) / 100)
         : fixedCapital;
 
+    // --- Persistent peak-equity tracking for drawdown protection ---
+    const equity = balance;
+    const persistedPeak = bot.peakEquity ?? null;
+    let peakForDrawdown: number;
+    if (walletBalance != null && equity > 0) {
+      // Wallet fetch succeeded — update peak if equity reached a new high.
+      const newPeak = persistedPeak != null ? Math.max(persistedPeak, equity) : equity;
+      if (newPeak !== persistedPeak) {
+        void this.deps.lifecycle.updatePeakEquity(bot.id, newPeak);
+      }
+      peakForDrawdown = newPeak;
+    } else {
+      // Wallet fetch failed — use persisted peak (never reset to current equity).
+      peakForDrawdown = persistedPeak ?? equity;
+    }
+
     const input: RiskManagerInput = {
       config: {
         maxRiskPerTradePct: config.maxRiskPerTrade,
@@ -388,7 +431,7 @@ export class AnalysisCycleRunner {
         maxDrawdownPct: 15,
         minRiskRewardRatio: config.minRiskRewardRatio ?? 2,
       },
-      wallet: { balance, equity: balance },
+      wallet: { balance, equity, peakBalance: peakForDrawdown },
       capital: {
         mode: config.capitalMode,
         amount: config.capitalMode === "fixed" ? config.capital : undefined,
@@ -523,6 +566,7 @@ export class AnalysisCycleRunner {
         leverageMode: config.leverageMode ?? "auto",
       };
       await this.deps.lifecycle.setConfig(botId, JSON.stringify(updated));
+      await this.deps.lifecycle.updateSelectedCoin(botId, selected.symbol, selected.leverage);
     } catch (error) {
       console.error(`[auto-select] failed to persist selection for bot ${botId}`, error);
     }

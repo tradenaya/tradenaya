@@ -26,7 +26,7 @@ function plan(overrides: Partial<TradePlan> = {}): TradePlan {
 function fakeStore() {
   const store = {
     updateState: vi.fn(async () => {}),
-    updateFilledQuantity: vi.fn(async () => {}),
+    updateFill: vi.fn(async () => {}),
   };
   return store as unknown as ExecutionStore;
 }
@@ -56,14 +56,14 @@ describe("OrderLifecycleService.pollEntryUntilFilled", () => {
     });
     const svc = new OrderLifecycleService(client, store, fakeBotState(), { statusPollIntervalMs: 1, statusPollAttempts: 3 });
 
-    const result = await svc.pollEntryUntilFilled(1, 1, "o1");
+    const result = await svc.pollEntryUntilFilled(1, 1, "o1", { quantity: 0.002 });
 
-    expect(result).toEqual({ filled: true, filledQuantity: 0.002 });
-    expect(store.updateFilledQuantity).toHaveBeenCalledWith(1, 0.002);
+    expect(result).toEqual({ filled: true, resting: false, filledQuantity: 0.002, remainingQuantity: 0, terminal: null });
+    expect(store.updateFill).toHaveBeenCalledWith(1, 0.002, 0, 63000);
     expect(store.updateState).toHaveBeenCalledWith(1, "ENTRY_FILLED");
   });
 
-  it("detects PARTIALLY_EXECUTED as a partial fill", async () => {
+  it("tracks a PARTIALLY_EXECUTED order as partially filled with a remaining quantity instead of fully filled", async () => {
     const store = fakeStore();
     const client = makeClient({
       getOrderStatus: async () => ({
@@ -73,14 +73,17 @@ describe("OrderLifecycleService.pollEntryUntilFilled", () => {
     });
     const svc = new OrderLifecycleService(client, store, fakeBotState(), { statusPollIntervalMs: 1, statusPollAttempts: 3 });
 
-    const result = await svc.pollEntryUntilFilled(1, 1, "o1");
+    const result = await svc.pollEntryUntilFilled(1, 1, "o1", { quantity: 0.002 });
 
-    expect(result.filled).toBe(true);
+    expect(result.filled).toBe(false);
+    expect(result.resting).toBe(true);
     expect(result.filledQuantity).toBe(0.001);
+    expect(result.remainingQuantity).toBe(0.001);
+    expect(store.updateFill).toHaveBeenCalledWith(1, 0.001, 0.001, null);
     expect(store.updateState).toHaveBeenCalledWith(1, "PARTIALLY_FILLED");
   });
 
-  it("treats CANCELLATION_RAISED as not filled", async () => {
+  it("treats CANCELLATION_RAISED as a terminal outcome (not resting)", async () => {
     const store = fakeStore();
     const client = makeClient({
       getOrderStatus: async () => ({ status: "CANCELLATION_RAISED", raw: {} }),
@@ -90,10 +93,12 @@ describe("OrderLifecycleService.pollEntryUntilFilled", () => {
     const result = await svc.pollEntryUntilFilled(1, 1, "o1");
 
     expect(result.filled).toBe(false);
+    expect(result.resting).toBe(false);
+    expect(result.terminal).toBe("CANCELLATION_RAISED");
     expect(store.updateState).toHaveBeenCalledWith(1, "CANCELLED", "Entry order CANCELLATION_RAISED");
   });
 
-  it("cancels the entry and reports CANCELLED after the poll times out", async () => {
+  it("keeps a still-open order resting after the poll window ends instead of cancelling early", async () => {
     const store = fakeStore();
     const client = makeClient({
       getOrderStatus: async () => ({ status: "RAISED", raw: {} }),
@@ -102,11 +107,32 @@ describe("OrderLifecycleService.pollEntryUntilFilled", () => {
     const svc = new OrderLifecycleService(client, store, fakeBotState(), { statusPollIntervalMs: 1, statusPollAttempts: 2 });
     const cancelEntry = vi.spyOn(svc, "cancelEntry").mockResolvedValue();
 
-    const result = await svc.pollEntryUntilFilled(1, 1, "o1");
+    const result = await svc.pollEntryUntilFilled(1, 1, "o1", { quantity: 0.002 });
 
+    // The order must stay active — NEVER cancelled merely because the short
+    // polling window ended; the server-side monitor handles the full expiry.
     expect(result.filled).toBe(false);
-    expect(store.updateState).toHaveBeenCalledWith(1, "CANCELLED", "Entry order timed out waiting for fill");
-    expect(cancelEntry).toHaveBeenCalledWith(1, 1, "o1");
+    expect(result.resting).toBe(true);
+    expect(result.remainingQuantity).toBe(0.002);
+    expect(result.terminal).toBeNull();
+    expect(store.updateState).not.toHaveBeenCalledWith(1, "CANCELLED", "Entry order timed out waiting for fill");
+    expect(store.updateState).toHaveBeenCalledWith(1, "MONITORING_ENTRY");
+    expect(cancelEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns the resting remainder as remaining quantity when the order never fills in-window", async () => {
+    const store = fakeStore();
+    const client = makeClient({
+      getOrderStatus: async () => ({ status: "PARTIALLY_EXECUTED", raw: { order_id: "o1", exec_quantity: "0.0005" } }),
+    });
+    const svc = new OrderLifecycleService(client, store, fakeBotState(), { statusPollIntervalMs: 1, statusPollAttempts: 2 });
+
+    const result = await svc.pollEntryUntilFilled(1, 1, "o1", { quantity: 0.001 });
+
+    expect(result.resting).toBe(true);
+    expect(result.filledQuantity).toBe(0.0005);
+    expect(result.remainingQuantity).toBe(0.0005);
+    expect(store.updateState).toHaveBeenCalledWith(1, "PARTIALLY_FILLED");
   });
 });
 

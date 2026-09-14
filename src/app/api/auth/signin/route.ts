@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       customerId: user.id,
       tenantId: 1,
       tenantCode: "tradenaya",
-      tenantName: "TradeNaya",
+      tenantName: "Tradenaya",
       customerCode: `CUS-${user.id}`,
       firstName: user.first_name,
       lastName: user.last_name,

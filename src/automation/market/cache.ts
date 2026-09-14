@@ -65,7 +65,7 @@ export class MarketDataCache {
 
   // ---- candles ----
 
-  /** Keep the most recent `maxPerInterval` candles per symbol/interval. */
+  /** Replace the cached candles for a symbol/interval (authoritative REST history). */
   setCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 200): void {
     if (!Array.isArray(candles) || candles.length === 0) return;
     let entry = this.data.get(symbol);
@@ -73,7 +73,27 @@ export class MarketDataCache {
       entry = this.createSymbolData();
       this.data.set(symbol, entry);
     }
-    const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
+    entry.candles[interval] = this.mergeCandles([], candles, maxPerInterval);
+    entry.candlesUpdatedAt[interval] = this.now();
+    entry.lastUpdateAt = this.now();
+  }
+
+  /** Merge live candles into the cached history for a symbol/interval. */
+  upsertCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 200): void {
+    if (!Array.isArray(candles) || candles.length === 0) return;
+    let entry = this.data.get(symbol);
+    if (!entry) {
+      entry = this.createSymbolData();
+      this.data.set(symbol, entry);
+    }
+    const existing = entry.candles[interval] ?? [];
+    entry.candles[interval] = this.mergeCandles(existing, candles, maxPerInterval);
+    entry.candlesUpdatedAt[interval] = this.now();
+    entry.lastUpdateAt = this.now();
+  }
+
+  private mergeCandles(existing: MarketCandle[], incoming: MarketCandle[], maxPerInterval: number): MarketCandle[] {
+    const sorted = [...existing, ...incoming].sort((a, b) => a.timestamp - b.timestamp);
     const deduped: MarketCandle[] = [];
     for (const candle of sorted) {
       const last = deduped[deduped.length - 1];
@@ -85,9 +105,7 @@ export class MarketDataCache {
       }
       deduped.push(candle);
     }
-    entry.candles[interval] = deduped.slice(-maxPerInterval);
-    entry.candlesUpdatedAt[interval] = this.now();
-    entry.lastUpdateAt = this.now();
+    return deduped.slice(-maxPerInterval);
   }
 
   getCandles(symbol: string, interval: string): MarketCandle[] {

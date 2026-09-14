@@ -36,10 +36,6 @@ export async function GET(req: NextRequest) {
 
   } catch(error:any){
 
-    console.log(
-      "FUTURES TICKER ERROR",
-      error
-    );
 
 
     return NextResponse.json(

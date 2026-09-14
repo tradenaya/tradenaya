@@ -40,7 +40,7 @@ function txTypeOf(t: any): string {
  */
 function normalizeTransactionType(type: string): string {
   const upper = String(type).trim().toUpperCase().replace(/[^A-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-  if (upper === "PNL" || upper === "PL" || upper === "P" || upper === "R_L" || upper === "RL") return "PNL";
+  if (upper === "PNL" || upper === "PL" || upper === "P" || upper === "R_L" || upper === "RL" || upper === "P_L") return "PNL";
   if (upper === "FUNDING" || upper === "FUNDING_FEE" || upper === "FEE") return "FUNDING_FEE";
   if (upper === "COMMISSION" || upper === "FEES") return "COMMISSION";
   return upper;
@@ -77,6 +77,28 @@ export interface ExchangePosition {
   leverage: number | null;
   positionId: string | null;
   liquidationPrice: number | null;
+  maintMargin: number | null;
+  positionMargin: number | null;
+}
+
+/** Normalized closed (terminal) futures order returned by /futures/orders/closed. */
+export interface ClosedOrderRecord {
+  orderId: string | null;
+  clientOrderId: string | null;
+  status: string | null;
+  symbol: string;
+  side: string;
+  orderType: string | null;
+  quantity: number;
+  execQuantity: number;
+  price: number | null;
+  triggerPrice: number | null;
+  avgExecutionPrice: number | null;
+  executionFee: number | null;
+  realizedPnl: number | null;
+  reduceOnly: boolean;
+  createdAt: number | null;
+  updatedAt: number | null;
 }
 
 export interface FuturesTransaction {
@@ -103,6 +125,7 @@ const DEFAULT_RATE_LIMITS: Record<string, number> = {
   leverage: 6500, // Update Leverage 10/60s -> ~9/min
   positions: 3300, // Get Positions 20/60s -> ~18/min
   open_orders: 3300, // Open Orders 20/60s -> ~18/min
+  closed_orders: 3300, // Closed Orders 20/60s -> ~18/min
   wallet: 3300, // Get Wallet Balance 20/60s -> ~18/min
   instrument: 750, // Instrument Info 100/60s -> ~80/min
   klines: 2200, // Klines 30/60s -> ~27/min
@@ -122,6 +145,8 @@ function rateBudget(method: "GET" | "POST" | "DELETE", endpoint: string): { key:
       return { key: "positions", intervalMs: 3300 };
     case "/futures/orders/open":
       return { key: "open_orders", intervalMs: 3300 };
+    case "/futures/orders/closed":
+      return { key: "closed_orders", intervalMs: 3300 };
     case "/futures/wallet_balance":
       return { key: "wallet", intervalMs: 3300 };
     case "/futures/instrument_info":
@@ -282,6 +307,8 @@ export class CoinSwitchClient {
       leverage: Number(p.leverage ?? null) || null,
       positionId: p.position_id ?? null,
       liquidationPrice: Number(p.liquidation_price ?? null) || null,
+      maintMargin: Number(p.maint_margin ?? null) || null,
+      positionMargin: Number(p.position_margin ?? null) || null,
     }));
   }
 
@@ -296,6 +323,57 @@ export class CoinSwitchClient {
       status: o.status ?? null,
       raw: o,
     }));
+  }
+
+  private normalizeClosedOrder(raw: Record<string, unknown>): ClosedOrderRecord {
+    const num = (v: unknown): number => (v == null || v === "" ? 0 : Number(v));
+    const nullableNum = (v: unknown): number | null =>
+      v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+    const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+    return {
+      orderId: str(raw.order_id),
+      clientOrderId: str(raw.client_order_id),
+      status: str(raw.status),
+      symbol: typeof raw.symbol === "string" ? raw.symbol : "",
+      side: typeof raw.side === "string" ? raw.side : "",
+      orderType: str(raw.order_type),
+      quantity: num(raw.quantity),
+      execQuantity: num(raw.exec_quantity),
+      price: nullableNum(raw.price),
+      triggerPrice: nullableNum(raw.trigger_price),
+      avgExecutionPrice: nullableNum(raw.avg_execution_price),
+      executionFee: nullableNum(raw.execution_fee),
+      realizedPnl: nullableNum(raw.realised_pnl ?? raw.realized_pnl),
+      reduceOnly: raw.reduce_only === true || raw.reduce_only === 1 || String(raw.reduce_only) === "1",
+      createdAt: nullableNum(raw.created_at),
+      updatedAt: nullableNum(raw.updated_at),
+    };
+  }
+
+  /**
+   * List terminal-state futures orders (EXECUTED / PARTIALLY_EXECUTED /
+   * CANCELLED). Returns at most `limit` (max 50) orders for the given window
+   * plus a `cursor` timestamp to page further back (pass it as the next
+   * call's `toTime`). Max window is 7 days.
+   */
+  async getClosedOrders(
+    userId: number,
+    opts: { symbol?: string; status?: string; limit?: number; fromTime?: number; toTime?: number } = {},
+  ): Promise<{ orders: ClosedOrderRecord[]; cursor: number | null }> {
+    const params: Record<string, any> = { exchange: "EXCHANGE_2" };
+    if (opts.symbol) params.symbol = opts.symbol.toLowerCase();
+    if (opts.status) params.status = opts.status;
+    if (opts.limit != null) params.limit = Math.min(Math.max(opts.limit, 1), 50);
+    if (opts.fromTime != null) params.from_time = opts.fromTime;
+    if (opts.toTime != null) params.to_time = opts.toTime;
+    const data = await this.call("POST", "/futures/orders/closed", params, userId);
+    const payload = data?.data ?? data;
+    const rows = Array.isArray(payload?.orders) ? payload.orders : [];
+    const cursor = payload?.cursor != null && payload?.cursor !== "" ? Number(payload.cursor) : null;
+    return {
+      orders: rows.map((o: unknown) => this.normalizeClosedOrder(o as Record<string, unknown>)),
+      cursor: cursor != null && Number.isFinite(cursor) ? cursor : null,
+    };
   }
 
   /**

@@ -18,7 +18,7 @@ import { EditBotDialog } from "@/components/automation/EditBotDialog";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { parseBotConfig, statusMeta, type BotView } from "@/components/automation/bot-config";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
-import { fmtMoney, displaySymbol, sideLabel } from "@/components/automation/bot-config";
+import { fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
@@ -143,12 +143,14 @@ function LiveBotCard({
   const tp = position?.takeProfit ?? null;
   const sym = displaySymbol(bot, cfg);
   const dir = sideLabel(cfg.side);
+  const name = botName(bot, cfg);
 
   return (
     <Card className="border border-border bg-card">
       <CardHeader className="gap-2.5 border-b pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
+            {name && <span className="w-full text-xs font-semibold uppercase tracking-wider text-muted-foreground">{name}</span>}
             <span className="text-xl font-bold text-foreground">
               {sym.replace(/USDT$/, "") || "Auto-select"}
             </span>
@@ -508,6 +510,11 @@ export default function AutomationPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold text-foreground">
                         <span className="truncate">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
+                        {botName(bot, cfg) && (
+                          <span className="shrink-0 truncate text-[11px] font-medium text-muted-foreground" title={botName(bot, cfg)!}>
+                            {botName(bot, cfg)}
+                          </span>
+                        )}
                         {cfg.autoSelect && <span className="shrink-0 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
                         {sideLabel(cfg.side) && (
                           <span className={cn("shrink-0 text-[10px] font-bold", sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>

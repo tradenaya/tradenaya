@@ -11,7 +11,7 @@ import WalletSummary from "@/components/WalletSummary";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { PositionDetailSheet, type ExchangePosition } from "@/components/positions/PositionDetailSheet";
 import { formatTimestamp } from "@/components/analytics/format";
-import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel } from "@/components/automation/bot-config";
+import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 
 type Position = ExchangePosition;
 
@@ -203,6 +203,7 @@ export default function DashboardPage() {
                 const st = statusMeta(bot.status);
                 const sym = displaySymbol(bot, cfg);
                 const dir = sideLabel(cfg.side);
+                const name = botName(bot, cfg);
                 return (
                   <div
                     key={bot.id}
@@ -214,6 +215,7 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                          {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                           <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
                           {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
                           {dir && <Badge className={sideBadge(dir === "Long" ? "LONG" : "SHORT")}>{dir}</Badge>}

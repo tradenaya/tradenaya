@@ -31,6 +31,7 @@ export interface BotRuntimeState {
   capital: number;
   capitalMode: "fixed" | "percent";
   walletPercent?: number;
+  name?: string | null;
   status: BotStatus;
   desiredStatus?: DesiredBotStatus;
   currentTrade?: string | null;
@@ -43,11 +44,13 @@ export interface BotRuntimeState {
   heartbeatAt?: string | null;
   leaseOwner?: string | null;
   leaseExpiresAt?: string | null;
+  peakEquity?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
 const SCHEDULER_COLUMNS: Array<[string, string]> = [
+  ["name", "VARCHAR(100) NULL"],
   ["config_json", "TEXT NULL"],
   ["desired_status", "VARCHAR(20) NOT NULL DEFAULT 'STOPPED'"],
   ["last_error", "TEXT NULL"],
@@ -56,6 +59,7 @@ const SCHEDULER_COLUMNS: Array<[string, string]> = [
   ["heartbeat_at", "TIMESTAMP NULL"],
   ["lease_owner", "VARCHAR(64) NULL"],
   ["lease_expires_at", "TIMESTAMP NULL"],
+  ["peak_equity", "DECIMAL(18,8) NULL"],
 ];
 
 export class BotLifecycleService {
@@ -66,6 +70,7 @@ export class BotLifecycleService {
         user_id INT NOT NULL,
         symbol VARCHAR(50) NOT NULL,
         strategy VARCHAR(100) NOT NULL,
+        name VARCHAR(100) NULL,
         leverage DECIMAL(10,2) NOT NULL DEFAULT 1,
         capital DECIMAL(18,8) NOT NULL DEFAULT 0,
         capital_mode VARCHAR(20) NOT NULL DEFAULT 'fixed',
@@ -108,8 +113,8 @@ export class BotLifecycleService {
     await this.ensureSchedulerSchema();
     const [result] = await db.query(
       `INSERT INTO automation_bots (
-        user_id, symbol, strategy, leverage, capital, capital_mode, wallet_percent, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        user_id, symbol, strategy, leverage, capital, capital_mode, wallet_percent, name, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         input.userId,
         input.symbol,
@@ -118,6 +123,7 @@ export class BotLifecycleService {
         input.capital,
         input.capitalMode,
         input.walletPercent ?? null,
+        input.name ?? null,
         input.status ?? "RUNNING",
       ],
     ) as any;
@@ -149,17 +155,31 @@ export class BotLifecycleService {
     );
   }
 
+  /**
+   * Keep the DB symbol + leverage columns in sync with the currently
+   * auto-selected coin. The `symbol` column is what the UI/trace shows and the
+   * `leverage` column feeds the bot header, so both must reflect the live
+   * selection rather than the static defaults saved at creation time.
+   */
+  async updateSelectedCoin(id: number, symbol: string, leverage: number) {
+    await this.ensureSchedulerSchema();
+    await db.query(
+      `UPDATE automation_bots SET symbol = ?, leverage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
+      [symbol, leverage, id],
+    );
+  }
+
   async updateConfig(
     id: number,
-    input: { leverage: number; capital: number; capitalMode: "fixed" | "percent"; walletPercent?: number; configJson: string },
+    input: { leverage: number; capital: number; capitalMode: "fixed" | "percent"; walletPercent?: number; name?: string | null; configJson: string },
   ) {
     await this.ensureSchedulerSchema();
     await db.query(
       `UPDATE automation_bots SET
-        leverage = ?, capital = ?, capital_mode = ?, wallet_percent = ?, config_json = ?,
+        leverage = ?, capital = ?, capital_mode = ?, wallet_percent = ?, name = ?, config_json = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?;`,
-      [input.leverage, input.capital, input.capitalMode, input.walletPercent ?? null, input.configJson, id],
+      [input.leverage, input.capital, input.capitalMode, input.walletPercent ?? null, input.name ?? null, input.configJson, id],
     );
   }
 
@@ -206,6 +226,14 @@ export class BotLifecycleService {
     await db.query(
       `UPDATE automation_bots SET heartbeat_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
       [at, id],
+    );
+  }
+
+  async updatePeakEquity(id: number, peakEquity: number) {
+    await this.ensureSchedulerSchema();
+    await db.query(
+      `UPDATE automation_bots SET peak_equity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
+      [peakEquity, id],
     );
   }
 
@@ -303,6 +331,7 @@ export class BotLifecycleService {
       userId: Number(row.user_id),
       symbol: row.symbol,
       strategy: row.strategy,
+      name: row.name ?? null,
       leverage: Number(row.leverage),
       capital: Number(row.capital),
       capitalMode: row.capital_mode,
@@ -319,6 +348,7 @@ export class BotLifecycleService {
       heartbeatAt: row.heartbeat_at ?? null,
       leaseOwner: row.lease_owner ?? null,
       leaseExpiresAt: row.lease_expires_at ?? null,
+      peakEquity: row.peak_equity != null ? Number(row.peak_equity) : null,
       createdAt: row.created_at ?? null,
       updatedAt: row.updated_at ?? null,
     };

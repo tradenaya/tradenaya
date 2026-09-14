@@ -55,7 +55,7 @@ export default function SignupPage() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="Join TradeNaya and start automated trading"
+      subtitle="Join Tradenaya and start automated trading"
       footer={
         <p className="text-center text-sm" style={{ color: "var(--muted-foreground)" }}>
           Already have an account?{" "}

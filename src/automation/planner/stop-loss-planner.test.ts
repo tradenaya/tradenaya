@@ -14,7 +14,15 @@ function decision(signal: "BUY" | "SELL", confidence: number): StrategyDecision 
   };
 }
 
-function context(signal: "BUY" | "SELL", price: number, atr: number, support: number | undefined, resistance: number | undefined, minStopDistancePct?: number): PlannerContext {
+function context(
+  signal: "BUY" | "SELL",
+  price: number,
+  atr: number,
+  support: number | undefined,
+  resistance: number | undefined,
+  minStopDistancePct?: number,
+  minRiskRewardRatio?: number,
+): PlannerContext {
   return {
     strategyDecision: decision(signal, 0.8),
     currentPrice: price,
@@ -30,6 +38,7 @@ function context(signal: "BUY" | "SELL", price: number, atr: number, support: nu
       capitalMode: "percent",
       walletPercent: 100,
       minStopDistancePct,
+      minRiskRewardRatio,
     },
   };
 }
@@ -37,11 +46,22 @@ function context(signal: "BUY" | "SELL", price: number, atr: number, support: nu
 describe("stop-loss planner boundary", () => {
   it("does not reject a stop that sits exactly on the min-distance boundary (floating point)", () => {
     // baseDistance === price * 0.008 to every printed decimal; a one-ULP float
-    // error used to flip this into "Stop loss is too close to entry".
-    const plan = new DefaultTradePlanner().plan(context("SELL", 8.851, 0.0292, 8.833, 8.899));
+    // error used to flip this into "Stop loss is too close to entry". Support is
+    // set far enough away that the take-profit stays at full R-multiple so the
+    // trade keeps a healthy risk/reward (min 1.5 here).
+    const plan = new DefaultTradePlanner().plan(context("SELL", 8.851, 0.0292, 8.68, 8.899, undefined, 1.5));
     expect(plan.action).toBe("SELL");
     expect(plan.stopLoss).not.toBeNull();
     expect(plan.reason).not.toContain("Stop loss is too close to entry");
+  });
+
+  it("rejects a trade whose reachable take-profit gives below-minimum risk/reward", () => {
+    // Support 0.2% below entry: the nearest reachable TP sits at support, which
+    // is only ~0.4R away. The planner must not fabricate a distant target to
+    // satisfy the RR floor — it should refuse the trade instead.
+    const plan = new DefaultTradePlanner().plan(context("SELL", 8.851, 0.0292, 8.833, 8.899));
+    expect(plan.action).toBe("WAIT");
+    expect(plan.reason).toContain("Risk reward");
   });
 
   it("respects a custom minStopDistancePct instead of hardcoding 0.008", () => {

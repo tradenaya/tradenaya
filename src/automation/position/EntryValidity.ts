@@ -27,6 +27,8 @@ export interface EntryValidityContext {
   driftAtr?: number;
   /** Drift band expressed as percentage of limit price (e.g. 0.005 = 0.5%). Overrides the ATR-based band if set. */
   driftPctPct?: number;
+  /** Floor for the drift band as a fraction of limit price (e.g. 0.005 = 0.5%). Prevents cancelling on tiny wiggles in dead/low-vol markets. Default 0.005. */
+  minDriftPct?: number;
   /** Soft age factor (candles) — cancels only in combination with another soft signal. Default 24. */
   maxCandles?: number;
   /** Absolute circuit-breaker (candles) — safety net so a resting order can never sit forever. Default 48. */

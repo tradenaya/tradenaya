@@ -103,7 +103,6 @@ export default function TradingChart({ symbol }: { symbol: string }) {
         // built-in price line (title: "LIVE" above) already shows this,
         // and it will actually move on every WebSocket update.
       } catch (error) {
-        console.log("CHART ERROR", error);
       }
     }
 

@@ -68,6 +68,7 @@ interface CoinAnalysis {
 }
 
 const DEFAULT_SETTINGS = {
+  name: "",
   symbol: "BTCUSDT",
   timeframe: "1h",
   leverage: "5",
@@ -98,6 +99,8 @@ interface AutoSelectionPreview {
   leverage: number;
   maxLeverage: number | null;
   minLeverage: number | null;
+  minQty: number | null;
+  step: number | null;
 }
 
 interface CreateBotDialogProps {
@@ -135,9 +138,28 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       leveragePercent: settings.leveragePercent,
       capital: String(Number(settings.capital) || 0),
       maxRiskPerTrade: String(Number(settings.maxRiskPerTrade) || 1),
+      config: JSON.stringify({
+        timeframe: settings.timeframe,
+        leverage: Number(settings.leverage) || 5,
+        leverageMode: settings.leverageMode,
+        leveragePercent: settings.leverageMode === "manual" ? Number(settings.leveragePercent) : undefined,
+        capital: Number(settings.capital) || 0,
+        capitalMode,
+        walletPercent: capitalMode === "percent" ? Number(walletPercent) : null,
+        maxRiskPerTrade: Number(settings.maxRiskPerTrade) || 1,
+        dailyLossLimit: Number(settings.dailyLossLimit) || 5,
+        enableTrailingStop: settings.enableTrailingStop,
+        trailingDistancePercent: settings.enableTrailingStop && settings.trailingDistancePercent ? Number(settings.trailingDistancePercent) : null,
+        driftAtr: Number(settings.driftAtr) || 2.5,
+        regimeTolerancePct: Number(settings.regimeTolerancePct) || 0.3,
+        maxCandles: Number(settings.maxCandles) || 24,
+        hardCapCandles: Number(settings.hardCapCandles) || 48,
+        orderExpiryMinutes: settings.orderExpiryMinutes ? Number(settings.orderExpiryMinutes) : null,
+        minConfidence: settings.minConfidence ? Number(settings.minConfidence) : null,
+      }),
     });
     return `/api/bots/auto-selection?${params.toString()}`;
-  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade]);
+  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade, settings.leverage, settings.dailyLossLimit, settings.enableTrailingStop, settings.trailingDistancePercent, settings.driftAtr, settings.regimeTolerancePct, settings.maxCandles, settings.hardCapCandles, settings.orderExpiryMinutes, settings.minConfidence, capitalMode, walletPercent]);
 
   useEffect(() => {
     if (!settings.autoSelect || !open) return;
@@ -365,6 +387,26 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
   }
 
   const minOrderIssue = (() => {
+    if (settings.autoSelect) {
+      // Auto mode: evaluate against the CURRENTLY selected coin (symbol, price
+      // and the effective leverage the bot would actually use), not the manual
+      // fallback symbol/leverage fields.
+      const alloc = effectiveCapital();
+      if (!autoPreview || autoPreview.price == null || !(autoPreview.price > 0)) return null;
+      const minQty = Number(autoPreview.minQty);
+      const step = Number(autoPreview.step);
+      const lev = Number(autoPreview.leverage);
+      if (!Number.isFinite(minQty) || minQty <= 0 || alloc == null || !Number.isFinite(lev) || lev <= 0) return null;
+      const price = autoPreview.price;
+      const maxPosition = (alloc * lev) / price;
+      const floored = Number.isFinite(step) && step > 0 ? Math.floor(maxPosition / step) * step : maxPosition;
+      if (floored >= minQty) return null;
+      const minNotional = minQty * price;
+      const required = minNotional / lev;
+      const symbol = autoPreview.symbol.trim().toUpperCase();
+      return `Minimum order is ${minQty} ${symbol} (~${minNotional.toFixed(4)} USDT). Your ${alloc.toFixed(4)} USDT at ${lev}x only buys ${Math.max(floored, 0).toFixed(4)} ${symbol}. Raise capital to at least ${required.toFixed(4)} USDT or increase leverage.`;
+    }
+
     if (!instrument || price == null || !(price > 0)) return null;
     const minQty = Number(instrument.min_base_quantity);
     const step = Number(instrument.base_quantity_step_size);
@@ -450,6 +492,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     const allocated = effectiveCapital() ?? (Number(settings.capital) || 0);
     const body: Record<string, unknown> = {
       symbol,
+      name: settings.name.trim() || undefined,
       timeframe: settings.timeframe,
       leverage: Number(settings.leverage),
       autoSelect: settings.autoSelect,
@@ -517,12 +560,27 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
           <DialogTitle>Automated trading setup</DialogTitle>
           <DialogDescription>
             {settings.autoSelect
-              ? "TradeNaya continuously analyzes eligible coins and trades the strongest current opportunity (LONG or SHORT), rotating as the market changes."
-              : `TradeNaya trades ${settings.symbol} using your strategy with fixed SL and TP protection. You can adjust this later.`}
+              ? "Tradenaya continuously analyzes eligible coins and trades the strongest current opportunity (LONG or SHORT), rotating as the market changes."
+              : `Tradenaya trades ${settings.symbol} using your strategy with fixed SL and TP protection. You can adjust this later.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto grid gap-4 md:grid-cols-2 py-2">
+          <div className="md:col-span-2">
+            <Label htmlFor="bot-name">Bot name (optional)</Label>
+            <Input
+              id="bot-name"
+              value={settings.name}
+              onChange={(e) => setSettings((s) => ({ ...s, name: e.target.value }))}
+              placeholder="e.g. BTC Scalper, Trend Follower"
+              maxLength={100}
+              className="mt-1.5"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              A label to identify this bot in the dashboard. You can change this later.
+            </p>
+          </div>
+
           <div className="rounded-lg border border-border bg-muted/40 p-3 md:col-span-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">

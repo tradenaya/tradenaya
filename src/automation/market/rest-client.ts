@@ -74,29 +74,45 @@ export class MarketDataRestClient {
     }
 
     const limit = options.limit ?? 100;
+    // Transient exchange failures can surface as an empty/unparseable response
+    // while the cache still holds only the live candle. Retry once so a single
+    // flake does not silently drop a valid symbol out of analysis.
+    let candles: MarketCandle[] = [];
+    for (let attempt = 0; attempt < 2 && candles.length === 0; attempt++) {
+      candles = await this.fetchCandlesOnce(userId, normalized, apiInterval, limit, options);
+    }
+
+    if (options.startTime !== undefined || options.endTime !== undefined) {
+      const start = options.startTime ?? -Infinity;
+      const end = options.endTime ?? Infinity;
+      return candles.filter((c) => c.timestamp >= start && c.timestamp <= end);
+    }
+    return candles;
+  }
+
+  private async fetchCandlesOnce(
+    userId: number,
+    symbol: string,
+    apiInterval: string,
+    limit: number,
+    options: HistoricalCandlesOptions,
+  ): Promise<MarketCandle[]> {
     try {
       const rows = this.getKlineImpl
-        ? await this.getKlineImpl(userId, normalized, apiInterval, limit, {
+        ? await this.getKlineImpl(userId, symbol, apiInterval, limit, {
             startTime: options.startTime,
             endTime: options.endTime,
           })
-        : await this.fetchKline(userId, normalized, apiInterval, limit, {
+        : await this.fetchKline(userId, symbol, apiInterval, limit, {
             startTime: options.startTime,
             endTime: options.endTime,
           });
       if (!Array.isArray(rows)) return [];
 
-      const candles = rows
+      return rows
         .map((row) => parseCandleRow(row, apiInterval))
         .filter((c): c is MarketCandle => c !== null)
         .sort((a, b) => a.timestamp - b.timestamp);
-
-      if (options.startTime !== undefined || options.endTime !== undefined) {
-        const start = options.startTime ?? -Infinity;
-        const end = options.endTime ?? Infinity;
-        return candles.filter((c) => c.timestamp >= start && c.timestamp <= end);
-      }
-      return candles;
     } catch {
       return [];
     }

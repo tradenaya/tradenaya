@@ -107,9 +107,27 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       leveragePercent: String(cfg.leveragePercent ?? 50),
       capital: String(cfg.capital || 0),
       maxRiskPerTrade: String(cfg.maxRiskPerTrade ?? 1),
+      config: JSON.stringify({
+        timeframe: cfg.timeframe ?? "1h",
+        leverage: cfg.leverage || 5,
+        leverageMode: cfg.leverageMode,
+        leveragePercent: cfg.leveragePercent ?? 50,
+        capital: cfg.capital || 0,
+        capitalMode: cfg.capitalMode,
+        walletPercent: cfg.capitalMode === "percent" ? cfg.walletPercent : null,
+        maxRiskPerTrade: cfg.maxRiskPerTrade ?? 1,
+        dailyLossLimit: cfg.dailyLossLimit ?? 5,
+        enableTrailingStop: cfg.enableTrailingStop ?? false,
+        trailingDistancePercent: cfg.trailingDistancePercent ?? null,
+        minConfidence: cfg.minConfidence ?? null,
+        driftAtr: cfg.driftAtr ?? 2.5,
+        maxCandles: cfg.maxCandles ?? 24,
+        hardCapCandles: cfg.hardCapCandles ?? 48,
+        regimeTolerancePct: cfg.regimeTolerancePct ?? 0.3,
+      }),
     });
     return `/api/bots/auto-selection?${params.toString()}`;
-  }, [cfg.autoSelect, cfg.timeframe, cfg.leverageMode, cfg.leveragePercent, cfg.capital, cfg.maxRiskPerTrade]);
+  }, [cfg.autoSelect, cfg.timeframe, cfg.leverageMode, cfg.leveragePercent, cfg.capital, cfg.maxRiskPerTrade, cfg.capitalMode, cfg.walletPercent, cfg.dailyLossLimit, cfg.enableTrailingStop, cfg.trailingDistancePercent, cfg.minConfidence, cfg.driftAtr, cfg.maxCandles, cfg.hardCapCandles, cfg.regimeTolerancePct, cfg.leverage]);
 
   useEffect(() => {
     if (!cfg.autoSelect || !open) return;
@@ -151,6 +169,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
     try {
       const body: Record<string, unknown> = {
         symbol: bot.symbol,
+        name: cfg.name?.trim() || undefined,
         timeframe: cfg.timeframe,
         leverage: cfg.leverage,
         autoSelect: cfg.autoSelect,
@@ -196,7 +215,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Bot className="h-4 w-4" />
-            Edit {bot.symbol}
+            Edit {cfg.name?.trim() || bot.symbol}
           </DialogTitle>
           <DialogDescription>Adjust capital, risk and protection settings. Changes apply on the next cycle.</DialogDescription>
         </DialogHeader>
@@ -215,6 +234,17 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                 <span className="text-xs text-red-400">Unavailable</span>
               )}
             </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="edit-bot-name">Bot name (optional)</Label>
+            <Input
+              id="edit-bot-name"
+              maxLength={100}
+              value={cfg.name ?? ""}
+              onChange={(e) => update("name", e.target.value)}
+              placeholder={`e.g. ${bot.symbol} bot`}
+            />
           </div>
 
           {/* Auto-select best coin */}
