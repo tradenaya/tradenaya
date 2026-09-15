@@ -198,6 +198,8 @@ export interface PositionStoreLike {
   createPosition(execution: ExecutionRecord, config: PositionManagerConfig): Promise<number>;
   getPositionByExecutionId(executionId: number): Promise<PositionRecord | null>;
   getActivePositions(): Promise<PositionRecord[]>;
+  /** Active states plus recoverable ERROR positions (those with exchange evidence). */
+  getRecoverablePositions(): Promise<PositionRecord[]>;
   getPosition(id: number): Promise<PositionRecord | null>;
   updateState(id: number, state: PositionState, errorMessage?: string | null): Promise<void>;
   updatePrices(id: number, currentPrice: number | null, unrealizedPnl: number | null): Promise<void>;

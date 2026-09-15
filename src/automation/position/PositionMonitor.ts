@@ -117,6 +117,17 @@ export class PositionMonitor {
       this.processing.add(position.id);
       void this.process(position).finally(() => this.processing.delete(position.id));
     }
+
+    // A persistence failure can leave a live tracked position in ERROR. Re-run
+    // exchange→DB reconciliation on those positions every cycle so they never
+    // permanently fall outside the recovery window and self-heal without a
+    // restart.
+    const recoverable = await this.store.getRecoverablePositions();
+    for (const position of recoverable) {
+      if (position.state !== "ERROR" || this.processing.has(position.id)) continue;
+      this.processing.add(position.id);
+      void this.recovery.reconcile(position).catch(() => null).finally(() => this.processing.delete(position.id));
+    }
   }
 
   private async process(position: PositionRecord): Promise<void> {

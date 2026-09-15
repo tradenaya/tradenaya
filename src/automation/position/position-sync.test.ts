@@ -186,6 +186,18 @@ class FakeStore implements PositionStoreLike {
   });
   getPositionByExecutionId = vi.fn(async (executionId: number): Promise<PositionRecord | null> => this.positions.find((p) => p.executionId === executionId) ?? null);
   getActivePositions = vi.fn(async (): Promise<PositionRecord[]> => [...this.positions]);
+  getRecoverablePositions = vi.fn(async (): Promise<PositionRecord[]> => {
+    const active = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
+    return [...this.positions].filter(
+      (p) =>
+        active.has(p.state) ||
+        (p.state === "ERROR" &&
+          (p.positionId != null ||
+            p.entryOrderId != null ||
+            (p.filledQuantity ?? 0) > 0 ||
+            (p.remainingQuantity ?? 0) > 0)),
+    );
+  });
   getPosition = vi.fn(async (id: number): Promise<PositionRecord | null> => this.positions.find((p) => p.id === id) ?? null);
   updateState = vi.fn(async (id: number, state: PositionRecord["state"]) => {
     const p = this.positions.find((x) => x.id === id);
@@ -517,5 +529,182 @@ describe("PositionRecovery.recoverAllActive — entry-order & robustness scenari
     expect(store.positions).toHaveLength(1);
     expect(summary).toEqual({ positionsChecked: 1, confirmedClosed: 0, keptOpen: 1, failed: 0 });
     expect(store.markCloseCalls).toEqual([]);
+  });
+});
+
+describe("PositionRecovery with previously-ERROR positions", () => {
+  function errorPosition(overrides: Partial<PositionRecord> = {}): PositionRecord {
+    return position({
+      state: "ERROR",
+      errorMessage: "Incorrect datetime value: '2026-09-14T18:28:03.723Z' for column 'closed_at' at row 1",
+      ...overrides,
+    });
+  }
+
+  it("reconciles an ERROR position whose exchange position is still open → restored and tracked, never closed", async () => {
+    const client = new FakeClient();
+    client.positions = [exchangePosition()];
+    client.openOrders = [openOrder({ orderId: "sl-1" }), openOrder({ orderId: "tp-1" })];
+    const store = new FakeStore();
+    store.positions = [errorPosition({ stopLossOrderId: "sl-1", takeProfitOrderId: "tp-1" })];
+    const execStore = new FakeExecutionStore();
+    // Execution already terminal while the exchange still holds the position:
+    // recovery must re-open it to reflect exchange truth.
+    execStore.records.set(10, execution({ state: "CLOSED" }));
+
+    const summary = await makeRecovery(client, store, execStore, new FakeBotState()).recoverAllActive();
+
+    expect(summary).toEqual({ positionsChecked: 1, confirmedClosed: 0, keptOpen: 1, failed: 0 });
+    expect(store.positions[0].state).toBe("PROTECTED");
+    expect(store.markCloseCalls).toEqual([]);
+    // Execution record revived to reflect the live exchange position.
+    expect(execStore.stateUpdates).toContainEqual({ id: 10, state: "ENTRY_FILLED" });
+    // Restore event emitted.
+    expect(store.events.some((e) => e.type === "RECOVERY_RESTORED")).toBe(true);
+  });
+
+  it("closes an ERROR position confirmed closed via TAKE_PROFIT on the exchange", async () => {
+    const client = new FakeClient();
+    client.orderStatus = {
+      "tp-1": { status: "EXECUTED", raw: { avg_execution_price: "110", realised_pnl: "18", execution_fee: "0.4" } },
+      "sl-1": { status: "RAISED", raw: {} },
+    };
+    client.transactions = [tx({ type: "commission", amount: 1.05 })];
+    const store = new FakeStore();
+    store.positions = [errorPosition({ takeProfit: 110 })];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, ACTIVE_EXECUTION());
+
+    const summary = await makeRecovery(client, store, execStore, new FakeBotState()).recoverAllActive();
+
+    expect(summary.confirmedClosed).toBe(1);
+    const p = store.positions[0];
+    expect(p.state).toBe("CLOSED");
+    expect(p.exitReason).toBe("TAKE_PROFIT");
+    expect(store.markCloseCalls[0].reason).toBe("TAKE_PROFIT");
+    expect(execStore.stateUpdates).toContainEqual({ id: 10, state: "CLOSED" });
+  });
+
+  it("closes an ERROR position confirmed closed via STOP_LOSS on the exchange", async () => {
+    const client = new FakeClient();
+    client.orderStatus = {
+      "sl-1": { status: "EXECUTED", raw: { avg_execution_price: "96.5", realised_pnl: "-7", execution_fee: "0.2" } },
+      "tp-1": { status: "RAISED", raw: {} },
+    };
+    client.transactions = [tx({ type: "commission", amount: 0.6 })];
+    const store = new FakeStore();
+    store.positions = [errorPosition()];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, ACTIVE_EXECUTION());
+
+    const summary = await makeRecovery(client, store, execStore, new FakeBotState()).recoverAllActive();
+
+    expect(summary.confirmedClosed).toBe(1);
+    const p = store.positions[0];
+    expect(p.state).toBe("CLOSED");
+    expect(p.exitReason).toBe("STOP_LOSS");
+    expect(store.markCloseCalls[0].reason).toBe("STOP_LOSS");
+  });
+
+  it("closes an ERROR position confirmed as an exchange LIQUIDATION", async () => {
+    const client = new FakeClient();
+    // entry 100, qty 10, 10x → full margin loss = -100.
+    client.transactions = [tx({ type: "P&L", amount: -100, fee: -0.05, timestamp: 1724700000000 })];
+    client.currentPrice = 95;
+    const store = new FakeStore();
+    store.positions = [errorPosition({ quantity: 10, filledQuantity: 10, leverage: 10 })];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, execution({ quantity: 10, filledQuantity: 10, leverage: 10 }));
+
+    const summary = await makeRecovery(client, store, execStore, new FakeBotState()).recoverAllActive();
+
+    expect(summary.confirmedClosed).toBe(1);
+    const p = store.positions[0];
+    expect(p.state).toBe("CLOSED");
+    expect(p.exitReason).toBe("LIQUIDATION");
+    expect(store.events.some((e) => e.type === "RECOVERY_LIQUIDATION")).toBe(true);
+  });
+
+  it("keeps an ERROR position open and retryable when no close evidence exists — never a fabricated MANUAL_CLOSE", async () => {
+    const client = new FakeClient();
+    const store = new FakeStore();
+    store.positions = [errorPosition()];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, ACTIVE_EXECUTION());
+
+    const recovery = makeRecovery(client, store, execStore, new FakeBotState());
+
+    const first = await recovery.recoverAllActive();
+    expect(first).toEqual({ positionsChecked: 1, confirmedClosed: 0, keptOpen: 1, failed: 0 });
+    expect(store.positions[0].state).toBe("ERROR");
+    expect(store.markCloseCalls).toEqual([]);
+    expect(store.closedSummaries).toEqual([]);
+    expect(store.events.some((e) => e.type === "RECOVERY_UNAVAILABLE")).toBe(true);
+
+    // Second pass: still recoverable, still retried on the exchange read, still not closed.
+    await recovery.recoverAllActive();
+    expect(store.positions[0].state).toBe("ERROR");
+    expect(store.markCloseCalls).toEqual([]);
+    expect(store.closedSummaries).toEqual([]);
+    expect(client.getPositions).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not revive bare ERROR artifacts that carry no exchange evidence", async () => {
+    const client = new FakeClient();
+    client.positions = [exchangePosition()];
+    const store = new FakeStore();
+    store.positions = [errorPosition({ positionId: null, entryOrderId: null, filledQuantity: 0, remainingQuantity: 0 })];
+    const execStore = new FakeExecutionStore();
+
+    const summary = await makeRecovery(client, store, execStore, new FakeBotState()).recoverAllActive();
+
+    expect(summary.positionsChecked).toBe(0);
+    expect(store.positions[0].state).toBe("ERROR");
+    expect(client.getPositions).not.toHaveBeenCalled();
+  });
+
+  it("re-running recovery after a confirmed close produces no duplicate close summaries or events", async () => {
+    const client = new FakeClient();
+    client.orderStatus = {
+      "sl-1": { status: "EXECUTED", raw: { avg_execution_price: "96.5", realised_pnl: "-7", execution_fee: "0.2" } },
+      "tp-1": { status: "RAISED", raw: {} },
+    };
+    client.transactions = [tx({ type: "commission", amount: 0.6 })];
+    const store = new FakeStore();
+    store.positions = [errorPosition()];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, ACTIVE_EXECUTION());
+
+    const recovery = makeRecovery(client, store, execStore, new FakeBotState());
+    const first = await recovery.recoverAllActive();
+    expect(first.confirmedClosed).toBe(1);
+    expect(store.closedSummaries).toHaveLength(1);
+    expect(store.markCloseCalls).toHaveLength(1);
+
+    // The position is now CLOSED and therefore excluded from the recoverable
+    // set — a second sweep must not re-close or re-emit anything.
+    await recovery.recoverAllActive();
+    expect(store.closedSummaries).toHaveLength(1);
+    expect(store.markCloseCalls).toHaveLength(1);
+    expect(store.positions[0].state).toBe("CLOSED");
+  });
+
+  it("routes an ERROR position that was pending entry through the entry-order recovery path", async () => {
+    const client = new FakeClient();
+    client.orderStatus = {
+      "entry-1": { status: "CANCELLED", raw: {} },
+    };
+    const store = new FakeStore();
+    store.positions = [errorPosition({ positionId: null, entryOrderId: "entry-1", filledQuantity: 0, stopLossOrderId: null, takeProfitOrderId: null })];
+    const execStore = new FakeExecutionStore();
+    execStore.records.set(10, ACTIVE_EXECUTION());
+    const botState = new FakeBotState();
+
+    const summary = await makeRecovery(client, store, execStore, botState).recoverAllActive();
+
+    expect(summary.confirmedClosed).toBe(1);
+    expect(store.positions[0].state).toBe("CLOSED");
+    expect(store.closedSummaries[0].reason).toBe("ENTRY_CANCELLED");
+    expect(execStore.stateUpdates).toContainEqual({ id: 10, state: "CANCELLED" });
   });
 });

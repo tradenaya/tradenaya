@@ -56,6 +56,15 @@ describe("toMysqlUtc", () => {
   it("throws a clear error for an invalid timestamp", () => {
     expect(() => toMysqlUtc("not-a-date")).toThrow(/Invalid close timestamp: "not-a-date"/);
   });
+
+  it("regression: never emits the ISO form a TIMESTAMP column rejects (no 'T', no ms, no 'Z')", () => {
+    const out = toMysqlUtc("2026-09-14T18:28:03.723Z");
+    expect(out).not.toContain("T");
+    expect(out).not.toContain("Z");
+    expect(out.endsWith(".000Z")).toBe(false);
+    expect(out.endsWith(".723Z")).toBe(false);
+    expect(out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
 });
 
 describe("PositionStore.markClose", () => {

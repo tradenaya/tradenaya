@@ -2,7 +2,7 @@ import { ExecutionStore } from "@/automation/executor/store";
 import { ProtectiveOrdersService } from "@/automation/executor/services/protective-orders";
 import { BotLifecycleService } from "@/automation/service/bot-lifecycle";
 import type { ExchangePosition } from "@/automation/executor/client";
-import type { CoinSwitchClientLike, ExitReason, PositionManagerConfig, PositionRecord, PositionStoreLike, PositionSyncSummary } from "./PositionManagerTypes";
+import type { CoinSwitchClientLike, ExitReason, PositionManagerConfig, PositionRecord, PositionState, PositionStoreLike, PositionSyncSummary } from "./PositionManagerTypes";
 import { detectExecutedClose, detectClosedOrderClose, confirmExternalClose, detectLiquidation } from "./executed-close";
 import { reconcileClose } from "./close-accounting";
 import { classifyStatus } from "@/automation/executor/order-status";
@@ -10,6 +10,24 @@ import { classifyStatus } from "@/automation/executor/order-status";
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 
 type ReconcileOutcome = "open" | "closed" | "kept_open" | "pending" | "skipped";
+
+/**
+ * Recovery-safe state classification: an ERROR position is reconcilable
+ * (and therefore eligible for exchange verification) only when it represents
+ * a real tracked position — evidenced by an exchange position id, a submitted
+ * entry order, or a non-zero fill/remaining quantity. A bare ERROR row with
+ * none of that evidence is an artifact that must never be revived indefinitely.
+ */
+function isReconcilableState(position: PositionRecord): boolean {
+  if (ACTIVE_STATES.has(position.state)) return true;
+  if (position.state !== "ERROR") return false;
+  return (
+    position.positionId != null ||
+    position.entryOrderId != null ||
+    (position.filledQuantity ?? 0) > 0 ||
+    (position.remainingQuantity ?? 0) > 0
+  );
+}
 
 function toNum(value: unknown): number | null {
   if (value == null || value === "") return null;
@@ -41,7 +59,7 @@ export class PositionRecovery {
     }
 
     const summary: PositionSyncSummary = { positionsChecked: 0, confirmedClosed: 0, keptOpen: 0, failed: 0 };
-    const positions = await this.store.getActivePositions();
+    const positions = await this.store.getRecoverablePositions();
     for (const position of positions) {
       summary.positionsChecked++;
       try {
@@ -69,8 +87,9 @@ export class PositionRecovery {
     }
   }
 
-  private async reconcile(position: PositionRecord): Promise<ReconcileOutcome> {
-    if (!ACTIVE_STATES.has(position.state)) return "skipped";
+  /** @internal Reconcile a single tracked position against the exchange. Called by recoverAllActive() in bulk, and by the monitor loop to keep ERROR positions recoverable cycle-by-cycle without requiring a restart. */
+  async reconcile(position: PositionRecord): Promise<ReconcileOutcome> {
+    if (!isReconcilableState(position)) return "skipped";
 
     // If the exchange is unreachable during recovery, leave the position
     // untouched and let the PositionMonitor retry — never close based on a
@@ -113,6 +132,13 @@ export class PositionRecovery {
       await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
     }
 
+    // A previously-ERROR position that is still open on the exchange must be
+    // restored to a normal tracking state (based on protection data we actually
+    // hold) so the monitor resumes managing it — never fabricate a close.
+    if (position.state === "ERROR") {
+      await this.restoreLiveError(position);
+    }
+
     return "open";
   }
 
@@ -133,7 +159,17 @@ export class PositionRecovery {
   private async reconcileMissingPosition(position: PositionRecord, price: number | null): Promise<ReconcileOutcome> {
     if (position.state === "WAITING_ENTRY") return "kept_open";
 
-    if (position.state === "ENTRY_PENDING") {
+    // An ERROR position that was still pending entry when it errored (has an
+    // entry order but no position id and no fill) must be checked against the
+    // entry order status just like a normal ENTRY_PENDING: the entry may have
+    // filled or been cancelled while the server was down.
+    const entryOnlyError =
+      position.state === "ERROR" &&
+      position.entryOrderId != null &&
+      position.positionId == null &&
+      (position.filledQuantity ?? 0) === 0 &&
+      (position.remainingQuantity ?? 0) === 0;
+    if (position.state === "ENTRY_PENDING" || entryOnlyError) {
       return await this.reconcilePendingEntry(position);
     }
 
@@ -197,6 +233,35 @@ export class PositionRecovery {
 
     await this.finalizeClosed(position, reason, exitPrice, closedAtMs, closing);
     return "closed";
+  }
+
+  /**
+   * A previously-ERROR position is confirmed open on the exchange. Restore it
+   * to a normal tracking state based on the protection data we actually have —
+   * never fabricate a close — and keep the execution record consistent with
+   * the live position so the monitor resumes managing it on the next cycle.
+   */
+  private async restoreLiveError(position: PositionRecord): Promise<void> {
+    const next: PositionState = position.stopLossOrderId || position.takeProfitOrderId ? "PROTECTED" : "UNPROTECTED";
+    if (position.state !== next) {
+      await this.store.updateState(position.id, next);
+      position.state = next;
+    }
+
+    // If the execution record is in a terminal state while the exchange still
+    // holds the position, the close never actually completed — re-open it to
+    // reflect the live exchange truth so the scheduler can manage the bot
+    // correctly.
+    const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
+    if (execution && !["ENTRY_FILLED", "PARTIALLY_FILLED", "UNPROTECTED"].includes(execution.state)) {
+      await this.executionStore.updateState(execution.id, "ENTRY_FILLED");
+    }
+
+    await this.saveEvent(
+      position,
+      "RECOVERY_RESTORED",
+      `${position.symbol} recovered from ERROR and resumed tracking on the exchange (${next})`,
+    );
   }
 
   private async finalizeClosed(

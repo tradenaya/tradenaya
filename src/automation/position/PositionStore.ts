@@ -248,12 +248,33 @@ export class PositionStore {
   }
 
   async getActivePositions(): Promise<PositionRecord[]> {
-    await this.ensureTable();
-    const [rows] = await db.query(
-      `SELECT * FROM automation_positions
-       WHERE state IN ('WAITING_ENTRY','ENTRY_PENDING','ENTRY_EXECUTED','PROTECTED','TRAILING','UNPROTECTED','CLOSING')
+    return this.queryPositions(
+      `WHERE state IN ('WAITING_ENTRY','ENTRY_PENDING','ENTRY_EXECUTED','PROTECTED','TRAILING','UNPROTECTED','CLOSING')
        ORDER BY id ASC;`,
     );
+  }
+
+  /**
+   * Positions eligible for exchange↔DB reconciliation: the normal active
+   * states plus ERROR positions that represent a real tracked position — i.e.
+   * they carry exchange evidence (a position id, a submitted entry order, or a
+   * non-zero fill/remaining quantity). Bare ERROR rows with none of that
+   * evidence are artifacts with nothing to reconcile and stay excluded so
+   * unrelated records are never revived indefinitely.
+   */
+  async getRecoverablePositions(): Promise<PositionRecord[]> {
+    return this.queryPositions(
+      `WHERE state IN ('WAITING_ENTRY','ENTRY_PENDING','ENTRY_EXECUTED','PROTECTED','TRAILING','UNPROTECTED','CLOSING')
+          OR (state = 'ERROR'
+              AND (position_id IS NOT NULL OR entry_order_id IS NOT NULL
+                   OR COALESCE(filled_quantity, 0) > 0 OR COALESCE(remaining_quantity, 0) > 0))
+       ORDER BY id ASC;`,
+    );
+  }
+
+  private async queryPositions(whereClause: string): Promise<PositionRecord[]> {
+    await this.ensureTable();
+    const [rows] = await db.query(`SELECT * FROM automation_positions ${whereClause}`);
     return (rows as any[]).map((row) => this.mapRow(row));
   }
 
