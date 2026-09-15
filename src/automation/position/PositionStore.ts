@@ -10,6 +10,35 @@ import type {
 } from "./PositionManagerTypes";
 import { OrderHistoryRepository, type OrderHistoryInsert } from "@/automation/order-history";
 
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/**
+ * Convert a JS Date / ISO-8601 / epoch-millis value into the MySQL-compatible
+ * UTC datetime string `YYYY-MM-DD HH:mm:ss`.
+ *
+ * MySQL TIMESTAMP columns reject ISO-8601 strings such as
+ * `2026-09-14T18:28:03.723Z` ("Incorrect datetime value"). The pool is
+ * configured with timezone "Z" (see src/lib/db.ts), so this UTC wall-clock
+ * string binds to the same absolute instant as the input timestamp — the
+ * sub-second portion is dropped because the column has no fractional-seconds
+ * precision.
+ */
+export function toMysqlUtc(value: string | Date | number | null | undefined): string {
+  const raw = value == null ? new Date() : value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(raw.getTime())) {
+    throw new Error(`Invalid close timestamp: "${String(value)}". Expected an ISO-8601 date string or a Date-compatible value.`);
+  }
+  const y = raw.getUTCFullYear();
+  const mo = pad2(raw.getUTCMonth() + 1);
+  const d = pad2(raw.getUTCDate());
+  const h = pad2(raw.getUTCHours());
+  const mi = pad2(raw.getUTCMinutes());
+  const s = pad2(raw.getUTCSeconds());
+  return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
+}
+
 export class PositionStore {
   async ensureTable() {
     await db.query(`
@@ -287,7 +316,7 @@ export class PositionStore {
 
   async markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number, closedAt?: string) {
     await this.ensureTable();
-    const closedAtTs = closedAt ?? new Date().toISOString();
+    const closedAtTs = toMysqlUtc(closedAt);
     await db.query(
       `UPDATE automation_positions SET
         state = 'CLOSED', exit_price = ?, exit_reason = ?, realized_pnl = ?, fees = ?,
