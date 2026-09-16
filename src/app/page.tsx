@@ -32,33 +32,57 @@ function ChartLine() {
 const steps = [
   {
     num: "01",
-    title: "Create your account",
-    body: "Register in seconds with your email and password. No documents, no waiting period — a Tradenaya account is all you need to get started.",
+    title: "Create your CoinSwitch account",
+    body: "Sign up on CoinSwitch, complete KYC verification and deposit funds into your wallet. Tradenaya needs an active, funded exchange account to place trades on your behalf.",
   },
   {
     num: "02",
-    title: "Add your exchange keys",
-    body: "Securely connect your exchange via API keys. Keys are encrypted and only used to place the trades you authorise — we never move your funds.",
+    title: "Create a Tradenaya account",
+    body: "Register here with your email and password. No documents needed — a Tradenaya account is all you need to connect and manage your bots.",
   },
   {
     num: "03",
+    title: "Add your exchange keys",
+    body: "Securely connect CoinSwitch via API keys. Keys are encrypted and only used to place the trades you authorise — we never move your funds.",
+  },
+  {
+    num: "04",
     title: "Choose or auto-select a bot",
     body: "Pick a strategy manually or let Tradenaya scan the market and auto-select the best opportunity across symbols, side and leverage — refreshed every few minutes.",
   },
   {
-    num: "04",
+    num: "05",
     title: "Set capital & risk",
     body: "Decide how much of your wallet each trade should use. Our risk engine calculates position size, liquidation safety and drawdown limits for you.",
   },
   {
-    num: "05",
+    num: "06",
     title: "Run and monitor",
     body: "Start the bot and it trades on your behalf, 24/7. Watch live positions, PnL, orders and analytics in the dashboard — pause or stop anytime.",
   },
+];
+
+const prerequisites = [
   {
-    num: "06",
-    title: "Review and grow",
-    body: "Learn from every cycle in your portfolio and position history. Tune your strategies and let compounding do the heavy lifting.",
+    icon: "🪪",
+    title: "Complete KYC on CoinSwitch",
+    body: "Verify your identity on CoinSwitch — PAN card, Aadhaar and a selfie. Without KYC approval, futures trading and deposits will not be enabled on your account.",
+    link: "https://coinswitch.co",
+    linkLabel: "Start KYC on CoinSwitch",
+  },
+  {
+    icon: "💳",
+    title: "Deposit funds into your wallet",
+    body: "Add funds to your CoinSwitch wallet via UPI, bank transfer (NEFT/IMPS/RTGS), or net banking. The balance you hold is what the bots will use for trading — deposit only what you are comfortable risking.",
+    link: "https://coinswitch.co",
+    linkLabel: "Deposit on CoinSwitch",
+  },
+  {
+    icon: "🔗",
+    title: "Generate API keys",
+    body: "In CoinSwitch PRO → Profile → API Trading, generate a key pair. Copy both the API key and secret — they are shown only once. You will paste them into Tradenaya during the connect step.",
+    link: "https://coinswitch.co/pro/profile?section=api-trading",
+    linkLabel: "Go to CoinSwitch API Trading",
   },
 ];
 
@@ -589,12 +613,77 @@ export default function Home() {
 
         @media (max-width: 900px) {
           .feat-grid { grid-template-columns: repeat(2, 1fr); }
+          .prereq-grid { grid-template-columns: 1fr; }
           .steps-list { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 560px) {
           .feat-grid { grid-template-columns: 1fr; }
           .steps-list { grid-template-columns: 1fr; }
           .about { padding: 80px 0 100px; }
+        }
+
+        .prereqs {
+          margin-top: 110px;
+        }
+        .prereq-grid {
+          margin-top: 54px;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px 18px;
+        }
+        .prereq {
+          position: relative;
+          padding: 32px 26px 28px;
+          border: 1px solid rgba(201, 154, 88, .14);
+          border-radius: 4px;
+          background: linear-gradient(160deg, rgba(201,154,88,.06), rgba(201,154,88,.015));
+          transition: border-color .4s ease, box-shadow .4s ease, transform .4s ease;
+        }
+        .prereq:hover {
+          border-color: rgba(201, 154, 88, .45);
+          box-shadow: 0 14px 40px rgba(0, 0, 0, .35), 0 0 24px rgba(201, 154, 88, .06);
+          transform: translateY(-3px);
+        }
+        .prereq-icon {
+          color: var(--gold);
+          font-size: 26px;
+          display: block;
+          margin-bottom: 16px;
+        }
+        .prereq h3 {
+          margin: 0 0 10px;
+          font-size: clamp(12px, .95vw, 14px);
+          font-weight: 600;
+          letter-spacing: .12em;
+          color: #f4e6cd;
+        }
+        .prereq p {
+          margin: 0;
+          font-size: 12px;
+          line-height: 1.75;
+          letter-spacing: .04em;
+          color: rgba(206, 195, 175, .72);
+        }
+        .prereq-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          margin-top: 18px;
+          font-family: "Cinzel", var(--font-cinzel), serif;
+          font-size: 10.5px;
+          font-weight: 600;
+          letter-spacing: .14em;
+          color: var(--gold);
+          transition: color .3s ease;
+        }
+        .prereq-link:hover {
+          color: #f4e6cd;
+        }
+        .prereq-arrow {
+          transition: transform .3s ease;
+        }
+        .prereq-link:hover .prereq-arrow {
+          transform: translateX(3px);
         }
       `}</style>
 
@@ -661,6 +750,40 @@ export default function Home() {
                 <p>{f.body}</p>
               </div>
             ))}
+          </div>
+
+          <div className="prereqs">
+            <div className="sec-head">
+              <div className="sec-kicker">॥ शुरू करने से पहले ॥</div>
+              <h2 className="sec-title">BEFORE YOU BEGIN</h2>
+              <div className="sec-rule" />
+            </div>
+
+            <p className="lead">
+              Tradenaya works <strong>with CoinSwitch</strong>, not instead of it. Your exchange
+              account is where your funds live and where trades actually execute — Tradenaya
+              simply sends the instructions. Complete these three steps before connecting your
+              API keys.
+            </p>
+
+            <div className="prereq-grid">
+              {prerequisites.map((p) => (
+                <div className="prereq" key={p.title}>
+                  <span className="prereq-icon">{p.icon}</span>
+                  <h3>{p.title}</h3>
+                  <p>{p.body}</p>
+                  <a
+                    className="prereq-link"
+                    href={p.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {p.linkLabel}
+                    <span className="prereq-arrow">→</span>
+                  </a>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="steps">

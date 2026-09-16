@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/table"
 import { apiGet } from "@/components/analytics/api"
 import { useAsyncData } from "@/components/analytics/use-data"
-import { formatPrice, pnlText, signClass, formatDuration, formatMoney } from "@/components/analytics/format"
+import { formatPrice, formatMoney, pnlText, signClass, formatDuration } from "@/components/analytics/format"
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 const PAGE_SIZE = 25
@@ -308,14 +308,14 @@ export default function PositionHistoryPage() {
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden lg:table-cell">
                                 {trade.grossProfit != null && trade.grossProfit !== 0
-                                  ? `${signClass(trade.grossProfit) === "text-emerald-400" ? "+" : ""}$${Math.abs(trade.grossProfit).toFixed(4)}`
+                                  ? pnlText(trade.grossProfit)
                                   : "—"}
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden xl:table-cell">
-                                {trade.commission != null && trade.commission > 0 ? `-$${trade.commission.toFixed(4)}` : "—"}
+                                {trade.commission != null && trade.commission > 0 ? `-${formatMoney(trade.commission)}` : "—"}
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden xl:table-cell">
-                                {trade.fundingFee != null && trade.fundingFee !== 0 ? `${trade.fundingFee > 0 ? "-" : "+"}$${Math.abs(trade.fundingFee).toFixed(4)}` : "—"}
+                                {trade.fundingFee != null && trade.fundingFee !== 0 ? (trade.fundingFee > 0 ? `-${formatMoney(trade.fundingFee)}` : `+${formatMoney(Math.abs(trade.fundingFee))}`) : "—"}
                               </TableCell>
                               <TableCell className={`text-right tabular-nums text-xs hidden md:table-cell ${signClass(pct)}`}>
                                 {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
@@ -330,7 +330,7 @@ export default function PositionHistoryPage() {
                                       <span className="text-muted-foreground">Outcome</span>
                                       <p className={`font-bold ${trade.outcome === "WIN" ? "text-emerald-400" : trade.outcome === "LOSS" ? "text-red-400" : "text-zinc-400"}`}>
                                         {trade.outcome === "WIN" ? "Won" : trade.outcome === "LOSS" ? "Lost" : "Breakeven"}
-                                        {trade.profitLoss >= 0 ? ` +$${trade.profitLoss.toFixed(2)}` : ` -$${Math.abs(trade.profitLoss).toFixed(2)}`}
+                                        {" "}{pnlText(trade.profitLoss)}
                                       </p>
                                     </div>
                                     <div>
@@ -351,22 +351,22 @@ export default function PositionHistoryPage() {
                                       <span className="text-muted-foreground">Gross Profit</span>
                                       <p className={`font-medium ${signClass(trade.grossProfit)}`}>
                                         {trade.grossProfit != null && trade.grossProfit !== 0
-                                          ? `${trade.grossProfit > 0 ? "+" : "-"}$${Math.abs(trade.grossProfit).toFixed(4)}`
+                                          ? pnlText(trade.grossProfit)
                                           : "—"}
                                       </p>
                                     </div>
                                     <div>
                                       <span className="text-muted-foreground">Commission</span>
-                                      <p className="font-medium">-{trade.commission != null && trade.commission > 0 ? `$${trade.commission.toFixed(4)}` : "—"}</p>
+                                      <p className="font-medium">-{trade.commission != null && trade.commission > 0 ? formatMoney(trade.commission) : "—"}</p>
                                     </div>
                                     <div>
                                       <span className="text-muted-foreground">Funding</span>
-                                      <p className="font-medium">{trade.fundingFee != null && trade.fundingFee !== 0 ? `${trade.fundingFee > 0 ? "-" : "+"}$${Math.abs(trade.fundingFee).toFixed(4)}` : "—"}</p>
+                                      <p className="font-medium">{trade.fundingFee != null && trade.fundingFee !== 0 ? (trade.fundingFee > 0 ? `-${formatMoney(trade.fundingFee)}` : `+${formatMoney(Math.abs(trade.fundingFee))}`) : "—"}</p>
                                     </div>
                                     <div>
                                       <span className="text-muted-foreground">Net P&amp;L</span>
                                       <p className={`font-bold ${signClass(trade.profitLoss)}`}>
-                                        {trade.profitLoss != null ? `${trade.profitLoss >= 0 ? "+" : "-"}$${Math.abs(trade.profitLoss).toFixed(4)}` : "—"}
+                                        {trade.profitLoss != null ? pnlText(trade.profitLoss) : "—"}
                                       </p>
                                     </div>
                                     <div>
@@ -379,7 +379,7 @@ export default function PositionHistoryPage() {
                                     </div>
                                     <div>
                                       <span className="text-muted-foreground">Investment</span>
-                                      <p className="font-medium">${trade.investment.toFixed(2)}</p>
+                                      <p className="font-medium">{formatMoney(trade.investment)}</p>
                                     </div>
                                     <div>
                                       <span className="text-muted-foreground">Position Size</span>

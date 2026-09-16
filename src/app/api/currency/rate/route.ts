@@ -8,10 +8,12 @@ import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
  * Returns the live USDT→INR conversion rate for display purposes.
  *
  * Source of truth: CoinSwitch's spot ticker USDT/INR pair when it is listed.
- * Falls back to deriving the cross rate from BTC/INR ÷ BTC/USDT when it is not.
+ * Falls back to deriving the cross rate from BTC/INR ÷ BTC/USDT when it is not,
+ * and then to CoinGecko's public USDT→INR quote when the account's API key has
+ * no access to the spot ticker (e.g. futures-only keys).
  * The quote is cached server-side for a short TTL so a fleet of browsers polls
  * this endpoint without hammering the exchange; a previous known-good quote is
- * served with a `stale` flag if the exchange call fails. Never falls back to a
+ * served with a `stale` flag if every upstream call fails. Never falls back to a
  * hardcoded rate.
  */
 
@@ -55,12 +57,22 @@ export async function GET(req: NextRequest) {
 
     let inrRate = Number.NaN;
     let fetchError: unknown = null;
+    let source = "coinswitch";
+
+    // 1) CoinSwitch spot ticker → USDT/INR directly (needs spot access).
     try {
       const ticker = await coinSwitchRequest("/24hr/all-pairs/ticker?exchange=coinswitchx", "GET", keys.apiKey, keys.apiSecret);
       const data = (ticker?.data ?? {}) as Record<string, TickerRow>;
       inrRate = findPair(data, "USDT", "INR");
-      if (Number.isNaN(inrRate)) {
-        const btcInr = findPair(data, "BTC", "INR");
+    } catch (error) {
+      fetchError = error;
+    }
+
+    // 2) Cross rate BTC/INR (spot) ÷ BTC/USDT (futures) when the direct pair is missing.
+    if (Number.isNaN(inrRate)) {
+      try {
+        const spot = await coinSwitchRequest("/24hr/all-pairs/ticker?exchange=coinswitchx", "GET", keys.apiKey, keys.apiSecret);
+        const data = (spot?.data ?? {}) as Record<string, TickerRow>;
         const futureTicker = await coinSwitchRequest(
           "/futures/all-pairs/ticker",
           "GET",
@@ -69,18 +81,42 @@ export async function GET(req: NextRequest) {
           undefined,
           { exchange: "EXCHANGE_2" },
         );
+        const btcInr = findPair(data, "BTC", "INR");
         const btcUsdt = findPair((futureTicker?.data ?? {}) as Record<string, TickerRow>, "BTC", "USDT");
         if (!Number.isNaN(btcInr) && !Number.isNaN(btcUsdt) && btcUsdt > 0) {
           inrRate = btcInr / btcUsdt;
         }
+      } catch (error) {
+        fetchError = fetchError ?? error;
       }
-    } catch (error) {
-      fetchError = error;
+    }
+
+    // 3) Public CoinGecko USDT→INR quote when the account key cannot access the
+    //    spot ticker (CoinSwitch replies "Invalid access" for futures-only keys).
+    if (Number.isNaN(inrRate)) {
+      try {
+        const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=inr", {
+          cache: "no-store",
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; Tradenaya/1.0)" },
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { tether?: { inr?: number | string } };
+          const cg = toNumber(body?.tether?.inr);
+          if (!Number.isNaN(cg)) {
+            inrRate = cg;
+            source = "coingecko";
+          }
+        }
+      } catch (error) {
+        fetchError = fetchError ?? error;
+      }
     }
 
     if (!Number.isNaN(inrRate)) {
       cache = { inrRate, at: Date.now() };
-      return NextResponse.json({ success: true, inrRate, updatedAt: new Date().toISOString() });
+      const response: Record<string, unknown> = { success: true, inrRate, updatedAt: new Date().toISOString() };
+      if (source !== "coinswitch") response.source = source;
+      return NextResponse.json(response);
     }
 
     if (cache) {

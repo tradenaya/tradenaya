@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const apiKey = body?.apiKey;
     const apiSecret = body?.apiSecret;
+    const validUntil: string | null | undefined = body?.validUntil;
 
     if (!apiKey || !apiSecret) {
       return NextResponse.json({ success: false, message: "Please enter your CoinSwitch API key and secret before connecting." }, { status: 400 });
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
     const response = await verifyConnection(apiKey, apiSecret);
 
     // save keys for this user (encrypted)
-    await saveKeysForUser(customer.customerId, apiKey, apiSecret);
+    await saveKeysForUser(customer.customerId, apiKey, apiSecret, validUntil);
 
     return NextResponse.json({ success: true, data: response });
   } catch (error: any) {
