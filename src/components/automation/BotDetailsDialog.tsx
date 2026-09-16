@@ -37,7 +37,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[98vw] max-w-7xl max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card p-0">
+      <DialogContent className="w-[98vw] max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card p-0 sm:max-w-7xl">
         <DialogHeader className="border-b border-border px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <DialogTitle className="flex items-center gap-2 text-lg">

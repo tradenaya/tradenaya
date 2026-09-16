@@ -220,7 +220,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
 
   return (
     <Dialog open={open} onOpenChange={(open) => !saving && onOpenChange(open)}>
-      <DialogContent className="w-[95vw] max-w-5xl max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card">
+      <DialogContent className="w-[95vw] max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card sm:max-w-5xl">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Bot className="h-4 w-4" />

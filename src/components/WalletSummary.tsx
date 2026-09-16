@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { ConvertInrToUsdtBanner } from "@/components/coinswitch/convert";
 
 interface WalletBalances {
   total_balance: string;
@@ -18,39 +19,39 @@ interface WalletBalances {
 export default function WalletSummary() {
   const [balances, setBalances] = useState<WalletBalances | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cancelled = useRef(false);
   useDisplayCurrency();
 
-  useEffect(() => {
-    let cancelled = false;
+  async function fetchBalance() {
+    try {
+      const res = await fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" });
+      const json = await res.json();
 
-    async function fetchBalance() {
-      try {
-        const res = await fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" });
-        const json = await res.json();
+      if (cancelled.current) return;
 
-        if (cancelled) return;
-
-        if (!json.success) {
-          setError(json.message ?? "failed to load balance");
-          return;
-        }
-
-        const usdt = json.data.base_asset_balances?.find(
-          (b: any) => b.base_asset === "USDT"
-        );
-
-        setBalances(usdt ? usdt.balances : null);
-        setError(null);
-      } catch (err: any) {
-        if (!cancelled) setError(err.message);
+      if (!json.success) {
+        setError(json.message ?? "failed to load balance");
+        return;
       }
-    }
 
-    fetchBalance();
+      const usdt = json.data.base_asset_balances?.find(
+        (b: any) => b.base_asset === "USDT"
+      );
+
+      setBalances(usdt ? usdt.balances : null);
+      setError(null);
+    } catch (err: any) {
+      if (!cancelled.current) setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    cancelled.current = false;
+    void fetchBalance();
     const interval = setInterval(fetchBalance, 10000);
 
     return () => {
-      cancelled = true;
+      cancelled.current = true;
       clearInterval(interval);
     };
   }, []);
@@ -98,9 +99,14 @@ export default function WalletSummary() {
           <Stat label="In Open Orders" value={money(balances.total_open_order_margin)} />
         </div>
 
+        <ConvertInrToUsdtBanner
+          className="mt-3"
+          onConverted={() => void fetchBalance()}
+        />
+
         {isEmpty && (
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400">
-            <AlertTriangle size={14} />
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <AlertTriangle size={13} className="text-amber-400" />
             Futures wallet balance is 0 — deposit/transfer funds into your Futures wallet on
             CoinSwitch before placing real orders.
           </p>

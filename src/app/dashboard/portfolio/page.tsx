@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wallet, RefreshCw } from "lucide-react";
+import { Wallet, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConvertInrToUsdtDialog } from "@/components/coinswitch/convert";
 import {
   Table,
   TableBody,
@@ -58,6 +59,7 @@ export default function PortfolioPage() {
   const [holdings, setHoldings] = useState<CoinHolding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [convertOpen, setConvertOpen] = useState(false);
 
   async function loadPortfolio() {
     try {
@@ -90,9 +92,19 @@ export default function PortfolioPage() {
           <h1 className="text-xl sm:text-2xl font-bold">Spot Portfolio</h1>
           <p className="text-sm text-muted-foreground">Your spot balances across all assets.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={loadPortfolio} disabled={loading} className="w-full sm:w-auto">
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConvertOpen(true)}
+            className="w-full border-amber-500/40 text-amber-300 hover:text-amber-200 sm:w-auto"
+          >
+            <ArrowLeftRight size={14} /> Convert INR to USDT
+          </Button>
+          <Button variant="outline" size="sm" onClick={loadPortfolio} disabled={loading} className="w-full sm:w-auto">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </Button>
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
@@ -187,6 +199,12 @@ export default function PortfolioPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConvertInrToUsdtDialog
+        open={convertOpen}
+        onOpenChange={setConvertOpen}
+        onConverted={() => void loadPortfolio()}
+      />
     </div>
   );
 }

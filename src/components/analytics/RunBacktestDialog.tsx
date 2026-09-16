@@ -100,7 +100,7 @@ export function RunBacktestDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Run Backtest</DialogTitle>
           <DialogDescription>Simulate the automation pipeline on historical data.</DialogDescription>
