@@ -250,7 +250,7 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
                 />
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="rounded-md bg-muted p-2">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">SL</div>
                   <div className="font-semibold text-foreground">

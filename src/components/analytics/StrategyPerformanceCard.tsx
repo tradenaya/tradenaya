@@ -39,12 +39,12 @@ export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterS
             <TableHeader>
               <TableRow>
                 <TableHead>Strategy</TableHead>
-                <TableHead className="text-right">Bots</TableHead>
-                <TableHead className="text-right">Trades</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Bots</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Trades</TableHead>
                 <TableHead className="text-right">Win Rate</TableHead>
-                <TableHead className="text-right">Profit Factor</TableHead>
-                <TableHead className="text-right">Max DD</TableHead>
-                <TableHead className="text-right">Avg Trade</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Profit Factor</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Max DD</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Avg Trade</TableHead>
                 <TableHead className="text-right">PnL</TableHead>
               </TableRow>
             </TableHeader>
@@ -52,12 +52,12 @@ export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterS
               {strategies.map((s) => (
                 <TableRow key={s.strategy}>
                   <TableCell className="font-medium text-foreground">{s.strategy}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.bots}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.trades}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{s.bots}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{s.trades}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatPercent(s.winRate)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.profitFactor == null ? "∞" : s.profitFactor.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{formatPercent(s.maxDrawdownPct)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${signClass(s.averageTrade)}`}>{pnlText(s.averageTrade)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">{s.profitFactor == null ? "∞" : s.profitFactor.toFixed(2)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{formatPercent(s.maxDrawdownPct)}</TableCell>
+                  <TableCell className={`text-right tabular-nums hidden sm:table-cell ${signClass(s.averageTrade)}`}>{pnlText(s.averageTrade)}</TableCell>
                   <TableCell className={`text-right font-medium tabular-nums ${signClass(s.pnl)}`}>{pnlText(s.pnl)}</TableCell>
                 </TableRow>
               ))}

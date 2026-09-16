@@ -98,7 +98,7 @@ function applyAdminBaseVars(root: HTMLElement, theme: any, mode: "light" | "dark
   };
 
   root.style.setProperty("--primary", d.primary);
-  root.style.setProperty("--secondary", d.secondary);
+  root.style.setProperty("--secondary", d.surface);
   root.style.setProperty("--accent", d.accent);
   root.style.setProperty("--background", d.background);
   root.style.setProperty("--foreground", d.text);
@@ -106,12 +106,13 @@ function applyAdminBaseVars(root: HTMLElement, theme: any, mode: "light" | "dark
   root.style.setProperty("--card-foreground", d.text);
   root.style.setProperty("--popover", d.surface);
   root.style.setProperty("--popover-foreground", d.text);
-  root.style.setProperty("--border", d.secondary);
-  root.style.setProperty("--input", d.secondary);
+  root.style.setProperty("--border", isDark ? "rgba(201,154,88,0.14)" : "rgba(201,154,88,0.18)");
+  root.style.setProperty("--input", isDark ? "rgba(7,6,5,0.8)" : "rgba(255,255,255,0.9)");
   root.style.setProperty("--ring", d.primary);
   root.style.setProperty("--muted", d.surface);
-  root.style.setProperty("--muted-foreground", d.text);
+  root.style.setProperty("--muted-foreground", isDark ? "#a89880" : "#6d5e48");
   root.style.setProperty("--sidebar", d.sidebar);
+  root.style.setProperty("--primary-hover", "#a47209");
 }
 
 function initColorMode(

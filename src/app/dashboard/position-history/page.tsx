@@ -140,9 +140,9 @@ export default function PositionHistoryPage() {
   const total = data?.total ?? 0
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-2xl font-bold">Position History</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Position History</h1>
         <p className="text-sm text-muted-foreground">
           Completed positions with entry, exit, P&amp;L and running balance.
         </p>
@@ -163,7 +163,7 @@ export default function PositionHistoryPage() {
               </CardHeader>
               <CardContent className="pt-4">
                 <div className="overflow-x-auto">
-                  <Table>
+                  <Table className="min-w-[640px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Symbol</TableHead>
@@ -172,10 +172,10 @@ export default function PositionHistoryPage() {
                         <TableHead>Bot</TableHead>
                         <TableHead className="text-right">Entry</TableHead>
                         <TableHead className="text-right">Current</TableHead>
-                        <TableHead className="text-right">SL</TableHead>
-                        <TableHead className="text-right">TP</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">SL</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">TP</TableHead>
                         <TableHead className="text-right">Unrealized PnL</TableHead>
-                        <TableHead className="text-right">Lev</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">Lev</TableHead>
                         <TableHead className="text-right">Duration</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -192,17 +192,17 @@ export default function PositionHistoryPage() {
                           <TableCell className="text-xs text-muted-foreground">{pos.botName}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(pos.entryPrice)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(pos.currentPrice)}</TableCell>
-                          <TableCell className="text-right tabular-nums text-xs text-red-400">
+                          <TableCell className="text-right tabular-nums text-xs text-red-400 hidden sm:table-cell">
                             {pos.stopLoss != null ? formatPrice(pos.stopLoss) : "—"}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums text-xs text-emerald-400">
+                          <TableCell className="text-right tabular-nums text-xs text-emerald-400 hidden sm:table-cell">
                             {pos.takeProfit != null ? formatPrice(pos.takeProfit) : "—"}
                           </TableCell>
                           <TableCell className={`text-right font-medium tabular-nums ${signClass(pos.unrealizedPnl)}`}>
                             {pnlText(pos.unrealizedPnl)}
                           </TableCell>
-                          <TableCell className="text-right">{pos.leverage ? `${pos.leverage}x` : "—"}</TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">{formatDuration(pos.durationMs)}</TableCell>
+                          <TableCell className="text-right hidden sm:table-cell">{pos.leverage ? `${pos.leverage}x` : "—"}</TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground hidden lg:table-cell">{formatDuration(pos.durationMs)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -246,7 +246,7 @@ export default function PositionHistoryPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <Table>
+                  <Table className="min-w-[700px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-8"></TableHead>
@@ -254,16 +254,16 @@ export default function PositionHistoryPage() {
                         <TableHead>Side</TableHead>
                         <TableHead className="text-right">Entry</TableHead>
                         <TableHead className="text-right">Exit</TableHead>
-                        <TableHead className="text-right">Size</TableHead>
-                        <TableHead className="text-right">Lev</TableHead>
-                        <TableHead>Outcome</TableHead>
+                        <TableHead className="text-right hidden md:table-cell">Size</TableHead>
+                        <TableHead className="text-right hidden lg:table-cell">Lev</TableHead>
+                        <TableHead className="hidden md:table-cell">Outcome</TableHead>
                         <TableHead>Exit Reason</TableHead>
                         <TableHead className="text-right">P&amp;L</TableHead>
-                        <TableHead className="text-right">Gross</TableHead>
-                        <TableHead className="text-right">Fees</TableHead>
-                        <TableHead className="text-right">Funding</TableHead>
-                        <TableHead className="text-right">ROI</TableHead>
-                        <TableHead className="text-right">Duration</TableHead>
+                        <TableHead className="text-right hidden lg:table-cell">Gross</TableHead>
+                        <TableHead className="text-right hidden xl:table-cell">Fees</TableHead>
+                        <TableHead className="text-right hidden xl:table-cell">Funding</TableHead>
+                        <TableHead className="text-right hidden md:table-cell">ROI</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">Duration</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -285,13 +285,13 @@ export default function PositionHistoryPage() {
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs">{formatPrice(trade.entryPrice)}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs">{formatPrice(trade.exitPrice)}</TableCell>
-                              <TableCell className="text-right tabular-nums text-xs">
+                              <TableCell className="text-right tabular-nums text-xs hidden md:table-cell">
                                 {trade.positionSize != null ? trade.positionSize.toFixed(4) : "—"}
                               </TableCell>
-                              <TableCell className="text-right text-xs text-muted-foreground">
+                              <TableCell className="text-right text-xs text-muted-foreground hidden lg:table-cell">
                                 {trade.leverage ? `${trade.leverage}x` : "—"}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="hidden md:table-cell">
                                 <Badge className={outcomeBadge(trade.outcome)}>
                                   {trade.outcome === "WIN" ? "Won" : trade.outcome === "LOSS" ? "Lost" : "Flat"}
                                 </Badge>
@@ -305,26 +305,26 @@ export default function PositionHistoryPage() {
                                 {pnlText(trade.profitLoss)}
                                 <span className="text-muted-foreground text-xs ml-1">USDT</span>
                               </TableCell>
-                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden lg:table-cell">
                                 {trade.grossProfit != null && trade.grossProfit !== 0
                                   ? `${signClass(trade.grossProfit) === "text-emerald-400" ? "+" : ""}$${Math.abs(trade.grossProfit).toFixed(4)}`
                                   : "—"}
                               </TableCell>
-                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden xl:table-cell">
                                 {trade.commission != null && trade.commission > 0 ? `-$${trade.commission.toFixed(4)}` : "—"}
                               </TableCell>
-                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden xl:table-cell">
                                 {trade.fundingFee != null && trade.fundingFee !== 0 ? `${trade.fundingFee > 0 ? "-" : "+"}$${Math.abs(trade.fundingFee).toFixed(4)}` : "—"}
                               </TableCell>
-                              <TableCell className={`text-right tabular-nums text-xs ${signClass(pct)}`}>
+                              <TableCell className={`text-right tabular-nums text-xs hidden md:table-cell ${signClass(pct)}`}>
                                 {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
                               </TableCell>
-                              <TableCell className="text-right text-xs text-muted-foreground">{formatDuration(trade.durationMs)}</TableCell>
+                              <TableCell className="text-right text-xs text-muted-foreground hidden sm:table-cell">{formatDuration(trade.durationMs)}</TableCell>
                             </TableRow>
                             {isExpanded && (
                               <TableRow key={`detail-${trade.tradeId}`} className="bg-muted/30">
                                 <TableCell colSpan={15} className="py-3 px-4">
-                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs min-w-0">
                                     <div>
                                       <span className="text-muted-foreground">Outcome</span>
                                       <p className={`font-bold ${trade.outcome === "WIN" ? "text-emerald-400" : trade.outcome === "LOSS" ? "text-red-400" : "text-zinc-400"}`}>
@@ -433,7 +433,7 @@ export default function PositionHistoryPage() {
               )}
 
               {total > PAGE_SIZE && (
-                <div className="mt-3 flex items-center justify-between">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">
                     Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
                   </span>

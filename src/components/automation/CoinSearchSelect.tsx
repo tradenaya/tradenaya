@@ -41,7 +41,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
   const [coins, setCoins] = useState<CoinOption[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value.toUpperCase());
+  const [query, setQuery] = useState(value);
   const [debouncedQuery, setDebouncedQuery] = useState(query);
   const [highlighted, setHighlighted] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -107,7 +107,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
       setQuery("");
       return;
     }
-    setQuery((current) => (current.toUpperCase() === value.toUpperCase() ? current : value.toUpperCase()));
+    setQuery(value);
   }, [value]);
 
   useEffect(() => {
@@ -136,9 +136,8 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
   }, [coins, debouncedQuery]);
 
   function select(symbol: string) {
-    const normalized = symbol.toUpperCase();
-    onChange(normalized);
-    setQuery(normalized);
+    onChange(symbol);
+    setQuery(symbol);
     setOpen(false);
   }
 
@@ -171,7 +170,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
         <Input
           ref={inputRef}
           id="auto-symbol"
-          className="pl-9 pr-8 uppercase"
+          className="pl-9 pr-8"
           placeholder="Search coin e.g BTCUSDT"
           value={query}
           disabled={disabled}

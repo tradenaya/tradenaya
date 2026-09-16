@@ -106,7 +106,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       leverageMode: cfg.leverageMode,
       leveragePercent: String(cfg.leveragePercent ?? 50),
       capital: String(cfg.capital || 0),
-      maxRiskPerTrade: String(cfg.maxRiskPerTrade ?? 1),
+        maxRiskPerTrade: String(cfg.maxRiskPerTrade ?? 20),
       config: JSON.stringify({
         timeframe: cfg.timeframe ?? "1h",
         leverage: cfg.leverage || 5,
@@ -116,7 +116,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         capitalMode: cfg.capitalMode,
         walletPercent: cfg.capitalMode === "percent" ? cfg.walletPercent : null,
         maxRiskPerTrade: cfg.maxRiskPerTrade ?? 1,
-        dailyLossLimit: cfg.dailyLossLimit ?? 5,
+        dailyLossLimit: cfg.dailyLossLimit ?? 30,
         enableTrailingStop: cfg.enableTrailingStop ?? false,
         trailingDistancePercent: cfg.trailingDistancePercent ?? null,
         minConfidence: cfg.minConfidence ?? null,
@@ -211,7 +211,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
 
   return (
     <Dialog open={open} onOpenChange={(open) => !saving && onOpenChange(open)}>
-      <DialogContent className="w-[95vw] max-w-3xl max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card">
+      <DialogContent className="w-[95vw] max-w-5xl max-h-[90dvh] flex flex-col overflow-hidden border-border bg-card">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Bot className="h-4 w-4" />
@@ -375,7 +375,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             <Input value={cfg.timeframe ?? ""} onChange={(e) => update("timeframe", e.target.value)} />
           </div>
 
-          <div className={`grid gap-3.5 ${cfg.autoSelect ? "grid-cols-1" : "grid-cols-2"}`}>
+          <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3.5`}>
             {!cfg.autoSelect && (
               <div className="grid gap-1.5">
                 <Label>Leverage</Label>
@@ -388,7 +388,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="grid gap-1.5">
               <Label>Capital mode</Label>
               <Select value={cfg.capitalMode} onValueChange={(v) => update("capitalMode", v)}>
@@ -409,7 +409,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="grid gap-1.5">
               <Label>Max risk / trade (%)</Label>
               <p className="text-[11px] text-muted-foreground -mt-0.5">
@@ -423,7 +423,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="grid gap-1.5">
               <Label>Order expiry (min)</Label>
               <Input type="number" min={1} value={cfg.orderExpiryMinutes ?? ""} onChange={(e) => update("orderExpiryMinutes", Number(e.target.value))} />
@@ -434,7 +434,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="grid gap-1.5">
               <Label>Drift tolerance (×ATR)</Label>
               <Input type="number" min={0.5} step={0.1} value={cfg.driftAtr ?? 1} onChange={(e) => update("driftAtr", Number(e.target.value))} />
@@ -461,7 +461,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             <TradePreviewPanel preview={tradePreview} />
           </div>
 
-          <div className="flex items-end justify-between rounded-lg border border-border bg-background/40 px-3 py-2.5">
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-border bg-background/40 px-3 py-2.5">
             <div className="flex items-center gap-2">
               <input
                 id="trailing"
@@ -475,7 +475,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
               </Label>
             </div>
             {cfg.enableTrailingStop && (
-              <div className="grid w-32 gap-1.5">
+              <div className="grid w-full sm:w-32 gap-1.5">
                 <Label>Trailing distance (%)</Label>
                 <Input type="number" min={0} step={0.1} value={cfg.trailingDistancePercent ?? ""} onChange={(e) => update("trailingDistancePercent", Number(e.target.value))} />
               </div>

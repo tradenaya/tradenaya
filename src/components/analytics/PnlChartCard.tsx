@@ -17,8 +17,8 @@ import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatMoney, formatShortDate, pnlText, signClass } from "./format"
 
-const AXIS_STROKE = "#9aa4b6"
-const GRID_STROKE = "rgba(154,164,182,0.15)"
+const AXIS_STROKE = "#a89880"
+const GRID_STROKE = "rgba(168,152,128,0.15)"
 
 export function PnlChartCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading } = useAsyncData<PnlAnalytics>(
@@ -78,7 +78,7 @@ export function PnlChartCard({ filters }: { filters: AnalyticsFilterState }) {
                   contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: "var(--foreground)" }}
                 />
-                <Bar dataKey="realized" fill="#b8860b" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="realized" fill="#c99a58" radius={[3, 3, 0, 0]} isAnimationActive={false} />
                 <Line
                   type="monotone"
                   dataKey="cumulative"

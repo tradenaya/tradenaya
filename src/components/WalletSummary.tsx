@@ -108,9 +108,9 @@ function Stat({
   highlight?: boolean;
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-1 text-xs text-muted-foreground">{label}</div>
-      <div className={`font-semibold ${highlight ? "text-emerald-400" : "text-foreground"}`}>
+      <div className={`min-w-0 font-semibold break-all ${highlight ? "text-emerald-400" : "text-foreground"}`}>
         {value}
       </div>
     </div>

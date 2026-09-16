@@ -14,8 +14,6 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const tenant = useAppSelector((state) => state.tenant);
 
-  // key the shell by pathname so navigation unmounts/remounts it and the
-  // sidebar resets to closed on every route change instead of persisting open.
   return (
     <NavShell key={pathname} tenantName={tenant.tenantName}>
       {children}
@@ -33,16 +31,19 @@ function NavShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+    <div
+      className="min-h-screen"
+      style={{ backgroundColor: "#070605", color: "#eee5d8" }}
+    >
       <CustomerSidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         tenantName={tenantName}
       />
 
-      <div className={`flex flex-col min-h-screen transition-all duration-300 ${sidebarOpen ? "ml-72" : ""}`}>
+      <div className="flex flex-col min-h-screen md:ml-0">
         <CustomerNavbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 overflow-x-hidden">{children}</main>
       </div>
     </div>
   );

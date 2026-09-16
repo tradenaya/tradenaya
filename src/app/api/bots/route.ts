@@ -21,6 +21,28 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const config = sanitizeConfig(body ?? {});
+
+    // Wallet-% must be a percentage of REMAINING available across running bots:
+    // sum every other bot's walletPercent for this user, block at 100%.
+    if (config.capitalMode === "percent" && config.walletPercent != null) {
+      const others = await botScheduler.listBots(userId);
+      const allocatedTotal =
+        others.reduce((sum, bot) => sum + (bot.capitalMode === "percent" ? bot.walletPercent ?? 0 : 0), 0) +
+        config.walletPercent;
+      if (allocatedTotal - 100 > 1e-9) {
+        return fail(
+          400,
+          `Cannot start bot: ${config.walletPercent}% of remaining + existing allocations would exceed 100% of your available futures balance. Lower the wallet %, or reduce another bot's allocation first.`,
+        );
+      }
+      if (allocatedTotal > 100 - 1e-9) {
+        return fail(
+          400,
+          `Cannot start bot: your wallet is 100% allocated already. No remaining available balance for a new % bot. Lower another bot's % or delete a bot first.`,
+        );
+      }
+    }
+
     const { botId } = await botScheduler.startBot(userId, config);
     return ok({ botId });
   } catch (error: any) {

@@ -94,7 +94,12 @@ export default function AdminSigninPage() {
           onChange={(e) => setForm({ ...form, password: e.target.value })}
         />
 
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button
+          type="submit"
+          className="h-12 w-full"
+          style={{ fontFamily: "var(--font-cinzel), serif", letterSpacing: "0.08em" }}
+          disabled={loading}
+        >
           {loading ? (
             <>
               <Loader2 className="animate-spin" /> Signing in…

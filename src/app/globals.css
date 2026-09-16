@@ -5,50 +5,51 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --surface: #11151d;
-  --primary: #b8860b; /* dark gold fallback */
+  color-scheme: dark;
+  --surface: #0e0c09;
+  --primary: #c99a58;
   --primary-hover: #a47209;
-  --primary-gradient: linear-gradient(135deg,#b8860b 0%,#a97112 50%,#89630a 100%);
-  --secondary: #10121a;
-  --text: #c1c8d7;
-  --text-muted: #9aa4b6;
-  --border: rgba(184,134,11,0.12);
-  --background: #000000;
-  --foreground: #d8e0ea;
-  --card: #0b0d10; /* darkest charcoal */
-  --card-foreground: #d8e0ea;
-  --popover: #13151d;
-  --popover-foreground: #c1c8d7;
-  --primary-foreground: #0b0d10;
-  --secondary-foreground: #c1c8d7;
-  --muted: #0b0d12;
-  --muted-foreground: #9aa4b6;
-  --accent: #232b3e;
-  --accent-foreground: #e6ecf5;
+  --primary-gradient: linear-gradient(135deg,#c99a58 0%,#b8860b 50%,#a47209 100%);
+  --secondary: #0e0c09;
+  --text: #eee5d8;
+  --text-muted: #a89880;
+  --border: rgba(201,154,88,0.14);
+  --background: #070605;
+  --foreground: #eee5d8;
+  --card: #0a0907;
+  --card-foreground: #eee5d8;
+  --popover: #0e0c09;
+  --popover-foreground: #eee5d8;
+  --primary-foreground: #070605;
+  --secondary-foreground: #eee5d8;
+  --muted: #0a0907;
+  --muted-foreground: #a89880;
+  --accent: #1a1510;
+  --accent-foreground: #f4e6cd;
   --destructive: #ef4444;
-  --input: #0d1017;
-  --ring: #8f9bb7;
-  --chart-1: #f8fafc;
-  --chart-2: #c1c8d7;
-  --chart-3: #9ca3af;
-  --chart-4: #6b7280;
-  --chart-5: #4b5563;
+  --input: #0a0907;
+  --ring: #c99a58;
+  --chart-1: #c99a58;
+  --chart-2: #dfb978;
+  --chart-3: #a89880;
+  --chart-4: #8a7a62;
+  --chart-5: #6d5e48;
   --radius: 0.625rem;
-  --sidebar: #090a10;
-  --sidebar-foreground: #d8e0ea;
-  --sidebar-primary: #d8e0ea;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: #0b0d11;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: rgba(255,255,255,0.08);
-  --sidebar-ring: #f8fafc;
-  --admin-primary: #d8e0ea;
-  --admin-secondary: #9aa4b6;
-  --admin-accent: #9ca3af;
-  --admin-sidebar: #000000;
-  --admin-background: #010204;
-  --admin-surface: #13151d;
-  --admin-foreground: #d8e0ea;
+  --sidebar: #070605;
+  --sidebar-foreground: #eee5d8;
+  --sidebar-primary: #c99a58;
+  --sidebar-primary-foreground: #070605;
+  --sidebar-accent: #0e0c09;
+  --sidebar-accent-foreground: #f4e6cd;
+  --sidebar-border: rgba(201,154,88,0.12);
+  --sidebar-ring: #c99a58;
+  --admin-primary: #c99a58;
+  --admin-secondary: #a89880;
+  --admin-accent: #dfb978;
+  --admin-sidebar: #070605;
+  --admin-background: #070605;
+  --admin-surface: #0a0907;
+  --admin-foreground: #eee5d8;
 }
 
 html,
@@ -56,11 +57,11 @@ body {
   background: var(--background);
   color: var(--text);
   overflow-x: hidden;
-  font-family: var(--font-inter), system-ui, sans-serif;
+  font-family: var(--font-cinzel), var(--font-inter), system-ui, sans-serif;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-poppins), system-ui, sans-serif;
+  font-family: var(--font-cinzel), var(--font-poppins), system-ui, sans-serif;
 }
 
 @theme inline {
@@ -107,44 +108,45 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .dark {
-  --background: #000000;
-  --foreground: #d8e0ea;
-  --card: #0f1115;
-  --card-foreground: #d8e0ea;
-  --popover: #13151d;
-  --popover-foreground: #d8e0ea;
-  --primary: #13151d;
-  --primary-foreground: #f8fafc;
-  --secondary: #10121a;
-  --secondary-foreground: #f8fafc;
-  --muted: #0a0c11;
-  --muted-foreground: #9aa4b6;
-  --accent: #232b3e;
-  --accent-foreground: #e6ecf5;
+  color-scheme: dark;
+  --background: #070605;
+  --foreground: #eee5d8;
+  --card: #0a0907;
+  --card-foreground: #eee5d8;
+  --popover: #0e0c09;
+  --popover-foreground: #eee5d8;
+  --primary: #c99a58;
+  --primary-foreground: #070605;
+  --secondary: #0e0c09;
+  --secondary-foreground: #eee5d8;
+  --muted: #0a0907;
+  --muted-foreground: #a89880;
+  --accent: #1a1510;
+  --accent-foreground: #f4e6cd;
   --destructive: #ef4444;
-  --border: rgba(184,134,11,0.14);
-  --input: #0d1017;
-  --ring: #8f9bb7;
-  --chart-1: #f8fafc;
-  --chart-2: #c1c8d7;
-  --chart-3: #9ca3af;
-  --chart-4: #6b7280;
-  --chart-5: #4b5563;
-  --sidebar: #090a10;
-  --sidebar-foreground: #f8fafc;
-  --sidebar-primary: #f8fafc;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: #0b0d11;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: rgba(184,134,11,0.14);
-  --sidebar-ring: #f8fafc;
-  --admin-primary: #f8fafc;
-  --admin-secondary: #c1c8d7;
-  --admin-accent: #9ca3af;
-  --admin-sidebar: #000000;
-  --admin-background: #000000;
-  --admin-surface: #13151d;
-  --admin-foreground: #d8e0ea;
+  --border: rgba(201,154,88,0.14);
+  --input: #0a0907;
+  --ring: #c99a58;
+  --chart-1: #c99a58;
+  --chart-2: #dfb978;
+  --chart-3: #a89880;
+  --chart-4: #8a7a62;
+  --chart-5: #6d5e48;
+  --sidebar: #070605;
+  --sidebar-foreground: #eee5d8;
+  --sidebar-primary: #c99a58;
+  --sidebar-primary-foreground: #070605;
+  --sidebar-accent: #0e0c09;
+  --sidebar-accent-foreground: #f4e6cd;
+  --sidebar-border: rgba(201,154,88,0.14);
+  --sidebar-ring: #c99a58;
+  --admin-primary: #c99a58;
+  --admin-secondary: #a89880;
+  --admin-accent: #dfb978;
+  --admin-sidebar: #070605;
+  --admin-background: #070605;
+  --admin-surface: #0a0907;
+  --admin-foreground: #eee5d8;
 }
 
 @layer base {
@@ -160,16 +162,16 @@ h1, h2, h3, h4, h5, h6 {
   button, a, [role="button"] {
     cursor: pointer;
   }
-  /* Primary buttons: use dark-gold gradient while keeping text readable */
+  /* Primary buttons: use gold gradient while keeping text readable */
   .group\/button[data-variant="default"] {
     background-image: var(--primary-gradient);
     background-color: var(--primary);
     color: var(--primary-foreground);
-    border-color: rgba(184,134,11,0.12);
+    border-color: rgba(201,154,88,0.14);
   }
-  /* Card borders: subtle dark gold tint */
+  /* Card borders: subtle gold tint */
   .card, .card * {
-    border-color: rgba(255,255,255,0.04);
+    border-color: rgba(201,154,88,0.08);
   }
 }
 
@@ -178,7 +180,7 @@ h1, h2, h3, h4, h5, h6 {
   /* Slim themed scrollbars — gold accent on dark track */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(184, 134, 11, 0.35) rgba(184, 134, 11, 0.06);
+    scrollbar-color: rgba(201, 154, 88, 0.35) rgba(201, 154, 88, 0.06);
   }
   *::-webkit-scrollbar {
     width: 8px;
@@ -188,16 +190,16 @@ h1, h2, h3, h4, h5, h6 {
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgba(184, 134, 11, 0.3);
+    background: rgba(201, 154, 88, 0.3);
     border-radius: 999px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgba(184, 134, 11, 0.5);
+    background: rgba(201, 154, 88, 0.5);
   }
 
 /* Selection tint matching brand */
 ::selection {
-  background: rgba(184, 134, 11, 0.35);
+  background: rgba(201, 154, 88, 0.35);
   color: var(--foreground);
 }
 
@@ -217,8 +219,33 @@ button {
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(184, 134, 11, 0.4);
+  outline: 2px solid rgba(201, 154, 88, 0.4);
   outline-offset: 1px;
+}
+
+/* Native date pickers: force the dark color-scheme so the calendar popup and
+   picker indicator render correctly against the dark theme, and keep the
+   indicator clearly visible — never a black blob on the dark card. */
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+  color-scheme: dark;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.8;
+  filter: invert(1) sepia(0.45) saturate(3) hue-rotate(8deg);
+  transition: opacity 0.15s ease;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="month"]::-webkit-calendar-picker-indicator:hover,
+input[type="week"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 
 /* Remove browser number-input spinners */
@@ -273,4 +300,72 @@ table tbody tr:hover {
 }
 .animate-fade-in {
   animation: fade-in 0.25s ease both;
+}
+
+/* ---------- Mobile Responsiveness ---------- */
+
+/* Prevent horizontal overflow on mobile */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Make tables horizontally scrollable */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Responsive card grids */
+  .grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Stack single-column grids on very small screens */
+  @media (max-width: 480px) {
+    .grid-cols-2 {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+/* Mobile tab navigation styles */
+.mobile-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0;
+  margin: 0 -1rem;
+  padding: 0 1rem;
+}
+
+.mobile-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-tab {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.mobile-tab.active {
+  background: rgba(201, 154, 88, 0.15);
+  color: #c99a58;
+}
+
+.mobile-tab:not(.active) {
+  color: #a89880;
+  background: transparent;
+}
+
+.mobile-tab:not(.active):hover {
+  background: rgba(201, 154, 88, 0.08);
+  color: #eee5d8;
 }

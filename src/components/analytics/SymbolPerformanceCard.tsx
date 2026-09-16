@@ -39,26 +39,26 @@ export function SymbolPerformanceCard({ filters }: { filters: AnalyticsFilterSta
             <TableHeader>
               <TableRow>
                 <TableHead>Symbol</TableHead>
-                <TableHead className="text-right">Trades</TableHead>
-                <TableHead className="text-right">Long / Short</TableHead>
-                <TableHead className="text-right">Win Rate</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Trades</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Long / Short</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Win Rate</TableHead>
                 <TableHead className="text-right">Avg PnL</TableHead>
                 <TableHead className="text-right">PnL</TableHead>
-                <TableHead className="text-right">Fees</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Fees</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {symbols.map((s) => (
                 <TableRow key={s.symbol}>
                   <TableCell className="font-medium text-foreground">{s.symbol}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.trades}</TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{s.trades}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">
                     {s.longTrades} / {s.shortTrades}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPercent(s.winRate)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPercent(s.winRate)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(s.averagePnl)}`}>{pnlText(s.averagePnl)}</TableCell>
                   <TableCell className={`text-right font-medium tabular-nums ${signClass(s.pnl)}`}>{pnlText(s.pnl)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{formatMoney(s.fees)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{formatMoney(s.fees)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

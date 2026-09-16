@@ -99,9 +99,9 @@ export default function MarketPage() {
   const currentCoins = filtered.slice(start, start + COINS_PER_PAGE);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-2xl font-bold">Futures Market</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Futures Market</h1>
         <p className="text-sm text-muted-foreground">Live perpetual contracts across all symbols.</p>
       </div>
 
@@ -139,7 +139,7 @@ export default function MarketPage() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="min-w-[540px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Symbol</TableHead>
@@ -193,7 +193,7 @@ export default function MarketPage() {
                 </Table>
               </div>
 
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-2">
                 <span className="text-xs text-muted-foreground">
                   Page {page} of {totalPages} · {filtered.length} symbols
                 </span>

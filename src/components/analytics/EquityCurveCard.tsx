@@ -16,8 +16,8 @@ import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatMoney, formatPercent, formatShortDate, signClass } from "./format"
 
-const AXIS_STROKE = "#9aa4b6"
-const GRID_STROKE = "rgba(154,164,182,0.15)"
+const AXIS_STROKE = "#a89880"
+const GRID_STROKE = "rgba(168,152,128,0.15)"
 
 export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading } = useAsyncData<EquityAnalytics>(
@@ -60,8 +60,8 @@ export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) 
               <AreaChart data={data?.points ?? []} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#b8860b" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#b8860b" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="#c99a58" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#c99a58" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke={GRID_STROKE} vertical={false} />
@@ -88,7 +88,7 @@ export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) 
                   contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: "var(--foreground)" }}
                 />
-                <Area type="monotone" dataKey="equity" stroke="#b8860b" strokeWidth={2} fill="url(#equityFill)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="equity" stroke="#c99a58" strokeWidth={2} fill="url(#equityFill)" isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>

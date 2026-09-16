@@ -55,13 +55,13 @@ export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState
               <TableRow>
                 <TableHead>Bot</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Capital</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Capital</TableHead>
                 <TableHead className="text-right">Position PnL</TableHead>
-                <TableHead className="text-right">Today</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Today</TableHead>
                 <TableHead className="text-right">Total PnL</TableHead>
-                <TableHead className="text-right">Trades</TableHead>
-                <TableHead className="text-right">Win Rate</TableHead>
-                <TableHead>Last Trade</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Trades</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">Win Rate</TableHead>
+                <TableHead className="hidden lg:table-cell">Last Trade</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -80,13 +80,13 @@ export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState
                       {!bot.enabled && <span className="text-[11px] text-muted-foreground">disabled</span>}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(bot.capital)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatMoney(bot.capital)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(bot.currentPnl)}`}>{pnlText(bot.currentPnl)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${signClass(bot.todayPnl)}`}>{pnlText(bot.todayPnl)}</TableCell>
+                  <TableCell className={`text-right tabular-nums hidden sm:table-cell ${signClass(bot.todayPnl)}`}>{pnlText(bot.todayPnl)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(bot.totalPnl)}`}>{pnlText(bot.totalPnl)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{bot.tradeCount}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPercent(bot.winRate)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{bot.tradeCount}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden lg:table-cell">{formatPercent(bot.winRate)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">
                     {bot.lastTrade ? (
                       <span>
                         {bot.lastTrade.exitReason} · {formatDate(bot.lastTrade.exitTime, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}

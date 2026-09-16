@@ -49,7 +49,7 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${poppins.variable} ${cinzel.variable} ${cinzelDecorative.variable} ${notoSerifDevanagari.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+      <body className="min-h-full flex flex-col" style={{ fontFamily: "var(--font-cinzel), var(--font-inter), system-ui, sans-serif" }}>
         <Providers>
           {children}
           <Toaster position="top-right" richColors />

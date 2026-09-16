@@ -46,7 +46,7 @@ export default function TradingChart({ symbol }: { symbol: string }) {
       },
       rightPriceScale: { minimumWidth: 90 },
       width: chartContainer.current.clientWidth,
-      height: 450,
+      height: Math.min(450, Math.max(280, chartContainer.current.clientWidth * 0.62)),
       timeScale: { timeVisible: true, secondsVisible: false },
     });
 
@@ -138,7 +138,7 @@ export default function TradingChart({ symbol }: { symbol: string }) {
 
   return (
     <div className="w-full">
-      <div className="flex gap-2 mb-2">
+      <div className="flex flex-wrap gap-2 mb-2">
         {INTERVALS.map((opt) => (
           <button
             key={opt.value}
@@ -156,7 +156,7 @@ export default function TradingChart({ symbol }: { symbol: string }) {
 
       <div
         ref={chartContainer}
-        className="w-full h-[450px] rounded-xl overflow-hidden"
+        className="w-full h-[280px] sm:h-[360px] lg:h-[450px] rounded-xl overflow-hidden"
       />
     </div>
   );

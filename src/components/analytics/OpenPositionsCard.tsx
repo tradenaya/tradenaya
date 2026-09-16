@@ -53,14 +53,14 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
               <TableRow>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Side</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead className="text-right">Entry</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Size</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Entry</TableHead>
                 <TableHead className="text-right">Mark</TableHead>
                 <TableHead className="text-right">Unrealized</TableHead>
-                <TableHead className="text-right">Stop Loss</TableHead>
-                <TableHead className="text-right">Take Profit</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Stop Loss</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Take Profit</TableHead>
                 <TableHead>Protection</TableHead>
-                <TableHead>Opened</TableHead>
+                <TableHead className="hidden lg:table-cell">Opened</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -75,15 +75,15 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
                       {p.side === "BUY" ? "Long" : "Short"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">
                     {p.quantity != null ? `${p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}` : "—"}
                     <div className="text-xs text-muted-foreground">{p.leverage != null ? `${p.leverage}x` : ""}{p.margin != null ? ` · ${formatMoney(p.margin)}` : ""}</div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPrice(p.entryPrice)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(p.entryPrice)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatPrice(p.currentPrice)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(p.unrealizedPnl)}`}>{pnlText(p.unrealizedPnl)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPrice(p.stopLoss)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPrice(p.takeProfit)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.stopLoss)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.takeProfit)}</TableCell>
                   <TableCell>
                     <ProtectionBadge status={p.protectionStatus} />
                     {p.trailingEnabled && (
@@ -92,7 +92,7 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(p.openTime)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">{formatDate(p.openTime)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import { CalendarDays, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { DatePicker } from "@/components/ui/date-picker"
 import { apiGet } from "./api"
 import { useAsyncData } from "./use-data"
 import type { AnalyticsFilterState } from "./api"
@@ -14,7 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 const labelClass = "text-xs font-medium text-muted-foreground"
 
@@ -34,16 +34,13 @@ export function FilterBar({ filters, onChange, onRefresh, showGranularity = fals
 
   const update = (patch: Partial<AnalyticsFilterState>) => onChange({ ...filters, ...patch })
 
-  const toEpoch = (value: string, endOfDay: boolean) => {
+  const toEpoch = (value: string | null, endOfDay: boolean) => {
     if (!value) return null
     const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`)
     return date.getTime()
   }
 
   const fromEpoch = (ms: number | null) => (ms == null ? "" : new Date(ms).toISOString().slice(0, 10))
-
-  const dateClass =
-    "h-8 rounded-lg border border-border bg-card px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
@@ -106,28 +103,40 @@ export function FilterBar({ filters, onChange, onRefresh, showGranularity = fals
 
       <div className="flex flex-col gap-1">
         <label className={labelClass}>From</label>
-        <div className="relative">
-          <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="date"
-            className={cn(dateClass, "pl-8")}
-            value={fromEpoch(filters.startTime)}
-            onChange={(e) => update({ startTime: toEpoch(e.target.value, false) })}
-          />
-        </div>
+        <DatePicker
+          value={fromEpoch(filters.startTime)}
+          maxDate={fromEpoch(filters.endTime)}
+          placeholder="From date"
+          onChange={(value) => {
+            const startTime = toEpoch(value, false)
+            let endTime = filters.endTime
+            // Never allow From after To: if From moves past To, push To
+            // forward onto the same day so the range stays valid.
+            if (startTime != null && endTime != null && startTime > endTime) {
+              endTime = toEpoch(fromEpoch(startTime), true)
+            }
+            update({ startTime, endTime })
+          }}
+        />
       </div>
 
       <div className="flex flex-col gap-1">
         <label className={labelClass}>To</label>
-        <div className="relative">
-          <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="date"
-            className={cn(dateClass, "pl-8")}
-            value={fromEpoch(filters.endTime)}
-            onChange={(e) => update({ endTime: toEpoch(e.target.value, true) })}
-          />
-        </div>
+        <DatePicker
+          value={fromEpoch(filters.endTime)}
+          minDate={fromEpoch(filters.startTime)}
+          placeholder="To date"
+          onChange={(value) => {
+            const endTime = toEpoch(value, true)
+            let startTime = filters.startTime
+            // Never allow To before From: if To moves before From, pull From
+            // back onto the same day so the range stays valid.
+            if (startTime != null && endTime != null && startTime > endTime) {
+              startTime = toEpoch(fromEpoch(endTime), false)
+            }
+            update({ startTime, endTime })
+          }}
+        />
       </div>
 
       {showGranularity && (

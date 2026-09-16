@@ -97,9 +97,9 @@ export default function OrdersPage() {
   const totalPages = data?.totalPages ?? 1
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-2xl font-bold">Order History</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Order History</h1>
         <p className="text-sm text-muted-foreground">
           Every futures order placed from your account, newest first.
         </p>
@@ -112,7 +112,7 @@ export default function OrdersPage() {
               <CardTitle>Orders</CardTitle>
               <CardDescription>{total} total</CardDescription>
             </div>
-            <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="flex flex-wrap w-full items-center gap-2 sm:w-auto">
               <div className="relative flex-1 sm:w-72 sm:flex-none">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -146,19 +146,18 @@ export default function OrdersPage() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="min-w-[640px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Order</TableHead>
                       <TableHead>Symbol</TableHead>
                       <TableHead>Context</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Price</TableHead>
-                      <TableHead className="text-right">Trigger</TableHead>
+                      <TableHead className="text-right hidden md:table-cell">Trigger</TableHead>
                       <TableHead className="text-right">PnL</TableHead>
-                      <TableHead className="text-right">ROI</TableHead>
-                      <TableHead className="text-right">Time</TableHead>
+                      <TableHead className="text-right hidden lg:table-cell">ROI</TableHead>
+                      <TableHead className="text-right hidden sm:table-cell">Time</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -168,11 +167,6 @@ export default function OrdersPage() {
                         <TableRow key={order.id}>
                           <TableCell>
                             <div className="font-medium text-foreground">#{order.id}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {order.clientOrderId ?? order.exchangeOrderId ?? "—"}
-                            </div>
-                          </TableCell>
-                          <TableCell>
                             <div className="font-medium text-foreground">{order.symbol}</div>
                             <Badge className={sideBadgeClass(order.side)}>{sideLabel(order.side)}</Badge>
                           </TableCell>
@@ -183,7 +177,7 @@ export default function OrdersPage() {
                           <TableCell>{statusBadge(order.status)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(order.quantity)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(order.price)}</TableCell>
-                          <TableCell className="text-right tabular-nums">
+                          <TableCell className="text-right tabular-nums hidden md:table-cell">
                             {formatPrice(order.triggerPrice)}
                           </TableCell>
                            <TableCell
@@ -191,7 +185,7 @@ export default function OrdersPage() {
                            >
                              {order.realizedPnl == null ? "—" : pnlText(order.realizedPnl)}
                            </TableCell>
-                           <TableCell className="text-right tabular-nums">
+                           <TableCell className="text-right tabular-nums hidden lg:table-cell">
                              {order.amountUsed && order.realizedPnl != null
                                ? (() => {
                                    const pct = (order.realizedPnl / order.amountUsed) * 100;
@@ -204,7 +198,7 @@ export default function OrdersPage() {
                                  })()
                                : "—"}
                            </TableCell>
-                           <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                           <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden sm:table-cell">
                              {formatDate(order.createdAt)}
                            </TableCell>
                         </TableRow>
@@ -214,7 +208,7 @@ export default function OrdersPage() {
                 </Table>
               </div>
 
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs text-muted-foreground">
                   Page {data?.page ?? 1} of {totalPages} · {total} orders
                 </span>

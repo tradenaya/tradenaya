@@ -53,13 +53,14 @@ function escapeHtml(text: string): string {
 }
 
 /** Build a Telegram sendMessage payload. All dynamic text is HTML-escaped. */
-function buildPayload(text: string): Record<string, unknown> {
-  return {
+function buildPayload(text: string, html = true): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
     chat_id: readConfig().chatId,
     text,
-    parse_mode: "HTML",
     disable_web_page_preview: true,
   };
+  if (html) payload.parse_mode = "HTML";
+  return payload;
 }
 
 /**
@@ -73,29 +74,61 @@ export async function sendTelegram(text: string): Promise<{ ok: boolean; error?:
     return { ok: false, error: "not_configured" };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const res = await fetch(`${BOT_API_BASE}/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload(text)),
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || data?.ok !== true) {
-      const detail = data?.description ?? data?.error ?? `HTTP ${res.status}`;
-      console.warn(`[telegram] send failed: ${detail}`);
-      return { ok: false, error: String(detail) };
-    }
-    return { ok: true };
+    return await attemptSend(0, text, true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[telegram] send error: ${message}`);
     return { ok: false, error: message };
-  } finally {
-    clearTimeout(timeout);
+  }
+
+  /**
+   * Send with N retries on flood/5xx, falling back to plain text if HTML
+   * parse-mode is rejected (400). Telegram flood-control (429) and 5xx are
+   * transient — this is what stops messages from being silently dropped.
+   * Each attempt gets its own 10s budget so backoff retries aren't starved
+   * by a single shared timeout.
+   */
+  async function attemptSend(
+    attempt: number,
+    text: string,
+    html: boolean,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (attempt > 3) {
+      console.warn(`[telegram] giving up after retries`);
+      return { ok: false, error: "max_attempts" };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(`${BOT_API_BASE}/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(text, html)),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => null);
+
+      // HTML parse rejected → retry once without parse_mode (plain text) so a
+      // stray entity can never permanently kill an important trade notification.
+      if (res.status === 400 && attempt === 0) {
+        return attemptSend(attempt + 1, text, false);
+      }
+      if (res.status === 429 || res.status >= 500) {
+        const retryAfter = Number(data?.retry_after ?? 2);
+        await new Promise((r) => setTimeout(r, Math.min(retryAfter, 8) * 1000));
+        return attemptSend(attempt + 1, text, html);
+      }
+      if (!res.ok || data?.ok !== true) {
+        const detail = data?.description ?? data?.error ?? `HTTP ${res.status}`;
+        console.warn(`[telegram] send failed: ${detail}`);
+        return { ok: false, error: String(detail) };
+      }
+      return { ok: true };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

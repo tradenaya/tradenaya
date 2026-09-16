@@ -29,10 +29,10 @@ export default function FuturesPage() {
   );
 
   return (
-    <div className="min-h-screen p-6">
-      <h1 className="text-3xl font-bold">Futures Market</h1>
+    <div className="min-h-screen px-3 sm:px-6 py-5">
+      <h1 className="text-2xl sm:text-3xl font-bold">Futures Market</h1>
 
-      <div className="relative mt-6 mb-4 max-w-md">
+      <div className="relative mt-6 mb-4 max-w-full sm:max-w-md">
         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           className="pl-9"
@@ -53,7 +53,7 @@ export default function FuturesPage() {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[540px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Symbol</TableHead>

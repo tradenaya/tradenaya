@@ -63,7 +63,7 @@ export function applyThemeToDOM(
   });
 
   root.style.setProperty("--primary", c.primary);
-  root.style.setProperty("--secondary", c.secondary);
+  root.style.setProperty("--secondary", c.surface);
   root.style.setProperty("--accent", c.accent);
   root.style.setProperty("--background", c.background);
   root.style.setProperty("--foreground", c.text);
@@ -71,11 +71,12 @@ export function applyThemeToDOM(
   root.style.setProperty("--card-foreground", c.text);
   root.style.setProperty("--popover", c.surface);
   root.style.setProperty("--popover-foreground", c.text);
-  root.style.setProperty("--border", c.secondary);
-  root.style.setProperty("--input", c.secondary);
+  root.style.setProperty("--border", isDark ? "rgba(201,154,88,0.14)" : "rgba(201,154,88,0.18)");
+  root.style.setProperty("--input", isDark ? "rgba(7,6,5,0.8)" : "rgba(255,255,255,0.9)");
   root.style.setProperty("--ring", c.primary);
   root.style.setProperty("--muted", c.surface);
-  root.style.setProperty("--muted-foreground", c.text);
+  root.style.setProperty("--muted-foreground", isDark ? "#a89880" : "#6d5e48");
+  root.style.setProperty("--primary-hover", "#a47209");
 }
 
 function isAdminRoute(pathname: string): boolean {

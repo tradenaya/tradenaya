@@ -18,11 +18,24 @@ import { StrategyPerformanceCard } from "./StrategyPerformanceCard";
 import { SymbolPerformanceCard } from "./SymbolPerformanceCard";
 import { TradeStatsCard } from "./TradeStatsCard";
 import { DEFAULT_FILTERS, type AnalyticsFilterState } from "./api";
+import { cn } from "@/lib/utils";
 
 interface Props {
   title?: string;
   description?: string;
 }
+
+const MOBILE_TABS = [
+  { id: "summary", label: "Summary" },
+  { id: "charts", label: "Charts" },
+  { id: "open", label: "Open Positions" },
+  { id: "performance", label: "Performance" },
+  { id: "trades", label: "Trades" },
+  { id: "backtests", label: "Backtests" },
+  { id: "activity", label: "Activity" },
+] as const;
+
+type MobileTabId = (typeof MOBILE_TABS)[number]["id"];
 
 function ActiveFilters({ filters }: { filters: AnalyticsFilterState }) {
   const parts: { label: string; value: string }[] = [];
@@ -57,11 +70,24 @@ function ActiveFilters({ filters }: { filters: AnalyticsFilterState }) {
 export function AnalyticsView({ title = "Analytics", description }: Props) {
   const [filters, setFilters] = useState<AnalyticsFilterState>(DEFAULT_FILTERS);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [tab, setTab] = useState<MobileTabId>("summary");
+
+  const tabCls = (id: MobileTabId) =>
+    cn(
+      "mobile-tab",
+      tab === id ? "active" : "",
+    );
+
+  const sectionCls = (id: MobileTabId) =>
+    cn(
+      tab === id ? "block" : "hidden",
+      "lg:block",
+    );
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">{title}</h1>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}
       </div>
 
@@ -74,37 +100,63 @@ export function AnalyticsView({ title = "Analytics", description }: Props) {
 
       <ActiveFilters filters={filters} />
 
+      {/* Mobile only: tabbed navigation to avoid endless scrolling */}
+      <div className="mobile-tabs lg:hidden">
+        {MOBILE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={tabCls(t.id)}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <div key={refreshKey} className="space-y-4">
-        <AccountSummaryCards filters={filters} />
-        <BotStatusCards filters={filters} />
+        <section className={sectionCls("summary")}>
+          <AccountSummaryCards filters={filters} />
+          <BotStatusCards filters={filters} />
+        </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <EquityCurveCard filters={filters} />
-          <PnlChartCard filters={filters} />
-        </div>
+        <section className={sectionCls("charts")}>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <EquityCurveCard filters={filters} />
+            <PnlChartCard filters={filters} />
+          </div>
+        </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <OpenPositionsCard filters={filters} />
-          <ActiveOrdersCard filters={filters} />
-        </div>
+        <section className={sectionCls("open")}>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <OpenPositionsCard filters={filters} />
+            <ActiveOrdersCard filters={filters} />
+          </div>
+        </section>
 
-        <BotPerformanceTable filters={filters} />
+        <section className={sectionCls("performance")}>
+          <BotPerformanceTable filters={filters} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <StrategyPerformanceCard filters={filters} />
+            <SymbolPerformanceCard filters={filters} />
+          </div>
+        </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <StrategyPerformanceCard filters={filters} />
-          <SymbolPerformanceCard filters={filters} />
-        </div>
+        <section className={sectionCls("trades")}>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <TradeStatsCard filters={filters} />
+            <ExitReasonCard filters={filters} />
+          </div>
+          <RecentTradesTable filters={filters} />
+        </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <TradeStatsCard filters={filters} />
-          <ExitReasonCard filters={filters} />
-        </div>
+        <section className={sectionCls("backtests")}>
+          <BacktestsCard filters={filters} />
+        </section>
 
-        <RecentTradesTable filters={filters} />
-
-        <BacktestsCard filters={filters} />
-
-        <ActivityCard filters={filters} />
+        <section className={sectionCls("activity")}>
+          <ActivityCard filters={filters} />
+        </section>
       </div>
     </div>
   );

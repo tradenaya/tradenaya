@@ -120,7 +120,12 @@ export default function SignupPage() {
           onChange={set("confirmPassword")}
         />
 
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button
+          type="submit"
+          className="h-12 w-full"
+          style={{ fontFamily: "var(--font-cinzel), serif", letterSpacing: "0.08em" }}
+          disabled={loading}
+        >
           {loading ? (
             <>
               <Loader2 className="animate-spin" /> Creating account…

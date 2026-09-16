@@ -74,16 +74,16 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
                   <TableHead>Symbol</TableHead>
                   <TableHead>Side</TableHead>
                   <TableHead>Exit Reason</TableHead>
-                  <TableHead className="cursor-pointer text-right select-none" onClick={() => toggleSort("entry_price")}>
+                  <TableHead className="cursor-pointer text-right select-none hidden sm:table-cell" onClick={() => toggleSort("entry_price")}>
                     Entry{sortIndicator("entry_price")}
                   </TableHead>
-                  <TableHead className="cursor-pointer text-right select-none" onClick={() => toggleSort("exit_price")}>
+                  <TableHead className="cursor-pointer text-right select-none hidden sm:table-cell" onClick={() => toggleSort("exit_price")}>
                     Exit{sortIndicator("exit_price")}
                   </TableHead>
                   <TableHead className="cursor-pointer text-right select-none" onClick={() => toggleSort("realized_pnl")}>
                     Net PnL{sortIndicator("realized_pnl")}
                   </TableHead>
-                  <TableHead className="text-right">Fees</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Fees</TableHead>
                   <TableHead className="cursor-pointer text-right select-none" onClick={() => toggleSort("closed_at")}>
                     Closed{sortIndicator("closed_at")}
                   </TableHead>
@@ -106,19 +106,19 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{trade.exitReason}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatPrice(trade.entryPrice)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatPrice(trade.exitPrice)}</TableCell>
+                    <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(trade.entryPrice)}</TableCell>
+                    <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(trade.exitPrice)}</TableCell>
                     <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.netPnl)}`}>
                       {pnlText(trade.netPnl)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">{formatMoney(trade.fees)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{formatMoney(trade.fees)}</TableCell>
                     <TableCell className="text-xs whitespace-nowrap text-muted-foreground">{formatDate(trade.exitTime)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
 
-            <div className="mt-3 flex items-center justify-between">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
                 Page {data?.page ?? 1} of {totalPages}
               </span>

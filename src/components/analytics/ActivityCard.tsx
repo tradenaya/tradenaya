@@ -42,8 +42,8 @@ export function ActivityCard({ filters }: { filters: AnalyticsFilterState }) {
           <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
             {items.map((item) => (
               <li key={item.id} className="rounded-lg border border-border bg-background/40 px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
                     <SeverityBadge severity={item.severity} />
                     <span>{item.type}</span>
                     {item.symbol && <span className="text-foreground">{item.symbol}</span>}

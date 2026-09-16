@@ -69,13 +69,13 @@ export default function PortfolioPage() {
   const pnlPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 px-3 sm:px-6 py-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Spot Portfolio</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Spot Portfolio</h1>
           <p className="text-sm text-muted-foreground">Your spot balances across all assets.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={loadPortfolio} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={loadPortfolio} disabled={loading} className="w-full sm:w-auto">
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
         </Button>
       </div>
@@ -130,7 +130,7 @@ export default function PortfolioPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[600px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Asset</TableHead>
@@ -138,7 +138,7 @@ export default function PortfolioPage() {
                     <TableHead className="text-right">Invested</TableHead>
                     <TableHead className="text-right">Current Value</TableHead>
                     <TableHead className="text-right">P/L</TableHead>
-                    <TableHead className="text-right">P/L %</TableHead>
+                    <TableHead className="text-right hidden sm:table-cell">P/L %</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -157,7 +157,7 @@ export default function PortfolioPage() {
                         <TableCell className={`text-right font-medium tabular-nums ${pnlClass(coinPnl)}`}>
                           {pnl(coinPnl)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right hidden sm:table-cell">
                           <Badge className={coinPnl > 0 ? "bg-emerald-500/15 text-emerald-400" : coinPnl < 0 ? "bg-red-500/15 text-red-400" : "bg-zinc-500/15 text-zinc-400"}>
                             {coinPnl > 0 ? "+" : ""}
                             {coinPct.toFixed(2)}%

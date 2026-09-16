@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import type { BacktestConfig } from "@/automation/backtest/types"
 import { apiSend } from "./api"
 
@@ -64,7 +65,7 @@ export function RunBacktestDialog({
       return
     }
     const config: BacktestConfig = {
-      symbol,
+      symbol: symbol.trim().toUpperCase(),
       timeframe,
       startTime,
       endTime,
@@ -107,7 +108,7 @@ export function RunBacktestDialog({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Symbol">
-            <Input className={inputClass} value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="BTCUSDT" />
+            <Input className={inputClass} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="BTCUSDT" />
           </Field>
           <Field label="Timeframe">
             <select className={inputClass} value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
@@ -120,10 +121,26 @@ export function RunBacktestDialog({
             </select>
           </Field>
           <Field label="From">
-            <input type="date" className={inputClass} value={from} onChange={(e) => setFrom(e.target.value)} />
+            <DatePicker
+              value={from}
+              maxDate={to}
+              placeholder="From date"
+              onChange={(value) => {
+                setFrom(value ?? "")
+                if (value && to && value > to) setTo(value)
+              }}
+            />
           </Field>
           <Field label="To">
-            <input type="date" className={inputClass} value={to} onChange={(e) => setTo(e.target.value)} />
+            <DatePicker
+              value={to}
+              minDate={from}
+              placeholder="To date"
+              onChange={(value) => {
+                setTo(value ?? "")
+                if (value && from && from > value) setFrom(value)
+              }}
+            />
           </Field>
           <Field label="Initial Capital (USDT)">
             <Input className={inputClass} type="number" min="1" value={capital} onChange={(e) => setCapital(e.target.value)} />

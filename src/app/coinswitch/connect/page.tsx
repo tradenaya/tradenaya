@@ -53,25 +53,62 @@ export default function ConnectPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen px-3 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
-        <div className="rounded-2xl border border-border/70 bg-card p-6 shadow-sm sm:p-8">
+        <div
+          className="rounded-2xl p-5 sm:p-8"
+          style={{
+            background: "linear-gradient(160deg, rgba(201,154,88,0.06), #0a0907)",
+            border: "1px solid rgba(201,154,88,0.16)",
+          }}
+        >
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-muted-foreground">CoinSwitch</p>
-              <h2 className="mt-2 text-2xl font-semibold text-foreground">Connect your account</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              <p
+                className="text-sm font-medium"
+                style={{
+                  fontFamily: "var(--font-cinzel), serif",
+                  letterSpacing: "0.2em",
+                  color: "#a89880",
+                }}
+              >
+                CoinSwitch
+              </p>
+              <h2
+                className="mt-2 text-xl sm:text-2xl font-semibold"
+                style={{
+                  fontFamily: "var(--font-cinzel), serif",
+                  background: "linear-gradient(100deg, #f4e6cd 0%, #eee5d8 35%, #c99a58 75%)",
+                  WebkitBackgroundClip: "text",
+                  backgroundClip: "text",
+                  color: "transparent",
+                }}
+              >
+                Connect your account
+              </h2>
+              <p className="mt-2 text-sm leading-6" style={{ color: "#a89880" }}>
                 Add your CoinSwitch API credentials to enable trading actions for this account.
               </p>
             </div>
-            <div className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+            <div
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-medium"
+              style={{
+                border: "1px solid rgba(201,154,88,0.25)",
+                background: "rgba(201,154,88,0.1)",
+                color: "#c99a58",
+              }}
+            >
               Secure
             </div>
           </div>
 
           <form onSubmit={handleConnect} className="space-y-5">
             <div className="space-y-2">
-              <label htmlFor="apiKey" className="block text-sm font-medium text-foreground">
+              <label
+                htmlFor="apiKey"
+                className="block text-sm font-medium"
+                style={{ color: "#eee5d8", fontFamily: "var(--font-cinzel), serif" }}
+              >
                 API Key
               </label>
               <Input
@@ -79,12 +116,21 @@ export default function ConnectPage() {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Paste your CoinSwitch API key"
-                className="h-10 rounded-xl border-border/70 bg-background px-3 text-sm shadow-sm"
+                className="h-10 rounded-xl px-3 text-sm shadow-sm"
+                style={{
+                  backgroundColor: "rgba(7,6,5,0.8)",
+                  borderColor: "rgba(201,154,88,0.16)",
+                  color: "#eee5d8",
+                }}
               />
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="apiSecret" className="block text-sm font-medium text-foreground">
+              <label
+                htmlFor="apiSecret"
+                className="block text-sm font-medium"
+                style={{ color: "#eee5d8", fontFamily: "var(--font-cinzel), serif" }}
+              >
                 API Secret
               </label>
               <Input
@@ -93,11 +139,23 @@ export default function ConnectPage() {
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder="Paste your CoinSwitch API secret"
-                className="h-10 rounded-xl border-border/70 bg-background px-3 text-sm shadow-sm"
+                className="h-10 rounded-xl px-3 text-sm shadow-sm"
+                style={{
+                  backgroundColor: "rgba(7,6,5,0.8)",
+                  borderColor: "rgba(201,154,88,0.16)",
+                  color: "#eee5d8",
+                }}
               />
             </div>
 
-            <div className="rounded-xl border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground">
+            <div
+              className="rounded-xl p-4 text-sm"
+              style={{
+                border: "1px solid rgba(201,154,88,0.12)",
+                background: "rgba(201,154,88,0.04)",
+                color: "#a89880",
+              }}
+            >
               Your credentials are stored securely for this account and used only for CoinSwitch requests.
             </div>
 

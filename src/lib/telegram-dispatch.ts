@@ -11,11 +11,12 @@
  */
 import { db } from "@/lib/db";
 import type { RowDataPacket } from "mysql2";
-import { isTelegramConfigured, sendTelegramAsync } from "@/lib/telegram";
+import { isTelegramConfigured, sendTelegram } from "@/lib/telegram";
 
 export interface TelegramDispatchResult {
   sent: boolean;
-  reason: "not_configured" | "duplicate" | "sent";
+  reason: "not_configured" | "duplicate" | "sent" | "send_failed";
+  error?: string;
 }
 
 let ensured = false;
@@ -83,7 +84,12 @@ export async function dispatchTelegram(
   if (await isAlreadySent(dedupeKey, type)) {
     return { sent: false, reason: "duplicate" };
   }
+  const result = await sendTelegram(text);
+  if (!result.ok) {
+    // Not marked sent → the next cycle/retry path can fire it again. A "modern"
+    // burst (429) or transient 5xx now only delays, never permanently loses.
+    return { sent: false, reason: "send_failed", error: result.error };
+  }
   await markSent(dedupeKey, type);
-  sendTelegramAsync(text);
   return { sent: true, reason: "sent" };
 }

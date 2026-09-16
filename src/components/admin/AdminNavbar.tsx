@@ -40,22 +40,34 @@ export default function AdminNavbar({ onMenuClick }: Props) {
     router.replace("/admin-signin");
   }
 
-  const primary = "var(--admin-primary)";
-  const surface = "var(--admin-surface)";
-  const fg = "var(--admin-foreground)";
-  const secondary = "var(--admin-secondary)";
-
   return (
-    <header className="h-16 flex items-center justify-between px-6" style={{ backgroundColor: surface, borderBottom: `1px solid ${secondary}` }}>
+    <header
+      className="h-14 sm:h-16 flex items-center justify-between px-4 sm:px-6"
+      style={{
+        background: "linear-gradient(90deg, #0a0907, #070605)",
+        borderBottom: "1px solid rgba(201,154,88,0.12)",
+      }}
+    >
       <div className="flex items-center gap-4">
         <button
           onClick={onMenuClick}
           className="p-2 rounded-lg transition hover:opacity-80 cursor-pointer"
-          style={{ color: primary }}
+          style={{ color: "#c99a58" }}
         >
           <Menu size={24} />
         </button>
-        <h1 className="text-xl font-bold" style={{ color: primary }}>{adminAuth.tenantName || "Tradenaya"}</h1>
+        <h1
+          className="text-lg sm:text-xl font-bold hidden sm:block"
+          style={{
+            fontFamily: "var(--font-cinzel), serif",
+            background: "linear-gradient(100deg, #f4e6cd, #c99a58)",
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+          }}
+        >
+          {adminAuth.tenantName || "Tradenaya"}
+        </h1>
       </div>
 
       {!mounted ? (
@@ -67,39 +79,45 @@ export default function AdminNavbar({ onMenuClick }: Props) {
             onClick={() => setOpen(!open)}
             className="flex items-center gap-3 px-3 py-2 rounded-xl transition hover:opacity-80 cursor-pointer"
           >
-            <div className="h-10 w-10 rounded-full text-white flex items-center justify-center" style={{ backgroundColor: primary }}>
-              <User size={18} />
+            <div
+              className="h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #c99a58, #a47209)", color: "#070605" }}
+            >
+              <User size={16} />
             </div>
-            <div className="text-left">
-              <div className="font-semibold text-sm" style={{ color: fg }}>{adminAuth.firstName}</div>
-              <div className="text-xs" style={{ color: secondary }}>{adminAuth.role}</div>
+            <div className="text-left hidden sm:block">
+              <div className="font-semibold text-sm" style={{ color: "#eee5d8", fontFamily: "var(--font-cinzel), serif" }}>{adminAuth.firstName}</div>
+              <div className="text-xs" style={{ color: "#a89880" }}>{adminAuth.role}</div>
             </div>
           </button>
 
           {open && (
-            <div className="absolute right-0 top-14 w-72 rounded-2xl border shadow-2xl overflow-hidden z-50" style={{ backgroundColor: surface, borderColor: secondary }}>
-              <div className="p-5 text-white" style={{ backgroundColor: primary }}>
+            <div
+              className="absolute right-0 top-14 w-72 rounded-2xl border shadow-2xl overflow-hidden z-50"
+              style={{ background: "linear-gradient(160deg, rgba(201,154,88,0.06), #0a0907)", borderColor: "rgba(201,154,88,0.16)" }}
+            >
+              <div className="p-5" style={{ background: "linear-gradient(135deg, #c99a58, #a47209)", color: "#070605" }}>
                 <div className="flex items-center gap-3">
-                  <div className="h-14 w-14 rounded-full bg-white/20 flex items-center justify-center">
+                  <div className="h-14 w-14 rounded-full bg-black/20 flex items-center justify-center">
                     <User size={28} />
                   </div>
                   <div>
-                    <div className="font-bold text-lg">{adminAuth.firstName} {adminAuth.lastName}</div>
+                    <div className="font-bold text-lg" style={{ fontFamily: "var(--font-cinzel), serif" }}>{adminAuth.firstName} {adminAuth.lastName}</div>
                     <div className="text-sm opacity-90">{adminAuth.role}</div>
                   </div>
                 </div>
               </div>
 
               <div className="p-4 space-y-3">
-                <div className="flex items-center gap-3 text-sm" style={{ color: secondary }}>
+                <div className="flex items-center gap-3 text-sm" style={{ color: "#a89880" }}>
                   <Mail size={16} /> {adminAuth.email}
                 </div>
-                <div className="flex items-center gap-3 text-sm" style={{ color: secondary }}>
+                <div className="flex items-center gap-3 text-sm" style={{ color: "#a89880" }}>
                   <Shield size={16} /> {adminAuth.role}
                 </div>
               </div>
 
-              <div style={{ borderTop: `1px solid ${secondary}` }}>
+              <div style={{ borderTop: "1px solid rgba(201,154,88,0.12)" }}>
                 <button
                   onClick={handleLogout}
                   className="w-full flex items-center gap-3 px-5 py-4 text-red-500 transition hover:bg-red-500/10 cursor-pointer"

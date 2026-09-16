@@ -76,8 +76,8 @@ const DEFAULT_SETTINGS = {
   leverageMode: "auto" as "auto" | "manual",
   leveragePercent: "50",
   capital: "100",
-  maxRiskPerTrade: "1",
-  dailyLossLimit: "5",
+  maxRiskPerTrade: "20",
+  dailyLossLimit: "30",
   orderExpiryMinutes: "",
   minConfidence: "",
   driftAtr: "2.5",
@@ -555,7 +555,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         }
       }}
     >
-      <DialogContent className="w-[95vw] max-h-[90dvh] flex flex-col overflow-hidden sm:max-w-3xl">
+      <DialogContent className="w-[95vw] max-h-[90dvh] flex flex-col overflow-hidden sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>Automated trading setup</DialogTitle>
           <DialogDescription>
@@ -1074,7 +1074,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
           </div>
 
           <div className="md:col-span-2">
-            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
                 <input
                   id="auto-trailing"
@@ -1086,7 +1086,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 <Label htmlFor="auto-trailing" className="mb-0">Enable trailing stop</Label>
               </div>
               {settings.enableTrailingStop && (
-                <div className="grid w-40 gap-1.5">
+                <div className="grid w-full sm:w-40 gap-1.5">
                   <Label>Trailing distance (%)</Label>
                   <Input
                     type="number"

@@ -49,12 +49,12 @@ export function ActiveOrdersCard({ filters }: { filters: AnalyticsFilterState })
               <TableRow>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Side</TableHead>
-                <TableHead>Kind</TableHead>
+                <TableHead className="hidden sm:table-cell">Kind</TableHead>
                 <TableHead className="text-right">Limit</TableHead>
-                <TableHead className="text-right">Trigger</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Trigger</TableHead>
+                <TableHead className="text-right hidden md:table-cell">Qty</TableHead>
+                <TableHead className="hidden lg:table-cell">Status</TableHead>
+                <TableHead className="hidden lg:table-cell">Created</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -73,10 +73,10 @@ export function ActiveOrdersCard({ filters }: { filters: AnalyticsFilterState })
                       <Badge className={badge.className}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatPrice(o.price)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{o.triggerPrice != null ? formatPrice(o.triggerPrice) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{o.quantity?.toLocaleString(undefined, { maximumFractionDigits: 4 }) ?? "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{o.status ?? "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(o.createdAt)}</TableCell>
+                    <TableCell className="text-right tabular-nums hidden sm:table-cell">{o.triggerPrice != null ? formatPrice(o.triggerPrice) : "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums hidden md:table-cell">{o.quantity?.toLocaleString(undefined, { maximumFractionDigits: 4 }) ?? "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">{o.status ?? "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">{formatDate(o.createdAt)}</TableCell>
                   </TableRow>
                 )
               })}

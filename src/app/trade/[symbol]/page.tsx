@@ -62,19 +62,30 @@ export default function TradePage() {
   }, [symbol]);
 
   return (
-    <div className="min-h-screen p-6">
+    <div className="min-h-screen px-3 sm:px-6 py-5">
       <div className="mb-6 flex flex-wrap items-center gap-4">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => router.push("/dashboard/market")}>
-          <ChevronLeft size={16} /> Markets
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            if (window.history.length > 1) {
+              router.back();
+            } else {
+              router.push("/dashboard/market");
+            }
+          }}
+        >
+          <ChevronLeft size={16} /> Back
         </Button>
-        <h1 className="text-2xl font-bold">{symbol} Futures</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">{symbol} Futures</h1>
       </div>
 
       {/* Chart takes the main screen first — compact position & order cards sit beside it */}
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Card className="bg-card">
-            <CardContent className="flex h-[540px] items-center justify-center p-0">
+            <CardContent className="flex h-[340px] sm:h-[440px] lg:h-[540px] items-center justify-center p-0">
               <TradingChart symbol={symbol} />
             </CardContent>
           </Card>

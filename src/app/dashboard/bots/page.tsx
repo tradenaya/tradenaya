@@ -23,6 +23,14 @@ import { formatDate } from "@/components/analytics/format";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
 
+const MOBILE_TABS = [
+  { id: "live", label: "Live" },
+  { id: "bots", label: "Bots" },
+  { id: "activity", label: "Activity" },
+] as const;
+
+type MobileTabId = (typeof MOBILE_TABS)[number]["id"];
+
 const STEP_ORDER = ["ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED"];
 const STEP_LABEL: Record<string, string> = {
   ANALYZING: "Analyze",
@@ -167,7 +175,7 @@ function LiveBotCard({
               </Badge>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">
               {cfg.timeframe} · {cfg.strategy} · {cfg.leverage}x
             </span>
@@ -272,6 +280,7 @@ export default function AutomationPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [confirmDeleteMany, setConfirmDeleteMany] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileTabId>("live");
 
   async function loadBots() {
     try {
@@ -406,10 +415,10 @@ export default function AutomationPage() {
   const sortedBots = useMemo(() => [...bots].sort((a, b) => Number(isLive(b)) - Number(isLive(a))), [bots]);
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-6 px-3 sm:px-6 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Automation</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Automation</h1>
           <p className="text-sm text-muted-foreground">Your automated trading strategies — live status, logs and controls.</p>
         </div>
         {bots.length > 0 && (
@@ -423,8 +432,22 @@ export default function AutomationPage() {
       {/* Settings + Turn On / Turn Off — create a new bot and start it without leaving this screen */}
       <AutomationSwitch onCreated={loadBots} />
 
+      {/* Mobile tabs to avoid endless scrolling */}
+      <div className="mobile-tabs lg:hidden">
+        {MOBILE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={cn("mobile-tab", mobileTab === t.id && "active")}
+            onClick={() => setMobileTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* Live status — full width, this is the one thing that matters most right now */}
-      <section>
+      <section className={cn(mobileTab === "live" ? "block" : "hidden", "lg:block")}>
         {loading && bots.length === 0 ? (
           <Skeleton className="h-40 w-full rounded-lg" />
         ) : (
@@ -434,7 +457,7 @@ export default function AutomationPage() {
 
       {/* Bots and Recent activity side by side, locked to the same height with independent scrollers */}
       <div className="grid gap-6 lg:h-[34rem] lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
-        <section className="flex min-h-0 flex-col">
+        <section className={cn("flex min-h-0 flex-col", mobileTab === "bots" ? "block" : "hidden", "lg:block")}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Bots</h2>
             <div className="flex items-center gap-2">
@@ -571,7 +594,7 @@ export default function AutomationPage() {
                           <Button
                             size="icon"
                             variant="outline"
-                            className="h-7 w-7 border-amber-500/50 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200"
+                            className="h-7 w-7 border-amber-500/50 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200 hidden sm:inline-flex"
                             disabled={busy}
                             title="Pause"
                             onClick={() => act(bot.id, "pause")}
@@ -581,7 +604,7 @@ export default function AutomationPage() {
                           <Button
                             size="icon"
                             variant="outline"
-                            className="h-7 w-7 border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30 hover:text-red-200"
+                            className="h-7 w-7 border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30 hover:text-red-200 hidden sm:inline-flex"
                             disabled={busy}
                             title="Stop"
                             onClick={() => setConfirmStop(bot)}
@@ -636,7 +659,7 @@ export default function AutomationPage() {
           )}
         </section>
 
-        <section className="flex min-h-0 flex-col">
+        <section className={cn("flex min-h-0 flex-col", mobileTab === "activity" ? "block" : "hidden", "lg:block")}>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Recent activity</h2>
           <div className="min-h-0 flex-1">
             <BehindTheScenes />

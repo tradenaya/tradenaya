@@ -14,15 +14,15 @@ export default function AdminLayout({
   const adminAuth = useAppSelector((state) => state.adminAuth);
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--admin-background)", color: "var(--admin-foreground)" }}>
+    <div className="min-h-screen" style={{ backgroundColor: "#070605", color: "#eee5d8" }}>
       <AdminSidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         tenantName={adminAuth.tenantName}
       />
-      <div className={`transition-all duration-300 ${sidebarOpen ? "md:ml-72" : ""}`}>
+      <div className="transition-all duration-300">
         <AdminNavbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="p-6">
+        <main className="p-4 sm:p-6 overflow-x-hidden">
           {children}
         </main>
       </div>

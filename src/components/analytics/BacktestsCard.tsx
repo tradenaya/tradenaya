@@ -83,19 +83,19 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-14">#</TableHead>
+                  <TableHead className="w-14 hidden sm:table-cell">#</TableHead>
                   <TableHead>Symbol</TableHead>
-                  <TableHead>TF</TableHead>
-                  <TableHead>Window</TableHead>
+                  <TableHead className="hidden sm:table-cell">TF</TableHead>
+                  <TableHead className="hidden lg:table-cell">Window</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Capital</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Capital</TableHead>
                   <TableHead className="text-right">Return</TableHead>
-                  <TableHead className="text-right">PnL</TableHead>
-                  <TableHead className="text-right">Win Rate</TableHead>
-                  <TableHead className="text-right">Max DD</TableHead>
-                  <TableHead className="text-right">Trades</TableHead>
-                  <TableHead className="text-right">Policy</TableHead>
-                  <TableHead className="text-right">Ran</TableHead>
+                  <TableHead className="text-right hidden sm:table-cell">PnL</TableHead>
+                  <TableHead className="text-right hidden sm:table-cell">Win Rate</TableHead>
+                  <TableHead className="text-right hidden lg:table-cell">Max DD</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Trades</TableHead>
+                  <TableHead className="text-right hidden xl:table-cell">Policy</TableHead>
+                  <TableHead className="hidden lg:table-cell">Ran</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -104,24 +104,24 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
                   const badge = STATUS_BADGE[b.status] ?? { label: b.status, className: "bg-muted text-muted-foreground" }
                   return (
                     <TableRow key={b.id} className="cursor-pointer" onClick={() => { setDetailId(b.id); setDetailOpen(true) }}>
-                      <TableCell className="text-muted-foreground">#{b.id}</TableCell>
+                      <TableCell className="text-muted-foreground hidden sm:table-cell">#{b.id}</TableCell>
                       <TableCell className="font-medium text-foreground">{b.symbol}</TableCell>
-                      <TableCell className="text-muted-foreground">{b.timeframe}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground hidden sm:table-cell">{b.timeframe}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">
                         {formatDate(new Date(b.startTime).toISOString(), { year: "numeric", month: "short", day: "2-digit" })} →{" "}
                         {formatDate(new Date(b.endTime).toISOString(), { year: "numeric", month: "short", day: "2-digit" })}
                       </TableCell>
                       <TableCell>
                         <Badge className={badge.className}>{badge.label}</Badge>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{formatMoney(b.initialCapital)}</TableCell>
+                      <TableCell className="text-right tabular-nums hidden md:table-cell">{formatMoney(b.initialCapital)}</TableCell>
                       <TableCell className={`text-right font-medium tabular-nums ${signClass(b.totalReturnPct)}`}>{formatPercent(b.totalReturnPct)}</TableCell>
-                      <TableCell className={`text-right tabular-nums ${signClass(b.totalPnl)}`}>{pnlText(b.totalPnl)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatPercent(b.winRate)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatPercent(b.maxDrawdownPct)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{b.tradeCount ?? "—"}</TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">{b.executionPolicy ?? "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(b.createdAt)}</TableCell>
+                      <TableCell className={`text-right tabular-nums hidden sm:table-cell ${signClass(b.totalPnl)}`}>{pnlText(b.totalPnl)}</TableCell>
+                      <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPercent(b.winRate)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{formatPercent(b.maxDrawdownPct)}</TableCell>
+                      <TableCell className="text-right tabular-nums hidden md:table-cell">{b.tradeCount ?? "—"}</TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground hidden xl:table-cell">{b.executionPolicy ?? "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground hidden lg:table-cell">{formatDate(b.createdAt)}</TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"

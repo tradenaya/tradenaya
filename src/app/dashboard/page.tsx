@@ -126,10 +126,10 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="space-y-5 p-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 px-3 sm:px-6 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Your account at a glance — automation, positions and PnL.</p>
         </div>
         <Badge
@@ -184,15 +184,16 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
+          <div key="active">
           {loading ? (
             <Skeleton className="h-20 w-full rounded-lg" />
           ) : runningBots.length === 0 ? (
-            <div className="flex items-center justify-between rounded-lg border border-dashed border-border py-5 text-center">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-lg border border-dashed border-border py-5 px-4 text-center">
               <div className="w-full">
                 <p className="text-sm text-muted-foreground">Your automated strategies are off.</p>
                 <p className="text-xs text-muted-foreground/70">Turn on Automated Trading above to run them.</p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => router.push("/dashboard/bots")}>
+              <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => router.push("/dashboard/bots")}>
                 Open Automation <ChevronRight size={14} />
               </Button>
             </div>
@@ -207,13 +208,13 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={bot.id}
-                    className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2.5"
+                    className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-border bg-background/40 px-3 py-2.5"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-sm font-bold">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-bold">
                         {sym.slice(0, 1) || bot.symbol.slice(0, 1)}
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                           {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                           <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
@@ -225,7 +226,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     </div>
-                    <Badge className={st.className}>{st.label}</Badge>
+                    <Badge className={`${st.className} shrink-0`}>{st.label}</Badge>
                   </div>
                 );
               })}
@@ -234,7 +235,8 @@ export default function DashboardPage() {
               </Button>
             </div>
           )}
-        </CardContent>
+        </div>
+      </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -251,7 +253,7 @@ export default function DashboardPage() {
             ) : positions.filter((p) => Number(p.position_size) > 0).length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">No open positions.</p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {positions.filter((p) => Number(p.position_size) > 0).map((p) => {
                   const up = Number(p.unrealised_pnl ?? 0) >= 0;
                   const _entry = Number(p.avg_entry_price);

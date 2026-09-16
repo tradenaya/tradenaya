@@ -194,8 +194,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
 
   return (
     <Card className={`bg-card border ${anyRunning ? "border-emerald-500/30" : ""}`}>
-      <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
+      <CardContent className="flex w-full flex-col gap-4 p-4 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
           <div
             className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl transition ${
               anyRunning ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"
@@ -203,8 +203,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
           >
             <Power size={26} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold text-foreground">Automated Trading</h2>
               {serverOffline && anyRunning ? (
                 <Badge className="bg-amber-500/15 text-amber-400">Server offline</Badge>
@@ -224,7 +224,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -241,7 +241,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
             size="lg"
             disabled={busy}
             onClick={anyRunning ? () => setConfirmTurnOff(true) : botList.length === 0 ? () => setSettingsOpen(true) : turnOn}
-            className={`min-w-32 font-semibold ${
+            className={`min-w-32 flex-1 sm:flex-none font-semibold ${
               anyRunning
                 ? "bg-red-600/90 hover:bg-red-600 text-white"
                 : "bg-emerald-600 hover:bg-emerald-500 text-white"
@@ -254,11 +254,11 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
       </CardContent>
 
       {error && (
-        <div className="border-t border-border px-6 py-3 text-sm text-red-400">{error}</div>
+        <div className="border-t border-border px-4 sm:px-6 py-3 text-sm text-red-400">{error}</div>
       )}
 
       {botList.length > 0 && (
-        <div className="border-t border-border px-6 py-4">
+        <div className="border-t border-border px-4 sm:px-6 py-4">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Active strategies</p>
           <div className="flex flex-wrap gap-2">
             {botList.map((bot) => {

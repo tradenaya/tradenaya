@@ -374,6 +374,9 @@ export default function Home() {
           .mantra { font-size: 17px; }
           .logo { width: 64px; }
           .lbl-h { font-size: 29px; }
+          .cta { flex-wrap: wrap; gap: 8px; }
+          .cta .line { display: none; }
+          .cta-btn { padding: 13px 24px; }
           .ganesha {
             height: 45vh;
             max-width: 72vw;

@@ -17,14 +17,22 @@ export function AuthField({ label, icon, toggleable, id, className, type, ...pro
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id} style={{ color: "var(--foreground)" }}>
+      <Label
+        htmlFor={id}
+        style={{
+          color: "#eee5d8",
+          fontFamily: "var(--font-cinzel), serif",
+          fontSize: "0.8rem",
+          letterSpacing: "0.05em",
+        }}
+      >
         {label}
       </Label>
       <div className="relative">
         {icon && (
           <span
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
-            style={{ color: "var(--muted-foreground)" }}
+            style={{ color: "rgba(201,154,88,0.5)" }}
           >
             {icon}
           </span>
@@ -33,7 +41,12 @@ export function AuthField({ label, icon, toggleable, id, className, type, ...pro
           id={id}
           type={inputType}
           className={`${icon ? "pl-10" : ""} ${toggleable ? "pr-10" : ""} ${className ?? ""}`}
-          style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", color: "var(--foreground)" }}
+          style={{
+            backgroundColor: "rgba(7,6,5,0.8)",
+            borderColor: "rgba(201,154,88,0.16)",
+            color: "#eee5d8",
+            fontFamily: "var(--font-cinzel), serif",
+          }}
           {...props}
         />
         {toggleable && (
@@ -41,7 +54,7 @@ export function AuthField({ label, icon, toggleable, id, className, type, ...pro
             type="button"
             onClick={() => setShow((s) => !s)}
             className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
-            style={{ color: "var(--muted-foreground)" }}
+            style={{ color: "rgba(201,154,88,0.5)" }}
             aria-label={show ? "Hide password" : "Show password"}
           >
             {show ? <EyeOff size={16} /> : <Eye size={16} />}

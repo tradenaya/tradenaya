@@ -204,9 +204,9 @@ export default function AllPositionsPage() {
   }
 
   return (
-    <div className="space-y-4 p-6">
+<div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-2xl font-bold">Positions & Orders</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Positions & Orders</h1>
         <p className="text-sm text-muted-foreground">Live futures positions and open orders, refreshed every 8s.</p>
       </div>
 
@@ -224,19 +224,19 @@ export default function AllPositionsPage() {
             <p className="py-10 text-center text-sm text-muted-foreground">No open positions.</p>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+<Table className="min-w-[700px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Symbol</TableHead>
                     <TableHead className="text-right">Size</TableHead>
                     <TableHead className="text-right">Entry</TableHead>
-                    <TableHead className="text-right">Mark</TableHead>
-                    <TableHead className="text-right">Amount (Leveraged)</TableHead>
-                    <TableHead className="text-right">Margin</TableHead>
-                    <TableHead className="text-right">Liq. Price</TableHead>
+                    <TableHead className="text-right hidden lg:table-cell">Mark</TableHead>
+                    <TableHead className="text-right hidden xl:table-cell">Amount (Leveraged)</TableHead>
+                    <TableHead className="text-right hidden md:table-cell">Margin</TableHead>
+                    <TableHead className="text-right hidden lg:table-cell">Liq. Price</TableHead>
                     <TableHead className="text-right">Unrealized PnL</TableHead>
                     <TableHead className="text-right">To TP / SL</TableHead>
-                    <TableHead className="text-right">Opened</TableHead>
+                    <TableHead className="text-right hidden md:table-cell">Opened</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -264,8 +264,8 @@ export default function AllPositionsPage() {
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{money(pos.position_size)}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(pos.avg_entry_price)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{money(pos.mark_price)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                        <TableCell className="text-right tabular-nums hidden lg:table-cell">{money(pos.mark_price)}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground hidden xl:table-cell">
                           {(() => {
                             const notional = Number(pos.position_size) * Number(pos.avg_entry_price);
                             const margin = Number(pos.position_margin);
@@ -274,8 +274,8 @@ export default function AllPositionsPage() {
                             return `${marginText} (${money(notional)} USDT)`;
                           })()}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">{money(pos.position_margin)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">{money(pos.liquidation_price)}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{money(pos.position_margin)}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{money(pos.liquidation_price)}</TableCell>
                         <TableCell className={`text-right font-medium tabular-nums ${profit ? "text-emerald-400" : "text-red-400"}`}>
                           {profit ? "+" : ""}
                           {pnl.toFixed(4)}
@@ -290,7 +290,7 @@ export default function AllPositionsPage() {
                             SL {slDist != null ? `${slDist >= 0 ? "+" : ""}${slDist.toFixed(2)}%` : "—"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                        <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden md:table-cell">
                           {formatTimestamp(pos.created_at)}
                         </TableCell>
                         <TableCell className="text-right">
@@ -332,7 +332,7 @@ export default function AllPositionsPage() {
             <p className="py-10 text-center text-sm text-muted-foreground">No open orders.</p>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[640px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Symbol</TableHead>
@@ -341,10 +341,10 @@ export default function AllPositionsPage() {
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Price</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="text-right">Trigger (TP/SL)</TableHead>
+                    <TableHead className="text-right hidden lg:table-cell">Amount</TableHead>
+                    <TableHead className="text-right hidden xl:table-cell">Trigger (TP/SL)</TableHead>
                     <TableHead className="text-right">Est. PnL</TableHead>
-                    <TableHead className="text-right">Placed</TableHead>
+                    <TableHead className="text-right hidden md:table-cell">Placed</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -359,13 +359,13 @@ export default function AllPositionsPage() {
                       <TableCell className="text-muted-foreground">{order.status}</TableCell>
                       <TableCell className="text-right tabular-nums">{money(order.quantity)}</TableCell>
                       <TableCell className="text-right tabular-nums">{money(order.price)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                      <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">
                         {(() => {
                           const amount = Number(order.quantity) * Number(order.price);
                           return Number.isFinite(amount) && amount > 0 ? `${money(amount)} USDT` : "—";
                         })()}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="text-right tabular-nums hidden xl:table-cell">
                         {order.trigger_price != null ? money(order.trigger_price) : "—"}
                       </TableCell>
                       <TableCell className="text-right">
@@ -386,7 +386,7 @@ export default function AllPositionsPage() {
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                      <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden md:table-cell">
                         {formatTimestamp(order.created_at)}
                       </TableCell>
                       <TableCell className="text-right">
