@@ -328,44 +328,47 @@ table tbody tr:hover {
   }
 }
 
-/* Mobile tab navigation styles */
-.mobile-tabs {
-  display: flex;
-  gap: 2px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  padding: 0;
-  margin: 0 -1rem;
-  padding: 0 1rem;
-}
+/* Mobile tab navigation styles — in @layer so Tailwind responsive utilities
+   (lg:hidden, lg:block) still work on desktop. */
+@layer components {
+  .mobile-tabs {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0;
+    margin: 0 -1rem;
+    padding: 0 1rem;
+  }
 
-.mobile-tabs::-webkit-scrollbar {
-  display: none;
-}
+  .mobile-tabs::-webkit-scrollbar {
+    display: none;
+  }
 
-.mobile-tab {
-  flex-shrink: 0;
-  padding: 0.5rem 1rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  white-space: nowrap;
-  border-radius: 0.5rem;
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
+  .mobile-tab {
+    flex-shrink: 0;
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
 
-.mobile-tab.active {
-  background: rgba(201, 154, 88, 0.15);
-  color: #c99a58;
-}
+  .mobile-tab.active {
+    background: rgba(201, 154, 88, 0.15);
+    color: #c99a58;
+  }
 
-.mobile-tab:not(.active) {
-  color: #a89880;
-  background: transparent;
-}
+  .mobile-tab:not(.active) {
+    color: #a89880;
+    background: transparent;
+  }
 
-.mobile-tab:not(.active):hover {
-  background: rgba(201, 154, 88, 0.08);
-  color: #eee5d8;
+  .mobile-tab:not(.active):hover {
+    background: rgba(201, 154, 88, 0.08);
+    color: #eee5d8;
+  }
 }

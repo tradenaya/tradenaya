@@ -27,6 +27,20 @@ interface PortfolioResponse {
   data?: { data?: CoinHolding[] };
 }
 
+// Fiat quote-currency cash held in the account wallet (e.g. the INR you
+// deposited). It is not an asset and must not be counted as a holding, or the
+// portfolio value gets inflated by the very cash used to buy the coins.
+const FIAT_CURRENCIES = new Set(["INR", "INR."]);
+
+// CoinSwitch reports the rupee cash you deposited as a row next to the coins.
+// That cash is not an asset — counting it inflates invested/current/P&L by the
+// very money used to buy the coins. Match on code (case-insensitive) or name.
+function isFiatCash(c: CoinHolding): boolean {
+  const code = String(c.currency ?? "").trim().toUpperCase().replace(/\.$/, "");
+  const name = String(c.name ?? "").toLowerCase();
+  return FIAT_CURRENCIES.has(code) || name.includes("indian rupee");
+}
+
 function money(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -51,7 +65,8 @@ export default function PortfolioPage() {
       const res = await fetch("/api/coinswitch/portfolio", { cache: "no-store" });
       const json = (await res.json()) as PortfolioResponse & { success?: boolean; message?: string };
       if (json.success === false) throw new Error(json.message || "Failed to load portfolio");
-      setHoldings(json.data?.data ?? []);
+      const all = json.data?.data ?? [];
+      setHoldings(all.filter((c) => !isFiatCash(c)));
     } catch (err: any) {
       setError(err.message || "Failed to load portfolio");
     } finally {

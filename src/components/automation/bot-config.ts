@@ -141,15 +141,21 @@ export function fmtRelative(iso?: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+import { convertUsdt, getCurrencyState } from "@/lib/currency/store";
+
 export function fmtMoney(value: number | string | null | undefined, digits?: number): string {
   if (value == null) return "—";
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
+  const state = getCurrencyState();
+  const conv = convertUsdt(num);
+  const isInr = state.currency === "INR" && conv != null;
+  const display = conv ?? num;
   if (digits == null) {
-    const abs = Math.abs(num);
+    const abs = Math.abs(display);
     digits = abs >= 1000 ? 2 : abs >= 1 ? 4 : abs === 0 ? 2 : 6;
   }
-  return num.toLocaleString("en-US", { maximumFractionDigits: digits });
+  return display.toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: digits });
 }
 
 /**

@@ -17,6 +17,7 @@ import { RecentTradesTable } from "./RecentTradesTable";
 import { StrategyPerformanceCard } from "./StrategyPerformanceCard";
 import { SymbolPerformanceCard } from "./SymbolPerformanceCard";
 import { TradeStatsCard } from "./TradeStatsCard";
+import { TradeOutcomesCard } from "./TradeOutcomesCard";
 import { DEFAULT_FILTERS, type AnalyticsFilterState } from "./api";
 import { cn } from "@/lib/utils";
 
@@ -147,6 +148,7 @@ export function AnalyticsView({ title = "Analytics", description }: Props) {
             <TradeStatsCard filters={filters} />
             <ExitReasonCard filters={filters} />
           </div>
+          <TradeOutcomesCard filters={filters} />
           <RecentTradesTable filters={filters} />
         </section>
 

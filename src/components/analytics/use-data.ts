@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 interface Options {
   pollMs?: number
@@ -11,6 +12,10 @@ export function useAsyncData<T>(fetcher: () => Promise<T>, deps: unknown[], opti
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const fetcherRef = useRef(fetcher)
+
+  // Re-render when the display currency / live rate changes so every metric
+  // that depends on the shared formatters updates instantly on toggle.
+  useDisplayCurrency()
 
   useEffect(() => {
     fetcherRef.current = fetcher

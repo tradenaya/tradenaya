@@ -47,6 +47,35 @@ export class SchedulerStore {
     );
   }
 
+  /**
+   * Delete activity log rows older than one hour from all three log tables
+   * (scheduler events, position events, execution notifications). These logs
+   * are display-only — the "Latest activity" feed is rebuilt from whatever
+   * remains, and the live trace is an in-memory SSE ring buffer unaffected by
+   * this. Returns rows removed per table.
+   */
+  async cleanupActivityLogs(): Promise<{ scheduler: number; position: number; notification: number }> {
+    await this.ensureEventsTable();
+    await this.positions.ensureEventsTable().catch(() => {});
+    await this.executions.ensureNotificationTable().catch(() => {});
+
+    const [s] = (await db.query(
+      `DELETE FROM automation_scheduler_events WHERE created_at < NOW() - INTERVAL 1 HOUR;`,
+    )) as any;
+    const [p] = (await db.query(
+      `DELETE FROM automation_position_events WHERE created_at < NOW() - INTERVAL 1 HOUR;`,
+    )) as any;
+    const [n] = (await db.query(
+      `DELETE FROM automation_execution_notifications WHERE created_at < NOW() - INTERVAL 1 HOUR;`,
+    )) as any;
+
+    return {
+      scheduler: Number(s?.affectedRows ?? 0),
+      position: Number(p?.affectedRows ?? 0),
+      notification: Number(n?.affectedRows ?? 0),
+    };
+  }
+
   async getActiveExecutionForBot(botId: number): Promise<ExecutionRecord | null> {
     const executions = await this.executions.getActiveExecutions();
     return executions.find((execution) => execution.botId === botId) ?? null;

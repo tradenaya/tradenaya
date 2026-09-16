@@ -1,6 +1,10 @@
+"use client";
+
 import { useMemo } from "react";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { type TradePreview, formatPreviewValue } from "./trade-preview";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                             */
@@ -15,6 +19,7 @@ interface TradePreviewPanelProps {
 /* ------------------------------------------------------------------ */
 
 export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
+  useDisplayCurrency();
   const {
     status,
     message,
@@ -78,21 +83,21 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
       <div className="grid grid-cols-2 gap-3">
         {/* Capital allocation */}
         <PreviewSection title="Capital Allocation">
-          <PreviewRow label="Wallet available" value={walletAvailable != null ? `${formatPreviewValue(walletAvailable)} USDT` : "—"} />
+          <PreviewRow label="Wallet available" value={walletAvailable != null ? formatCurrency(walletAvailable) : "—"} />
           <PreviewRow label="Allocation" value={formatAllocation(preview)} />
-          <PreviewRow label="Margin used" value={`${formatPreviewValue(allocatedCapital)} USDT`} accent />
+          <PreviewRow label="Margin used" value={formatCurrency(allocatedCapital)} accent />
           <PreviewRow label="Leverage" value={`${preview.margin > 0 ? preview.positionNotional / preview.allocatedCapital || 0 : 0}x`} />
-          <PreviewRow label="Position value" value={`~${formatPreviewValue(positionNotional)} USDT`} accent />
+          <PreviewRow label="Position value" value={`~${formatCurrency(positionNotional)}`} accent />
         </PreviewSection>
 
         {/* Risk */}
         <PreviewSection title="Risk">
           <PreviewRow label="Max risk" value={`${maxRiskPct}%`} />
-          <PreviewRow label="Max loss allowed" value={`${formatPreviewValue(maxRiskUsdt)} USDT`} />
+          <PreviewRow label="Max loss allowed" value={formatCurrency(maxRiskUsdt)} />
           <PreviewRow label="Est. SL distance" value={`${formatPreviewValue(slDistancePct)}%`} />
           <PreviewRow
             label="Est. loss at SL"
-            value={`${formatPreviewValue(estimatedLoss)} USDT`}
+            value={formatCurrency(estimatedLoss)}
             danger={!riskCompatible}
           />
           <PreviewRow
@@ -105,14 +110,14 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
         {/* Reward */}
         <PreviewSection title="Reward">
           <PreviewRow label="Est. TP distance" value={`${formatPreviewValue(tpDistancePct)}%`} />
-          <PreviewRow label="Est. profit at TP" value={`${formatPreviewValue(estimatedProfit)} USDT`} positive />
+          <PreviewRow label="Est. profit at TP" value={formatCurrency(estimatedProfit)} positive />
           <PreviewRow label="Risk / Reward" value={riskRewardRatio > 0 ? `1 : ${riskRewardRatio.toFixed(1)}` : "—"} />
         </PreviewSection>
 
         {/* Summary */}
         <PreviewSection title="Summary">
           <PreviewRow label="Capital mode" value={preview.margin > 0 ? (preview.allocatedCapital === (preview.walletAvailable ?? 0) ? "Fixed (100%)" : "Fixed") : "—"} />
-          <PreviewRow label="Actual margin" value={`${formatPreviewValue(allocatedCapital)} USDT`} />
+          <PreviewRow label="Actual margin" value={formatCurrency(allocatedCapital)} />
           <PreviewRow label="Position size" value={`${formatPreviewValue(preview.riskBasedSize > 0 && preview.riskBasedSize <= preview.capitalCappedSize ? preview.riskBasedSize : preview.capitalCappedSize, 6)}`} />
           <PreviewRow
             label="Binding constraint"
@@ -174,5 +179,12 @@ function formatAllocation(p: TradePreview): string {
   if (p.walletAvailable == null || p.walletAvailable <= 0) return "—";
   if (p.allocatedCapital <= 0) return "—";
   const pct = (p.allocatedCapital / p.walletAvailable) * 100;
-  return `${formatPreviewValue(p.allocatedCapital)} USDT (${pct.toFixed(0)}%)`;
+  return `${formatCurrency(p.allocatedCapital)} (${pct.toFixed(0)}%)`;
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const conv = convertUsdt(value);
+  const state = getCurrencyState();
+  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
 }

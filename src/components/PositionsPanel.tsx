@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 interface Position {
   position_id: string;
@@ -40,7 +42,14 @@ interface OpenOrder {
   reduce_only?: boolean;
 }
 
+function convLabel(value: number): string {
+  const conv = convertUsdt(value);
+  const state = getCurrencyState();
+  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+}
+
 export default function PositionsPanel({ symbol }: { symbol: string }) {
+  useDisplayCurrency();
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<OpenOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -239,10 +248,10 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
                 <Row label="Mark Price" value={pos.mark_price} />
                 <Row
                   label="Unrealised PnL"
-                  value={`${isProfit ? "+" : ""}${pnl.toFixed(4)} USDT`}
+                  value={`${isProfit ? "+" : ""}${convLabel(pnl)}`}
                   valueClass={isProfit ? "text-emerald-400" : "text-red-400"}
                 />
-                <Row label="Position Margin" value={`${pos.position_margin} USDT`} />
+                <Row label="Position Margin" value={convLabel(Number(pos.position_margin))} />
                 <Row
                   label="Liquidation Price"
                   value={pos.liquidation_price}
@@ -272,7 +281,7 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
                     className="mt-2 h-8 text-xs"
                   />
                   <div className="mt-1.5 text-[10px] text-muted-foreground">
-                    {slPreview === null ? "Enter a price to preview PnL" : `${slPreview >= 0 ? "+" : ""}${slPreview.toFixed(2)} USDT`}
+                    {slPreview === null ? "Enter a price to preview PnL" : `${slPreview >= 0 ? "+" : ""}${convLabel(slPreview)}`}
                   </div>
                   <Button
                     size="sm"
@@ -305,7 +314,7 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
                     className="mt-2 h-8 text-xs"
                   />
                   <div className="mt-1.5 text-[10px] text-muted-foreground">
-                    {tpPreview === null ? "Enter a price to preview PnL" : `${tpPreview >= 0 ? "+" : ""}${tpPreview.toFixed(2)} USDT`}
+                    {tpPreview === null ? "Enter a price to preview PnL" : `${tpPreview >= 0 ? "+" : ""}${convLabel(tpPreview)}`}
                   </div>
                   <Button
                     size="sm"

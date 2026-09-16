@@ -196,6 +196,7 @@ export interface AccountSummary {
   totalTrades: number;
   winningTrades: number;
   losingTrades: number;
+  cancelledTrades: number;
   winRate: number;
   profitFactor: number | null;
   maxDrawdown: number;
@@ -294,6 +295,7 @@ export interface BotSummary {
   tradeCount: number;
   winningTrades: number;
   losingTrades: number;
+  cancelledTrades: number;
   winRate: number;
   lastTrade: ClosedTradeSummary | null;
   lastAnalysisAt: string | null;
@@ -330,6 +332,7 @@ export interface TradeStatistics {
   winningTrades: number;
   losingTrades: number;
   breakevenTrades: number;
+  cancelledTrades: number;
   winRate: number;
   averageProfit: number;
   averageLoss: number;
@@ -344,6 +347,30 @@ export interface TradeStatistics {
   grossProfit: number;
   grossLoss: number;
   totalFees: number;
+}
+
+/** Result of a closed trade. Only WIN and LOSS count toward the win rate. */
+export type TradeOutcome = "WIN" | "LOSS" | "BREAKEVEN" | "CANCELLED";
+
+export const ALL_TRADE_OUTCOMES: TradeOutcome[] = ["WIN", "LOSS", "BREAKEVEN", "CANCELLED"];
+
+/** Counts + PnL + share for a single outcome status. */
+export interface TradeOutcomeStat {
+  status: TradeOutcome;
+  count: number;
+  pnl: number;
+  /** Share of all closed trades, percent. */
+  rate: number;
+}
+
+/** Full breakdown of closed trades by outcome. */
+export interface OutcomeAnalytics {
+  total: number;
+  /** Number of trades that resolved to a win or loss. */
+  resolvedTrades: number;
+  /** Wins / (wins + losses) * 100. Cancelled and breakeven trades are excluded. */
+  winRate: number;
+  statuses: TradeOutcomeStat[];
 }
 
 export interface EquityPoint {
@@ -520,6 +547,24 @@ export function normalizeExitReason(reason: string | null | undefined, trailingA
     default:
       return "OTHER";
   }
+}
+
+/** Exit reasons that mean the trade never produced a real outcome. */
+const NO_RESULT_EXITS = new Set(["ENTRY_CANCELLED", "EXPIRED", "ERROR"]);
+
+export function isNoResultExit(reason: string | null | undefined): boolean {
+  return NO_RESULT_EXITS.has(String(reason ?? "").toUpperCase());
+}
+
+/**
+ * Classify a closed trade by result. Trades that never produced a real outcome
+ * (cancelled/expired/error) are "CANCELLED" and never count toward the win rate.
+ */
+export function classifyOutcome(exitReason: string | null | undefined, pnl: number): TradeOutcome {
+  if (isNoResultExit(exitReason)) return "CANCELLED";
+  if (pnl > 0) return "WIN";
+  if (pnl < 0) return "LOSS";
+  return "BREAKEVEN";
 }
 
 export { ExitReason as LiveExitReason };

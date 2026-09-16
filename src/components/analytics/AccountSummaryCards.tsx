@@ -58,7 +58,7 @@ export function AccountSummaryCards({ filters }: { filters: AnalyticsFilterState
       <StatCard
         label="Win Rate"
         value={formatPercent(s.winRate)}
-        sub={`${s.winningTrades}W / ${s.losingTrades}L of ${s.totalTrades} trades`}
+        sub={`${s.winningTrades}W / ${s.losingTrades}L of ${s.totalTrades} trades${s.cancelledTrades > 0 ? ` · ${s.cancelledTrades} cancelled` : ""}`}
       />
       <StatCard
         label="Profit Factor"

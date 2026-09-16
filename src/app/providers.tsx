@@ -8,6 +8,8 @@ import AdminThemeProvider
   from "@/components/providers/AdminThemeProvider";
 import CustomerThemeProvider
   from "@/components/providers/CustomerThemeProvider";
+import CurrencyProvider
+  from "@/lib/currency/CurrencyProvider";
 import AuthHydrator
   from "@/components/auth/AuthHydrator";
 
@@ -22,7 +24,9 @@ export default function Providers({
         <AuthHydrator>
           <AdminThemeProvider>
             <CustomerThemeProvider>
-              {children}
+              <CurrencyProvider>
+                {children}
+              </CurrencyProvider>
             </CustomerThemeProvider>
           </AdminThemeProvider>
         </AuthHydrator>

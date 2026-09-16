@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/table"
 import { apiGet } from "@/components/analytics/api"
 import { useAsyncData } from "@/components/analytics/use-data"
-import { formatPrice, pnlText, signClass, formatDuration } from "@/components/analytics/format"
+import { formatPrice, pnlText, signClass, formatDuration, formatMoney } from "@/components/analytics/format"
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 const PAGE_SIZE = 25
 
@@ -126,6 +127,7 @@ function formatTimestamp(ts: string | null): string {
 }
 
 export default function PositionHistoryPage() {
+  useDisplayCurrency();
   const [page, setPage] = useState(1)
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null)
 
@@ -303,7 +305,6 @@ export default function PositionHistoryPage() {
                               </TableCell>
                               <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.profitLoss)}`}>
                                 {pnlText(trade.profitLoss)}
-                                <span className="text-muted-foreground text-xs ml-1">USDT</span>
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden lg:table-cell">
                                 {trade.grossProfit != null && trade.grossProfit !== 0
@@ -400,7 +401,7 @@ export default function PositionHistoryPage() {
                                       <span className="text-muted-foreground">Balance After</span>
                                       <p className="font-medium">
                                         {trade.balanceAfter != null
-                                          ? `${trade.balanceAfter >= 0 ? "" : "-"}${Math.abs(trade.balanceAfter).toFixed(2)} USDT`
+                                          ? `${trade.balanceAfter >= 0 ? "" : "-"}${formatMoney(Math.abs(trade.balanceAfter))}`
                                           : "—"}
                                       </p>
                                     </div>

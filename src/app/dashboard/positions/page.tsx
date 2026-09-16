@@ -21,6 +21,8 @@ import {
 } from "@/components/positions/PositionDetailSheet";
 import { formatTimestamp } from "@/components/analytics/format";
 import { orderTypeLabel, positionSideLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 type Position = ExchangePosition;
 
@@ -43,6 +45,14 @@ function money(value: string | number | null | undefined): string {
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
   return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+function balance(value: string | number | null | undefined): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const conv = convertUsdt(num);
+  const state = getCurrencyState();
+  return `${(conv ?? num).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
 }
 
 /** Estimated PnL (in quote/USDT) if a protective TP/SL order triggers, using the matching live position's entry. */
@@ -89,6 +99,7 @@ function distancePct(current: number | null, target: number | null): number | nu
 }
 
 export default function AllPositionsPage() {
+  useDisplayCurrency();
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<OpenOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,15 +281,15 @@ export default function AllPositionsPage() {
                             const notional = Number(pos.position_size) * Number(pos.avg_entry_price);
                             const margin = Number(pos.position_margin);
                             if (!Number.isFinite(notional)) return "—";
-                            const marginText = Number.isFinite(margin) && margin > 0 ? `${money(margin)} USDT` : "—";
-                            return `${marginText} (${money(notional)} USDT)`;
+                            const marginText = Number.isFinite(margin) && margin > 0 ? balance(margin) : "—";
+                            return `${marginText} (${balance(notional)})`;
                           })()}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{money(pos.position_margin)}</TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{money(pos.liquidation_price)}</TableCell>
                         <TableCell className={`text-right font-medium tabular-nums ${profit ? "text-emerald-400" : "text-red-400"}`}>
                           {profit ? "+" : ""}
-                          {pnl.toFixed(4)}
+                          {balance(pnl)}
                           {pnlPct != null && <span className="ml-1 text-xs opacity-80">({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)</span>}
                         </TableCell>
                         <TableCell className="text-right text-xs whitespace-nowrap">
@@ -362,7 +373,7 @@ export default function AllPositionsPage() {
                       <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">
                         {(() => {
                           const amount = Number(order.quantity) * Number(order.price);
-                          return Number.isFinite(amount) && amount > 0 ? `${money(amount)} USDT` : "—";
+                          return Number.isFinite(amount) && amount > 0 ? balance(amount) : "—";
                         })()}
                       </TableCell>
                       <TableCell className="text-right tabular-nums hidden xl:table-cell">
@@ -380,7 +391,7 @@ export default function AllPositionsPage() {
                           return (
                             <span className={`font-medium tabular-nums ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                               {pnl >= 0 ? "+" : ""}
-                              {pnl.toFixed(4)} USDT
+                              {balance(pnl)}
                               {pct != null && <span className="ml-1 text-xs opacity-80">({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>}
                             </span>
                           );

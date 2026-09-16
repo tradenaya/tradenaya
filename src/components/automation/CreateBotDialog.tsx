@@ -7,6 +7,8 @@ import { CoinSearchSelect } from "@/components/automation/CoinSearchSelect";
 import { formatPrice } from "@/components/analytics/format";
 import { computeTradePreview, type TradePreview } from "@/components/automation/trade-preview";
 import { TradePreviewPanel } from "@/components/automation/TradePreviewPanel";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,7 +111,14 @@ interface CreateBotDialogProps {
   onCreated?: () => void;
 }
 
+function fmtWallet(value: number): string {
+  const conv = convertUsdt(value);
+  const state = getCurrencyState();
+  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+}
+
 export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDialogProps) {
+  useDisplayCurrency();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -591,7 +600,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 <Skeleton className="h-5 w-24" />
               ) : wallet != null ? (
                 <span className="font-semibold text-foreground">
-                  {wallet.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
+                  {fmtWallet(wallet)}
                 </span>
               ) : (
                 <span className="text-sm text-red-400">Unavailable</span>
@@ -601,7 +610,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Allocated for trading</span>
                 <span className="font-medium text-foreground">
-                  {effectiveCapital()!.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
+                  {fmtWallet(effectiveCapital()!)}
                 </span>
               </div>
             )}
@@ -912,7 +921,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
 
           {capitalMode === "fixed" ? (
             <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="auto-capital">Capital per trade (USDT)</Label>
+              <Label htmlFor="auto-capital">Capital per trade ({currencyLabel()})</Label>
               <Input
                 id="auto-capital"
                 type="number"
@@ -925,7 +934,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               {fieldErrors.capital && <FieldError>{fieldErrors.capital}</FieldError>}
               {wallet != null && Number(settings.capital) > wallet && (
                 <p className="text-xs text-red-400">
-                  Exceeds your available balance of {wallet.toFixed(2)} USDT.
+                  Exceeds your available balance of {fmtWallet(wallet)}.
                 </p>
               )}
               {notActiveIssue && <p className="text-xs text-red-400">{notActiveIssue}</p>}
@@ -947,7 +956,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               {fieldErrors.walletPercent && <FieldError>{fieldErrors.walletPercent}</FieldError>}
               {wallet != null && effectiveCapital() != null && (
                 <p className="text-xs text-muted-foreground">
-                  ≈ {effectiveCapital()!.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
+                  ≈ {fmtWallet(effectiveCapital()!)}
                 </p>
               )}
               {notActiveIssue && <p className="text-xs text-red-400">{notActiveIssue}</p>}

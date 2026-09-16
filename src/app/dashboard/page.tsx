@@ -12,6 +12,8 @@ import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { PositionDetailSheet, type ExchangePosition } from "@/components/positions/PositionDetailSheet";
 import { formatTimestamp } from "@/components/analytics/format";
 import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 type Position = ExchangePosition;
 
@@ -51,14 +53,18 @@ function SummaryRow({ label, value }: SummaryRowProps) {
   );
 }
 
-function money(value: string | number | null | undefined): string {
+function money(value: string | number | null | undefined, decimals = 4): string {
   if (value == null) return "—";
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
-  return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  const state = getCurrencyState();
+  const conv = convertUsdt(num);
+  const isInr = state.currency === "INR" && conv != null;
+  return (conv ?? num).toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: decimals });
 }
 
 export default function DashboardPage() {
+  const displayCurrency = useDisplayCurrency();
   const router = useRouter();
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<OpenOrder[]>([]);
@@ -149,19 +155,19 @@ export default function DashboardPage() {
       <Card className="border border-border bg-card">
         <CardHeader className="border-b">
           <CardTitle>PnL summary</CardTitle>
-          <CardDescription>From automated trading (USDT)</CardDescription>
+          <CardDescription>From automated trading ({currencyLabel()})</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
           {loading || !summary ? (
             <Skeleton className="h-28 w-full rounded-lg" />
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatBox label="Today" value={`${summary.todayPnl >= 0 ? "+" : ""}${summary.todayPnl.toFixed(2)}`} up={summary.todayPnl >= 0} />
-              <StatBox label="Unrealized" value={`${summary.unrealizedPnl >= 0 ? "+" : ""}${summary.unrealizedPnl.toFixed(2)}`} up={summary.unrealizedPnl >= 0} />
-              <StatBox label="Realized" value={`${summary.realizedPnl >= 0 ? "+" : ""}${summary.realizedPnl.toFixed(2)}`} up={summary.realizedPnl >= 0} />
+              <StatBox label="Today" value={`${summary.todayPnl >= 0 ? "+" : ""}${money(summary.todayPnl, 2)}`} up={summary.todayPnl >= 0} />
+              <StatBox label="Unrealized" value={`${summary.unrealizedPnl >= 0 ? "+" : ""}${money(summary.unrealizedPnl, 2)}`} up={summary.unrealizedPnl >= 0} />
+              <StatBox label="Realized" value={`${summary.realizedPnl >= 0 ? "+" : ""}${money(summary.realizedPnl, 2)}`} up={summary.realizedPnl >= 0} />
               <StatBox
                 label="Total"
-                value={`${summary.totalPnl >= 0 ? "+" : ""}${summary.totalPnl.toFixed(2)}`}
+                value={`${summary.totalPnl >= 0 ? "+" : ""}${money(summary.totalPnl, 2)}`}
                 up={summary.totalPnl >= 0}
               />
               <div className="col-span-2 sm:col-span-4">
@@ -222,7 +228,7 @@ export default function DashboardPage() {
                           {dir && <Badge className={sideBadge(dir === "Long" ? "LONG" : "SHORT")}>{dir}</Badge>}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} USDT
+                          {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
                         </div>
                       </div>
                     </div>
@@ -282,7 +288,7 @@ export default function DashboardPage() {
                         <div className="flex justify-between col-span-2">
                           <span className="text-muted-foreground">PnL</span>
                           <span className={`font-medium tabular-nums ${up ? "text-emerald-400" : "text-red-400"}`}>
-                            {up ? "+" : ""}{money(p.unrealised_pnl)} USDT ({up ? "+" : ""}{_pct.toFixed(2)}%)
+                            {up ? "+" : ""}{money(p.unrealised_pnl)} {currencyLabel()} ({up ? "+" : ""}{_pct.toFixed(2)}%)
                           </span>
                         </div>
                       </div>
@@ -346,12 +352,12 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="font-medium tabular-nums">{order.order_type}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="font-medium tabular-nums">{order.quantity}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Price</span><span className="font-medium tabular-nums">{order.price}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Price</span><span className="font-medium tabular-nums">{money(order.price)}</span></div>
                       {order.trigger_price != null && (
                         <div className="flex justify-between"><span className="text-muted-foreground">Trigger</span><span className="font-medium tabular-nums">{money(order.trigger_price)}</span></div>
                       )}
                       <div className={`flex justify-between col-span-2 ${Number(order.quantity) * Number(order.price) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        <span>USDT</span>
+                        <span>{currencyLabel()}</span>
                         <span>{money(Number(order.quantity) * Number(order.price))}</span>
                       </div>
                       <div className="col-span-2 text-xs text-muted-foreground">{formatTimestamp(order.created_at)}</div>

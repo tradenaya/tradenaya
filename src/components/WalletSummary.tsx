@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 interface WalletBalances {
   total_balance: string;
@@ -16,6 +18,7 @@ interface WalletBalances {
 export default function WalletSummary() {
   const [balances, setBalances] = useState<WalletBalances | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useDisplayCurrency();
 
   useEffect(() => {
     let cancelled = false;
@@ -75,15 +78,24 @@ export default function WalletSummary() {
   const total = Number(balances.total_balance);
   const isEmpty = total === 0;
 
+  const money = (value: string): string => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const state = getCurrencyState();
+    const conv = convertUsdt(num);
+    const isInr = state.currency === "INR" && conv != null;
+    return `${(conv ?? num).toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+  };
+
   return (
     <Card className="mb-5 bg-card">
       <CardContent className="py-4">
         <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
-          <Stat label="Total Balance" value={`${balances.total_balance} USDT`} />
-          <Stat label="Available" value={`${balances.total_available_balance} USDT`} highlight />
-          <Stat label="Blocked" value={`${balances.total_blocked_balance} USDT`} />
-          <Stat label="In Positions" value={`${balances.total_position_margin} USDT`} />
-          <Stat label="In Open Orders" value={`${balances.total_open_order_margin} USDT`} />
+          <Stat label="Total Balance" value={money(balances.total_balance)} />
+          <Stat label="Available" value={money(balances.total_available_balance)} highlight />
+          <Stat label="Blocked" value={money(balances.total_blocked_balance)} />
+          <Stat label="In Positions" value={money(balances.total_position_margin)} />
+          <Stat label="In Open Orders" value={money(balances.total_open_order_margin)} />
         </div>
 
         {isEmpty && (

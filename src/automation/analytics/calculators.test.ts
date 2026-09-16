@@ -6,6 +6,7 @@ import {
   buildEquityCurve,
   buildPnlSeries,
   computeExitAnalytics,
+  computeOutcomeAnalytics,
   computeTradeStatistics,
   sumFees,
   unrealizedOfPosition,
@@ -130,6 +131,70 @@ describe("computeTradeStatistics", () => {
     expect(stats.maxConsecutiveWins).toBe(2);
     expect(stats.maxConsecutiveLosses).toBe(2);
   });
+
+  it("excludes cancelled trades from the win rate", () => {
+    const trades = [
+      trade({ id: 1, realizedPnl: 20, side: "BUY" }),
+      trade({ id: 2, realizedPnl: 12, side: "BUY" }),
+      trade({ id: 3, realizedPnl: 8, side: "BUY" }),
+      trade({ id: 4, exitReason: "ENTRY_CANCELLED", realizedPnl: 0, side: "SELL" }),
+    ];
+    const stats = computeTradeStatistics(trades);
+    expect(stats.totalTrades).toBe(4);
+    expect(stats.winningTrades).toBe(3);
+    expect(stats.losingTrades).toBe(0);
+    expect(stats.breakevenTrades).toBe(0);
+    expect(stats.cancelledTrades).toBe(1);
+    expect(stats.winRate).toBeCloseTo(100, 1);
+  });
+
+  it("keeps cancelled and breakeven out of win/loss counts", () => {
+    const trades = [
+      trade({ id: 1, realizedPnl: 20 }),
+      trade({ id: 2, realizedPnl: -5 }),
+      trade({ id: 3, realizedPnl: 0, exitReason: "MANUAL_CLOSE" }),
+      trade({ id: 4, exitReason: "EXPIRED", realizedPnl: 0 }),
+    ];
+    const stats = computeTradeStatistics(trades);
+    expect(stats.winningTrades).toBe(1);
+    expect(stats.losingTrades).toBe(1);
+    expect(stats.breakevenTrades).toBe(1);
+    expect(stats.cancelledTrades).toBe(1);
+    expect(stats.winRate).toBeCloseTo(50, 1);
+  });
+});
+
+describe("computeOutcomeAnalytics", () => {
+  it("breaks down all statuses with counts and rates", () => {
+    const trades = [
+      trade({ id: 1, realizedPnl: 20 }),
+      trade({ id: 2, realizedPnl: -5 }),
+      trade({ id: 3, realizedPnl: 0, exitReason: "MANUAL_CLOSE" }),
+      trade({ id: 4, exitReason: "ENTRY_CANCELLED", realizedPnl: 0 }),
+    ];
+    const outcomes = computeOutcomeAnalytics(trades);
+    expect(outcomes.total).toBe(4);
+    expect(outcomes.resolvedTrades).toBe(2);
+    expect(outcomes.winRate).toBeCloseTo(50, 1);
+    const by = new Map(outcomes.statuses.map((s) => [s.status, s]));
+    expect(by.get("WIN")!.count).toBe(1);
+    expect(by.get("WIN")!.rate).toBeCloseTo(25, 1);
+    expect(by.get("LOSS")!.count).toBe(1);
+    expect(by.get("LOSS")!.rate).toBeCloseTo(25, 1);
+    expect(by.get("BREAKEVEN")!.count).toBe(1);
+    expect(by.get("BREAKEVEN")!.rate).toBeCloseTo(25, 1);
+    expect(by.get("CANCELLED")!.count).toBe(1);
+    expect(by.get("CANCELLED")!.rate).toBeCloseTo(25, 1);
+    expect(by.get("CANCELLED")!.pnl).toBeCloseTo(0, 8);
+  });
+
+  it("handles an empty trade list", () => {
+    const outcomes = computeOutcomeAnalytics([]);
+    expect(outcomes.total).toBe(0);
+    expect(outcomes.resolvedTrades).toBe(0);
+    expect(outcomes.winRate).toBe(0);
+    expect(outcomes.statuses).toHaveLength(4);
+  });
 });
 
 describe("buildEquityCurve", () => {
@@ -215,6 +280,17 @@ describe("aggregation", () => {
     expect(mf.trades).toBe(2);
     expect(mf.pnl).toBeCloseTo(6, 8);
   });
+
+  it("excludes cancelled trades from symbol win rates", () => {
+    const trades = [
+      trade({ id: 1, symbol: "BTCUSDT", realizedPnl: 10 }),
+      trade({ id: 2, symbol: "BTCUSDT", exitReason: "ENTRY_CANCELLED", realizedPnl: 0 }),
+    ];
+    const symbols = aggregateBySymbol(trades);
+    const btc = symbols.find((s) => s.symbol === "BTCUSDT")!;
+    expect(btc.trades).toBe(2);
+    expect(btc.winRate).toBeCloseTo(100, 1);
+  });
 });
 
 describe("computeExitAnalytics", () => {
@@ -238,6 +314,21 @@ describe("computeExitAnalytics", () => {
     expect(analytics.tpSl.trailing.trailingMovements).toBe(1);
     expect(analytics.tpSl.trailing.trailingClosedTrades).toBe(1);
     expect(analytics.tpSl.trailing.averageMfePct).toBeCloseTo(11, 2);
+  });
+
+  it("excludes cancelled trades from per-reason win rates", () => {
+    const trades = [
+      trade({ id: 1, exitReason: "ENTRY_CANCELLED", realizedPnl: 0 }),
+      trade({ id: 2, exitReason: "MANUAL_CLOSE", realizedPnl: 10 }),
+      trade({ id: 3, exitReason: "MANUAL_CLOSE", realizedPnl: -4 }),
+    ];
+    const analytics = computeExitAnalytics(trades);
+    const manual = analytics.reasons.find((r) => r.reason === "MANUAL_CLOSE")!;
+    expect(manual.count).toBe(2);
+    expect(manual.winRate).toBeCloseTo(50, 1);
+    const other = analytics.reasons.find((r) => r.reason === "OTHER")!;
+    expect(other.count).toBe(1);
+    expect(other.winRate).toBe(0);
   });
 });
 

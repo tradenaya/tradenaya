@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
+import { fmtMoney } from "@/components/automation/bot-config";
+import { currencyLabel } from "@/lib/currency/store";
 
 interface BotRecord {
   id: number;
@@ -283,7 +285,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {bot.timeframe} · {bot.leverage}x · {bot.capital} USDT
+                    {bot.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
                   </div>
                   {bot.lastError && <div className="mt-1 text-xs text-red-400">{bot.lastError}</div>}
                 </div>

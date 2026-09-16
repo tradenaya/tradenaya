@@ -20,6 +20,8 @@ import { parseBotConfig, statusMeta, type BotView } from "@/components/automatio
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 import { fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { currencyLabel } from "@/lib/currency/store";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
 
@@ -267,6 +269,7 @@ function LiveOverview({
 
 export default function AutomationPage() {
   const router = useRouter();
+  useDisplayCurrency();
   const [bots, setBots] = useState<BotView[]>([]);
   const [positions, setPositions] = useState<BotPosition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -547,7 +550,7 @@ export default function AutomationPage() {
                         {offline && <span className="shrink-0 text-[10px] font-normal text-amber-400">offline</span>}
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground">
-                        {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} USDT
+                        {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
                       </div>
                       {bot.lastError && !live && (
                         <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{bot.lastError}</div>

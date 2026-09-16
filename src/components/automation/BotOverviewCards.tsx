@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
+import { currencyLabel } from "@/lib/currency/store";
 
 export function BotOverviewCards() {
   const router = useRouter();
@@ -123,7 +124,7 @@ export function BotOverviewCards() {
                       <Gauge size={12} /> {config.leverage}x
                     </span>
                     <span className="flex items-center gap-1">
-                      <Wallet size={12} /> {fmtMoney(config.capital)} USDT
+                      <Wallet size={12} /> {fmtMoney(config.capital)} {currencyLabel()}
                     </span>
                     <span className={cn("ml-auto flex items-center gap-1", live && !offline && "text-emerald-400")}>
                       <Cpu size={12} /> {live && !offline ? "Live" : fmtRelative(bot.updatedAt)}

@@ -23,6 +23,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
 import { displaySymbol, sideLabel, botName } from "./bot-config";
+import { fmtMoney } from "./bot-config";
+import { currencyLabel } from "@/lib/currency/store";
 
 interface BotRecord {
   id: number;
@@ -288,7 +290,7 @@ export function BehindTheScenes() {
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {cfg.timeframe} · {bot.leverage}x · {bot.capital} USDT
+                        {cfg.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
                       </span>
                     </div>
                     <Badge

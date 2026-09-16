@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { parseBotConfig, type BotConfig, type BotView } from "./bot-config";
 import { computeTradePreview, type TradePreview } from "./trade-preview";
 import { TradePreviewPanel } from "./TradePreviewPanel";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 interface AutoSelectionPreview {
   symbol: string;
@@ -39,7 +41,14 @@ export interface EditBotDialogProps {
   onSaved?: () => void;
 }
 
+function fmtWallet(value: number): string {
+  const conv = convertUsdt(value);
+  const state = getCurrencyState();
+  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+}
+
 export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialogProps) {
+  useDisplayCurrency();
   const [cfg, setCfg] = useState<BotConfig>(parseBotConfig(bot));
   const [saving, setSaving] = useState(false);
   const [wallet, setWallet] = useState<number | null>(null);
@@ -228,7 +237,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                 <span className="text-muted-foreground animate-pulse">Loading…</span>
               ) : wallet != null ? (
                 <span className="font-semibold text-foreground">
-                  {wallet.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT
+                  {fmtWallet(wallet)}
                 </span>
               ) : (
                 <span className="text-xs text-red-400">Unavailable</span>
@@ -383,7 +392,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
               </div>
             )}
             <div className="grid gap-1.5">
-              <Label>Capital (USDT)</Label>
+              <Label>Capital ({currencyLabel()})</Label>
               <Input type="number" min={0} value={cfg.capital ?? ""} onChange={(e) => update("capital", Number(e.target.value))} />
             </div>
           </div>

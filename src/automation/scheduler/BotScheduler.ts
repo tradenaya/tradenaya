@@ -28,6 +28,7 @@ export interface BotSchedulerDependencies {
 }
 
 export class BotScheduler {
+  private static readonly CLEANUP_INTERVAL_MS = 48 * 60 * 60 * 1000;
   private readonly config: Required<SchedulerConfig>;
   private readonly lifecycle: BotLifecycleService;
   private readonly store: SchedulerStore;
@@ -39,6 +40,7 @@ export class BotScheduler {
   private readonly coinAutoSelector: CoinAutoSelector;
   private readonly inProcess = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
+  private cleanupTimer: NodeJS.Timeout | null = null;
   private started = false;
 
   constructor(deps: BotSchedulerDependencies = {}) {
@@ -88,12 +90,20 @@ export class BotScheduler {
       console.error("BotScheduler: startup failed; continuing to tick in background", error);
     }
     await this.tick().catch((error) => console.error("BotScheduler: initial tick error", error));
+    // One-time purge of stale logs on boot, then every 48 hours.
+    this.cleanupTimer = setInterval(
+      () => void this.runCleanup().catch((error) => console.error("BotScheduler: activity cleanup error", error)),
+      BotScheduler.CLEANUP_INTERVAL_MS,
+    );
+    await this.runCleanup().catch((error) => console.error("BotScheduler: initial activity cleanup error", error));
   }
 
   stop(): void {
     this.started = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    this.cleanupTimer = null;
     void serverMarketDataService.stop();
     // Shutdown must NEVER close an open position or cancel SL/TP orders on the
     // exchange. Exchange-side protective orders remain active independently of
@@ -114,6 +124,15 @@ export class BotScheduler {
 
   async recoverAll(): Promise<void> {
     await this.recovery.recoverAll();
+  }
+
+  async cleanupActivityLogs(): Promise<{ scheduler: number; position: number; notification: number }> {
+    return this.store.cleanupActivityLogs();
+  }
+
+  private async runCleanup(): Promise<void> {
+    const removed = await this.store.cleanupActivityLogs();
+    console.log(`[cleanup] pruned activity logs older than 1 hour: scheduler=${removed.scheduler} position=${removed.position} notification=${removed.notification}`);
   }
 
   async tick(): Promise<void> {
@@ -204,6 +223,15 @@ export class BotScheduler {
     if (!keys || keys.status !== "A") {
       throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your CoinSwitch account.");
     }
+
+    // Hard limit: max 3 running bots per user
+    const runningCount = await this.lifecycle.countActiveBotsForUser(userId);
+    if (runningCount >= 3) {
+      throw new Error(
+        `Maximum of 3 bots allowed per user. You currently have ${runningCount} running bot${runningCount === 1 ? "" : "s"}. Stop or delete a bot before starting a new one.`,
+      );
+    }
+
     this.validateConfig(config);
 
     await this.validateLiveConstraints(userId, config);

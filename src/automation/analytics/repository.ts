@@ -341,7 +341,7 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
          ) p2 ON p1.id = p2.max_id
        ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
        LEFT JOIN automation_bots b ON b.id = ct.bot_id
-       WHERE ct.user_id = ?${sql}
+       WHERE ct.user_id = ? AND ct.exit_reason NOT IN ('ENTRY_CANCELLED','EXPIRED','ERROR')${sql}
        ORDER BY ct.closed_at DESC;`,
       [userId, ...params],
     );
@@ -364,10 +364,11 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
         : "closed_at";
     const direction = sortDir === "asc" ? "ASC" : "DESC";
     const offset = (page - 1) * pageSize;
+    const baseWhere = `WHERE ct.user_id = ? AND ct.exit_reason NOT IN ('ENTRY_CANCELLED','EXPIRED','ERROR')${sql}`;
 
     const [[countRows], [rows]] = (await Promise.all([
       db.query(
-        `SELECT COUNT(*) AS total FROM automation_closed_trades ct WHERE ct.user_id = ?${sql};`,
+        `SELECT COUNT(*) AS total FROM automation_closed_trades ct ${baseWhere};`,
         [userId, ...params],
       ),
       db.query(
@@ -393,7 +394,7 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
            ) p2 ON p1.id = p2.max_id
          ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
          LEFT JOIN automation_bots b ON b.id = ct.bot_id
-         WHERE ct.user_id = ?${sql}
+         ${baseWhere}
          ORDER BY ${safeSort} ${direction}, ct.id ${direction}
          LIMIT ? OFFSET ?;`,
         [userId, ...params, pageSize, offset],
@@ -525,7 +526,7 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
          ) p2 ON p1.id = p2.max_id
        ) p ON p.execution_id = ct.execution_id AND p.bot_id = ct.bot_id
        LEFT JOIN automation_bots b ON b.id = ct.bot_id
-       WHERE ct.user_id = ? AND ct.id = ?
+       WHERE ct.user_id = ? AND ct.id = ? AND ct.exit_reason NOT IN ('ENTRY_CANCELLED','EXPIRED','ERROR')
        LIMIT 1;`,
       [userId, tradeId],
     );

@@ -6,12 +6,14 @@ import type {
   ExitAnalytics,
   ExitReasonCategory,
   OpenPositionRow,
+  OutcomeAnalytics,
   PnlPoint,
   StrategyPerformance,
   SymbolPerformance,
+  TradeOutcome,
   TradeStatistics,
 } from "./types";
-import { normalizeExitReason } from "./types";
+import { ALL_TRADE_OUTCOMES, classifyOutcome, normalizeExitReason } from "./types";
 
 export type Granularity = "daily" | "weekly" | "monthly";
 
@@ -99,6 +101,7 @@ export function computeTradeStatistics(trades: ClosedTradeRow[]): TradeStatistic
   let winningTrades = 0;
   let losingTrades = 0;
   let breakevenTrades = 0;
+  let cancelledTrades = 0;
   let largestWin = -Infinity;
   let largestLoss = Infinity;
   let durationSumMs = 0;
@@ -115,20 +118,23 @@ export function computeTradeStatistics(trades: ClosedTradeRow[]): TradeStatistic
     if (trade.side === "BUY") longTrades += 1;
     else shortTrades += 1;
 
-    if (pnl > 0) {
+    const outcome = classifyOutcome(trade.exitReason, pnl);
+    if (outcome === "WIN") {
       winningTrades += 1;
       grossProfit.add(pnl);
       largestWin = Math.max(largestWin, pnl);
       consecutiveWins += 1;
       consecutiveLosses = 0;
-    } else if (pnl < 0) {
+    } else if (outcome === "LOSS") {
       losingTrades += 1;
       grossLoss.add(Math.abs(pnl));
       largestLoss = Math.min(largestLoss, pnl);
       consecutiveLosses += 1;
       consecutiveWins = 0;
-    } else {
+    } else if (outcome === "BREAKEVEN") {
       breakevenTrades += 1;
+    } else {
+      cancelledTrades += 1;
     }
     maxConsecutiveWins = Math.max(maxConsecutiveWins, consecutiveWins);
     maxConsecutiveLosses = Math.max(maxConsecutiveLosses, consecutiveLosses);
@@ -140,6 +146,7 @@ export function computeTradeStatistics(trades: ClosedTradeRow[]): TradeStatistic
   }
 
   const total = sorted.length;
+  const resolvedTrades = winningTrades + losingTrades;
   const grossProfitValue = grossProfit.get();
   const grossLossValue = grossLoss.get();
   const grossLossAbs = Math.abs(grossLossValue);
@@ -151,7 +158,8 @@ export function computeTradeStatistics(trades: ClosedTradeRow[]): TradeStatistic
     winningTrades,
     losingTrades,
     breakevenTrades,
-    winRate: total ? round((winningTrades / total) * 100, 1) : 0,
+    cancelledTrades,
+    winRate: resolvedTrades ? round((winningTrades / resolvedTrades) * 100, 1) : 0,
     averageProfit: winningTrades ? grossProfitValue / winningTrades : 0,
     averageLoss: losingTrades ? -grossLossAbs / losingTrades : 0,
     largestWin: largestWin === -Infinity ? 0 : largestWin,
@@ -165,6 +173,44 @@ export function computeTradeStatistics(trades: ClosedTradeRow[]): TradeStatistic
     grossProfit: grossProfitValue,
     grossLoss: grossLossValue,
     totalFees: sumFees(trades),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Outcome breakdown (win / loss / breakeven / cancelled)
+// ---------------------------------------------------------------------------
+
+export function computeOutcomeAnalytics(trades: ClosedTradeRow[]): OutcomeAnalytics {
+  const pnlByStatus = new Map<TradeOutcome, MoneySum>();
+  const countByStatus = new Map<TradeOutcome, number>();
+  for (const status of ALL_TRADE_OUTCOMES) {
+    pnlByStatus.set(status, new MoneySum());
+    countByStatus.set(status, 0);
+  }
+
+  for (const trade of trades) {
+    const outcome = classifyOutcome(trade.exitReason, netPnl(trade));
+    countByStatus.set(outcome, (countByStatus.get(outcome) ?? 0) + 1);
+    pnlByStatus.get(outcome)!.add(netPnl(trade));
+  }
+
+  const total = trades.length;
+  const wins = countByStatus.get("WIN") ?? 0;
+  const losses = countByStatus.get("LOSS") ?? 0;
+  const resolvedTrades = wins + losses;
+
+  const statuses = ALL_TRADE_OUTCOMES.map((status) => ({
+    status,
+    count: countByStatus.get(status) ?? 0,
+    pnl: pnlByStatus.get(status)!.get(),
+    rate: total ? round(((countByStatus.get(status) ?? 0) / total) * 100, 1) : 0,
+  }));
+
+  return {
+    total,
+    resolvedTrades,
+    winRate: resolvedTrades ? round((wins / resolvedTrades) * 100, 1) : 0,
+    statuses,
   };
 }
 
@@ -351,33 +397,42 @@ export function buildPnlSeries(input: PnlSeriesInput): PnlSeriesResult {
 // ---------------------------------------------------------------------------
 
 export function aggregateBySymbol(trades: ClosedTradeRow[]): SymbolPerformance[] {
-  const grouped = new Map<string, { pnl: MoneySum; fees: MoneySum; total: number; long: number; short: number; wins: number }>();
+  const grouped = new Map<
+    string,
+    { pnl: MoneySum; fees: MoneySum; total: number; long: number; short: number; wins: number; losses: number }
+  >();
 
   for (const trade of trades) {
     let entry = grouped.get(trade.symbol);
     if (!entry) {
-      entry = { pnl: new MoneySum(), fees: new MoneySum(), total: 0, long: 0, short: 0, wins: 0 };
+      entry = { pnl: new MoneySum(), fees: new MoneySum(), total: 0, long: 0, short: 0, wins: 0, losses: 0 };
       grouped.set(trade.symbol, entry);
     }
-    entry.pnl.add(netPnl(trade));
+    const pnl = netPnl(trade);
+    entry.pnl.add(pnl);
     entry.fees.add(trade.fees);
     entry.total += 1;
     if (trade.side === "BUY") entry.long += 1;
     else entry.short += 1;
-    if (netPnl(trade) > 0) entry.wins += 1;
+    const outcome = classifyOutcome(trade.exitReason, pnl);
+    if (outcome === "WIN") entry.wins += 1;
+    else if (outcome === "LOSS") entry.losses += 1;
   }
 
   return [...grouped.entries()]
-    .map(([symbol, e]) => ({
-      symbol,
-      trades: e.total,
-      longTrades: e.long,
-      shortTrades: e.short,
-      pnl: e.pnl.get(),
-      winRate: e.total ? round((e.wins / e.total) * 100, 1) : 0,
-      averagePnl: e.total ? e.pnl.get() / e.total : 0,
-      fees: e.fees.get(),
-    }))
+    .map(([symbol, e]) => {
+      const resolved = e.wins + e.losses;
+      return {
+        symbol,
+        trades: e.total,
+        longTrades: e.long,
+        shortTrades: e.short,
+        pnl: e.pnl.get(),
+        winRate: resolved ? round((e.wins / resolved) * 100, 1) : 0,
+        averagePnl: e.total ? e.pnl.get() / e.total : 0,
+        fees: e.fees.get(),
+      };
+    })
     .sort((a, b) => b.pnl - a.pnl);
 }
 
@@ -433,7 +488,7 @@ function mfePct(trade: ClosedTradeRow): number | null {
 }
 
 export function computeExitAnalytics(trades: ClosedTradeRow[]): ExitAnalytics {
-  const byReason = new Map<ExitReasonCategory, { count: number; pnl: MoneySum; wins: number }>();
+  const byReason = new Map<ExitReasonCategory, { count: number; pnl: MoneySum; wins: number; losses: number }>();
   const tpHits: number[] = [];
   const slHits: number[] = [];
   const trailingHits: number[] = [];
@@ -446,14 +501,16 @@ export function computeExitAnalytics(trades: ClosedTradeRow[]): ExitAnalytics {
     const category = normalizeExitReason(trade.exitReason, trade.trailingActivated);
     let entry = byReason.get(category);
     if (!entry) {
-      entry = { count: 0, pnl: new MoneySum(), wins: 0 };
+      entry = { count: 0, pnl: new MoneySum(), wins: 0, losses: 0 };
       byReason.set(category, entry);
     }
-    entry.count += 1;
-    entry.pnl.add(netPnl(trade));
-    if (netPnl(trade) > 0) entry.wins += 1;
-
     const pnl = netPnl(trade);
+    entry.count += 1;
+    entry.pnl.add(pnl);
+    const outcome = classifyOutcome(trade.exitReason, pnl);
+    if (outcome === "WIN") entry.wins += 1;
+    else if (outcome === "LOSS") entry.losses += 1;
+
     if (category === "TAKE_PROFIT") tpHits.push(pnl);
     else if (category === "STOP_LOSS") slHits.push(pnl);
     else if (category === "TRAILING_STOP") {
@@ -471,13 +528,16 @@ export function computeExitAnalytics(trades: ClosedTradeRow[]): ExitAnalytics {
     }
   }
 
-  const reasons = [...byReason.entries()].map(([reason, e]) => ({
-    reason,
-    count: e.count,
-    pnl: e.pnl.get(),
-    winRate: e.count ? round((e.wins / e.count) * 100, 1) : 0,
-    averagePnl: e.count ? e.pnl.get() / e.count : 0,
-  }));
+  const reasons = [...byReason.entries()].map(([reason, e]) => {
+    const resolved = e.wins + e.losses;
+    return {
+      reason,
+      count: e.count,
+      pnl: e.pnl.get(),
+      winRate: resolved ? round((e.wins / resolved) * 100, 1) : 0,
+      averagePnl: e.count ? e.pnl.get() / e.count : 0,
+    };
+  });
 
   const sum = (values: number[]) => {
     const s = new MoneySum();

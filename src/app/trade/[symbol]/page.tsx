@@ -12,6 +12,8 @@ import PlaceOrderPanel from "@/components/PlaceOrderPanel";
 import { futuresTickerSocket, TickerData } from "@/lib/coinswitch/futuresTickerSocket";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
 import { cn } from "@/lib/utils";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 interface Position {
   position_id: string;
@@ -43,6 +45,14 @@ function money(value: string | number | null | undefined): string {
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
   return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+function balance(value: string | number | null | undefined): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const conv = convertUsdt(num);
+  const state = getCurrencyState();
+  return `${(conv ?? num).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
 }
 
 export default function TradePage() {
@@ -161,6 +171,7 @@ function useSymbolData(symbol: string) {
 function CompactPositionCard({ symbol }: { symbol: string }) {
   const { positions, loading } = useSymbolData(symbol);
   const pos = positions[0];
+  useDisplayCurrency();
 
   if (loading) {
     return <Card className="bg-card"><CardContent className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="animate-spin" /></CardContent></Card>;
@@ -187,7 +198,7 @@ function CompactPositionCard({ symbol }: { symbol: string }) {
                   Number(pos.unrealised_pnl) >= 0 ? "text-emerald-400" : "text-red-400",
                 )}
               >
-                {Number(pos.unrealised_pnl) >= 0 ? "+" : ""}{money(pos.unrealised_pnl)} USDT
+                {Number(pos.unrealised_pnl) >= 0 ? "+" : ""}{balance(pos.unrealised_pnl)}
               </span>
             </div>
             <div className="flex justify-between">
@@ -204,7 +215,7 @@ function CompactPositionCard({ symbol }: { symbol: string }) {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Margin</span>
-              <span className="text-foreground">{money(pos.position_margin)} USDT</span>
+              <span className="text-foreground">{balance(pos.position_margin)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Liq. price</span>

@@ -6,6 +6,7 @@ import {
   buildEquityCurve,
   buildPnlSeries,
   computeExitAnalytics,
+  computeOutcomeAnalytics,
   computeTradeStatistics,
   netPnl,
   sumFees,
@@ -24,6 +25,7 @@ import type {
   EquityAnalytics,
   ExitAnalytics,
   OpenPositionAnalytics,
+  OutcomeAnalytics,
   Paged,
   PnlAnalytics,
   StrategyPerformance,
@@ -31,6 +33,7 @@ import type {
   TradeDetail,
   TradeStatistics,
 } from "./types";
+import { classifyOutcome } from "./types";
 
 const DAY_MS = 86_400_000;
 const WEEK_MS = 7 * DAY_MS;
@@ -235,6 +238,7 @@ export class BotAnalyticsService {
       totalTrades: trades.length,
       winningTrades: stats.winningTrades,
       losingTrades: stats.losingTrades,
+      cancelledTrades: stats.cancelledTrades,
       winRate: stats.winRate,
       profitFactor: stats.profitFactor,
       maxDrawdown: equity.maxDrawdown,
@@ -289,12 +293,17 @@ export class BotAnalyticsService {
       let totalPnl = 0;
       let todayPnl = 0;
       let wins = 0;
+      let losses = 0;
+      let cancelled = 0;
       let lastTrade: ClosedTradeSummary | null = null;
       for (const trade of botTrades) {
         const net = netPnl(trade);
         totalPnl += net;
         if (new Date(trade.closedAt).getTime() >= todayStart) todayPnl += net;
-        if (net > 0) wins += 1;
+        const outcome = classifyOutcome(trade.exitReason, net);
+        if (outcome === "WIN") wins += 1;
+        else if (outcome === "LOSS") losses += 1;
+        else if (outcome === "CANCELLED") cancelled += 1;
         if (!lastTrade || trade.closedAt > lastTrade.exitTime) {
           lastTrade = formatTrade(trade, new Map([[bot.id, bot]]));
         }
@@ -317,8 +326,9 @@ export class BotAnalyticsService {
         totalPnl,
         tradeCount: botTrades.length,
         winningTrades: wins,
-        losingTrades: botTrades.length - wins,
-        winRate: botTrades.length ? Math.round((wins / botTrades.length) * 1000) / 10 : 0,
+        losingTrades: losses,
+        cancelledTrades: cancelled,
+        winRate: wins + losses ? Math.round((wins / (wins + losses)) * 1000) / 10 : 0,
         lastTrade,
         lastAnalysisAt: bot.lastAnalysisAt,
         lastExecutionAt: bot.lastExecutionAt,
@@ -536,6 +546,17 @@ export class BotAnalyticsService {
     if (cached) return cached;
     const trades = await this.repo.getClosedTrades(userId, f);
     const result = computeExitAnalytics(trades);
+    this.cache.set(key, result);
+    return result;
+  }
+
+  async getOutcomeAnalytics(userId: number, filters?: AnalyticsFilters): Promise<OutcomeAnalytics> {
+    const f = defaultFilters(filters);
+    const key = `outcomes:${userId}:${filtersCacheKey(f)}`;
+    const cached = this.cache.get(key) as OutcomeAnalytics | undefined;
+    if (cached) return cached;
+    const trades = await this.repo.getClosedTrades(userId, f);
+    const result = computeOutcomeAnalytics(trades);
     this.cache.set(key, result);
     return result;
   }

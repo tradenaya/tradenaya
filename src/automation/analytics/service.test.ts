@@ -239,6 +239,39 @@ describe("BotAnalyticsService", () => {
     expect(summary.winRate).toBeCloseTo(100, 1);
   });
 
+  it("excludes cancelled trades from bot summary win rate", async () => {
+    const repo = new FakeRepository();
+    repo.trades = [
+      trade({ id: 1, realizedPnl: 20 }),
+      trade({ id: 2, realizedPnl: 12 }),
+      trade({ id: 3, exitReason: "ENTRY_CANCELLED", realizedPnl: 0 }),
+    ];
+    const service = new BotAnalyticsService(repo);
+    const bots = await service.getBotSummaries(1);
+    expect(bots).toHaveLength(1);
+    const bot = bots[0];
+    expect(bot.tradeCount).toBe(3);
+    expect(bot.winningTrades).toBe(2);
+    expect(bot.losingTrades).toBe(0);
+    expect(bot.cancelledTrades).toBe(1);
+    expect(bot.winRate).toBeCloseTo(100, 1);
+  });
+
+  it("reports cancelled trades in the account summary", async () => {
+    const repo = new FakeRepository();
+    repo.trades = [
+      trade({ id: 1, realizedPnl: 20 }),
+      trade({ id: 2, exitReason: "ENTRY_CANCELLED", realizedPnl: 0 }),
+    ];
+    const service = new BotAnalyticsService(repo);
+    const summary = await service.getAccountSummary(1);
+    expect(summary.totalTrades).toBe(2);
+    expect(summary.winningTrades).toBe(1);
+    expect(summary.losingTrades).toBe(0);
+    expect(summary.cancelledTrades).toBe(1);
+    expect(summary.winRate).toBeCloseTo(100, 1);
+  });
+
   it("exposes open positions with protection status", async () => {
     const repo = new FakeRepository();
     const service = new BotAnalyticsService(repo);

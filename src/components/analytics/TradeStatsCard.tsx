@@ -32,27 +32,33 @@ export function TradeStatsCard({ filters }: { filters: AnalyticsFilterState }) {
         {loading && !data ? (
           <Skeleton className="h-56 w-full rounded-lg" />
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            <Stat label="Trades" value={String(data?.totalTrades ?? 0)} />
-            <Stat label="Long / Short" value={`${data?.longTrades ?? 0} / ${data?.shortTrades ?? 0}`} />
-            <Stat label="Win Rate" value={formatPercent(data?.winRate)} />
-            <Stat label="Wins" value={String(data?.winningTrades ?? 0)} />
-            <Stat label="Losses" value={String(data?.losingTrades ?? 0)} />
-            <Stat label="Gross Profit" value={formatMoney(data?.grossProfit)} valueClass={pnlClass(data?.grossProfit)} />
-            <Stat label="Gross Loss" value={formatMoney(data?.grossLoss)} valueClass={pnlClass(-(data?.grossLoss ?? 0))} />
-            <Stat label="Profit Factor" value={data?.profitFactor == null ? "∞" : data.profitFactor.toFixed(2)} />
-            <Stat label="Avg Trade" value={pnlText(data?.averageTradePnl)} valueClass={pnlClass(data?.averageTradePnl)} />
-            <Stat label="Avg Win" value={formatMoney(data?.averageProfit)} valueClass={pnlClass(data?.averageProfit)} />
-            <Stat label="Avg Loss" value={formatMoney(data?.averageLoss)} valueClass={pnlClass(data?.averageLoss)} />
-            <Stat label="Largest Win" value={formatMoney(data?.largestWin)} valueClass={pnlClass(data?.largestWin)} />
-            <Stat label="Largest Loss" value={formatMoney(data?.largestLoss)} valueClass={pnlClass(data?.largestLoss)} />
-            <Stat label="Avg Duration" value={formatDuration(data?.averageTradeDurationMs)} />
-            <Stat label="Expectancy" value={pnlText(data?.expectancy)} valueClass={pnlClass(data?.expectancy)} />
-            <Stat label="Fees Paid" value={formatMoney(data?.totalFees)} />
-            <Stat label="Consecutive W" value={String(data?.maxConsecutiveWins ?? 0)} />
-            <Stat label="Consecutive L" value={String(data?.maxConsecutiveLosses ?? 0)} />
-            <Stat label="Breakeven" value={String(data?.breakevenTrades ?? 0)} />
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+              <Stat label="Trades" value={String(data?.totalTrades ?? 0)} />
+              <Stat label="Long / Short" value={`${data?.longTrades ?? 0} / ${data?.shortTrades ?? 0}`} />
+              <Stat label="Win Rate" value={formatPercent(data?.winRate)} />
+              <Stat label="Wins" value={String(data?.winningTrades ?? 0)} />
+              <Stat label="Losses" value={String(data?.losingTrades ?? 0)} />
+              <Stat label="Gross Profit" value={formatMoney(data?.grossProfit)} valueClass={pnlClass(data?.grossProfit)} />
+              <Stat label="Gross Loss" value={formatMoney(data?.grossLoss)} valueClass={pnlClass(-(data?.grossLoss ?? 0))} />
+              <Stat label="Profit Factor" value={data?.profitFactor == null ? "∞" : data.profitFactor.toFixed(2)} />
+              <Stat label="Avg Trade" value={pnlText(data?.averageTradePnl)} valueClass={pnlClass(data?.averageTradePnl)} />
+              <Stat label="Avg Win" value={formatMoney(data?.averageProfit)} valueClass={pnlClass(data?.averageProfit)} />
+              <Stat label="Avg Loss" value={formatMoney(data?.averageLoss)} valueClass={pnlClass(data?.averageLoss)} />
+              <Stat label="Largest Win" value={formatMoney(data?.largestWin)} valueClass={pnlClass(data?.largestWin)} />
+              <Stat label="Largest Loss" value={formatMoney(data?.largestLoss)} valueClass={pnlClass(data?.largestLoss)} />
+              <Stat label="Avg Duration" value={formatDuration(data?.averageTradeDurationMs)} />
+              <Stat label="Expectancy" value={pnlText(data?.expectancy)} valueClass={pnlClass(data?.expectancy)} />
+              <Stat label="Fees Paid" value={formatMoney(data?.totalFees)} />
+              <Stat label="Consecutive W" value={String(data?.maxConsecutiveWins ?? 0)} />
+              <Stat label="Consecutive L" value={String(data?.maxConsecutiveLosses ?? 0)} />
+              <Stat label="Breakeven" value={String(data?.breakevenTrades ?? 0)} />
+              <Stat label="Cancelled" value={String(data?.cancelledTrades ?? 0)} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Win rate counts wins vs. losses only; cancelled and breakeven trades are excluded.
+            </p>
+          </>
         )}
       </CardContent>
     </Card>

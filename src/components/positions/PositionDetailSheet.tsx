@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
 export interface ExchangePosition {
   position_id: string;
@@ -76,6 +78,13 @@ function signed(value: number | null, digits = 4): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 }
 
+function balance(value: number | null): string {
+  if (value == null) return "—";
+  const conv = convertUsdt(value);
+  const state = getCurrencyState();
+  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+}
+
 interface Props {
   position: ExchangePosition;
   open: boolean;
@@ -84,6 +93,7 @@ interface Props {
 
 export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
   const router = useRouter();
+  useDisplayCurrency();
   const [detail, setDetail] = useState<AutomationPositionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -229,7 +239,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
                     pnl != null && pnl < 0 ? "text-red-400" : "text-emerald-400"
                   }`}
                 >
-                  {signed(pnl)} USDT
+                  {pnl != null && pnl >= 0 ? "+" : ""}{balance(pnl)}
                 </div>
                 {pnlPct != null && (
                   <div

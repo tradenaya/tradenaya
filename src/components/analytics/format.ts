@@ -1,12 +1,23 @@
+import { getCurrencyState, convertUsdt } from "@/lib/currency/store";
+
 export function formatMoney(value: number | null | undefined, decimals = 2): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return `$${value.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+  const state = getCurrencyState();
+  const conv = convertUsdt(value);
+  const isInr = state.currency === "INR" && conv != null;
+  const num = conv ?? value;
+  return `${isInr ? "₹" : "$"}${num.toLocaleString(isInr ? "en-IN" : "en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
 export function formatPrice(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  const decimals = value >= 1000 ? 2 : value >= 1 ? 4 : 6;
-  return value.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  const state = getCurrencyState();
+  const conv = convertUsdt(value);
+  const isInr = state.currency === "INR" && conv != null;
+  const num = conv ?? value;
+  const decimals = num >= 1000 ? 2 : num >= 1 ? 4 : 6;
+  const body = num.toLocaleString(isInr ? "en-IN" : "en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return isInr ? `₹${body}` : body;
 }
 
 export function formatPercent(value: number | null | undefined, decimals = 1): string {

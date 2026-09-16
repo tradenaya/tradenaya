@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
+import { currencyLabel } from "@/lib/currency/store";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 
 export interface BotDetailsDialogProps {
@@ -72,7 +73,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
             </Button>
           </div>
           <DialogDescription>
-            {fmtMoney(cfg.capital)} USDT capital · {cfg.leverage}x leverage · {cfg.timeframe} · {cfg.strategy}
+            {fmtMoney(cfg.capital)} {currencyLabel()} capital · {cfg.leverage}x leverage · {cfg.timeframe} · {cfg.strategy}
           </DialogDescription>
         </DialogHeader>
 
@@ -97,7 +98,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
               <Field label="Auto-select">{cfg.autoSelect ? "On" : "Off"}</Field>
               <Field label="Timeframe">{cfg.timeframe}</Field>
               <Field label="Leverage">{cfg.leverage}x</Field>
-              <Field label="Capital">{fmtMoney(cfg.capital)} USDT</Field>
+              <Field label="Capital">{fmtMoney(cfg.capital)} {currencyLabel()}</Field>
               <Field label="Strategy">{cfg.strategy}</Field>
               <Field label="Capital mode">{cfg.capitalMode === "percent" ? `${cfg.walletPercent}% of wallet` : "Fixed"}</Field>
               <Field label="Max risk / trade">{cfg.maxRiskPerTrade}%</Field>
@@ -109,7 +110,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Risk / protection</p>
-              <Field label="Capital allocated">{fmtMoney(cfg.capital)} USDT</Field>
+              <Field label="Capital allocated">{fmtMoney(cfg.capital)} {currencyLabel()}</Field>
               <Field label="Per-trade ceiling">~{cfg.maxRiskPerTrade}% of capital</Field>
               <Field label="Stop loss">{cfg.enableTrailingStop ? `${cfg.trailingDistancePercent}% trailing` : "Static or disabled"}</Field>
               <Field label="Bot id">{bot.id}</Field>
