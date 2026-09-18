@@ -147,6 +147,7 @@ function formatPosition(position: OpenPositionRow, bots: Map<number, BotRow>): O
     quantity: qty,
     filledQuantity: position.filledQuantity,
     entryPrice: position.entryPrice,
+    plannedEntryPrice: position.plannedEntryPrice,
     currentPrice: position.currentPrice,
     stopLoss: position.stopLoss,
     takeProfit: position.takeProfit,

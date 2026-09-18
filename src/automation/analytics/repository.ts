@@ -189,6 +189,7 @@ function mapPosition(row: any): OpenPositionRow {
     quantity: num(row.quantity),
     filledQuantity: num(row.filled_quantity),
     entryPrice: num(row.entry_price),
+    plannedEntryPrice: num(row.planned_entry_price),
     currentPrice: num(row.current_price),
     stopLoss: num(row.stop_loss),
     takeProfit: num(row.take_profit),
@@ -414,10 +415,14 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
   async getOpenPositions(userId: number, botId?: number): Promise<OpenPositionRow[]> {
     await this.ensureSchema();
     const [rows] = await db.query(
-      `SELECT * FROM automation_positions
-       WHERE user_id = ? AND state NOT IN ('CLOSED', 'ERROR')
-         ${botId != null ? "AND bot_id = ?" : ""}
-       ORDER BY id DESC;`,
+      `SELECT automation_positions.*, automation_executions.limit_price AS planned_entry_price
+       FROM automation_positions
+       LEFT JOIN automation_executions
+         ON automation_executions.id = automation_positions.execution_id
+         AND automation_executions.user_id = automation_positions.user_id
+       WHERE automation_positions.user_id = ? AND automation_positions.state NOT IN ('CLOSED', 'ERROR')
+         ${botId != null ? "AND automation_positions.bot_id = ?" : ""}
+       ORDER BY automation_positions.id DESC;`,
       botId != null ? [userId, botId] : [userId],
     );
     return (rows as any[]).map(mapPosition);

@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
 import { displaySymbol, sideLabel, botName } from "./bot-config";
 import { fmtMoney } from "./bot-config";
+import { AutoBadge } from "./AutoBadge";
 import { currencyLabel } from "@/lib/currency/store";
 
 interface BotRecord {
@@ -283,7 +284,7 @@ export function BehindTheScenes() {
                       <Bot size={14} className="text-emerald-400" />
                       {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                       <span className="text-sm font-semibold text-foreground">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
-                      {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                      {cfg.autoSelect && <AutoBadge />}
                       {sideLabel(cfg.side) && (
                         <span className={`text-[10px] font-bold ${sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
                           {sideLabel(cfg.side)}

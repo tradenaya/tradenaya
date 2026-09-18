@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
+import { AutoBadge } from "./AutoBadge";
 import { currencyLabel } from "@/lib/currency/store";
 
 export function BotOverviewCards() {
@@ -94,7 +95,7 @@ export function BotOverviewCards() {
                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                           {name && <span className="max-w-40 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                           <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
-                          {config.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                          {config.autoSelect && <AutoBadge />}
                           {dir && (
                             <span className={cn("text-[10px] font-bold", dir === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
                               {dir}

@@ -82,6 +82,7 @@ function position(overrides: Partial<OpenPositionRow> = {}): OpenPositionRow {
     quantity: 1,
     filledQuantity: 1,
     entryPrice: 100,
+    plannedEntryPrice: 100,
     currentPrice: 120,
     stopLoss: 95,
     takeProfit: 130,

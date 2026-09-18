@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { fmtMoney } from "@/components/automation/bot-config";
+import { AutoBadge } from "@/components/automation/AutoBadge";
 import { currencyLabel } from "@/lib/currency/store";
 
 interface BotRecord {
@@ -277,7 +278,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-medium text-foreground">
                     {name && <span className="max-w-40 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                     <span>{sym.replace(/USDT$/, "") || "Auto"}</span>
-                    {cfg.autoSelect && <span className="text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                    {cfg.autoSelect && <AutoBadge />}
                     {dir && (
                       <span className={`text-[10px] font-bold ${dir === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
                         {dir}

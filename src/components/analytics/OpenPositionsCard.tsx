@@ -79,7 +79,7 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
                     {p.quantity != null ? `${p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}` : "—"}
                     <div className="text-xs text-muted-foreground">{p.leverage != null ? `${p.leverage}x` : ""}{p.margin != null ? ` · ${formatMoney(p.margin)}` : ""}</div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(p.entryPrice)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(p.entryPrice ?? p.plannedEntryPrice)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatPrice(p.currentPrice)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(p.unrealizedPnl)}`}>{pnlText(p.unrealizedPnl)}</TableCell>
                   <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.stopLoss)}</TableCell>

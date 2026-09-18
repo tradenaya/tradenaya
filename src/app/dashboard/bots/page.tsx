@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
+import { AutoBadge } from "@/components/automation/AutoBadge";
 import { CreateBotDialog } from "@/components/automation/CreateBotDialog";
 import { BehindTheScenes } from "@/components/automation/BehindTheScenes";
 import { BotDetailsDialog } from "@/components/automation/BotDetailsDialog";
@@ -149,7 +150,7 @@ function LiveBotCard({
 }) {
   const cfg = parseBotConfig(bot);
   const inPhase = STEP_ORDER.includes(bot.status);
-  const entry = position?.entryPrice ?? null;
+  const entry = position?.entryPrice ?? position?.plannedEntryPrice ?? null;
   const current = position?.currentPrice ?? null;
   const sl = position?.stopLoss ?? null;
   const tp = position?.takeProfit ?? null;
@@ -166,9 +167,7 @@ function LiveBotCard({
             <span className="text-xl font-bold text-foreground">
               {sym.replace(/USDT$/, "") || "Auto-select"}
             </span>
-            {cfg.autoSelect && (
-              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500/80">AUTO</span>
-            )}
+            {cfg.autoSelect && <AutoBadge />}
             {dir ? (
               <Badge className={dir === "Long" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}>
                 {dir}
@@ -543,7 +542,7 @@ export default function AutomationPage() {
                             {botName(bot, cfg)}
                           </span>
                         )}
-                        {cfg.autoSelect && <span className="shrink-0 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+                        {cfg.autoSelect && <AutoBadge />}
                         {sideLabel(cfg.side) && (
                           <span className={cn("shrink-0 text-[10px] font-bold", sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
                             {sideLabel(cfg.side)}

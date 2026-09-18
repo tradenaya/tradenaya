@@ -10,7 +10,74 @@
  * no-op (isTelegramConfigured() === false) so the rest of the app is unaffected.
  */
 
+import https from "node:https";
+
 const BOT_API_BASE = "https://api.telegram.org";
+
+/**
+ * Force IPv4 for Telegram API connections.
+ *
+ * Node's native `fetch()` / undici defaults to Happy Eyeballs which can
+ * attempt IPv6 first. On certain VPS configurations the IPv6 path silently
+ * hangs while IPv4 works fine. A per-host Agent with `family: 4` pins
+ * DNS resolution to A records only, bypassing the issue without touching
+ * the OS or system-wide Node flags.
+ */
+const ipv4Agent = new https.Agent({ family: 4, keepAlive: true });
+
+/**
+ * Low-level HTTPS POST helper that resolves `api.telegram.org` over IPv4
+ * and preserves TLS certificate validation via `servername`.
+ *
+ * Returns a parsed `{ status, data }` pair so the caller can handle
+ * Telegram-specific error codes (429, 500-599, 400, etc.) exactly as before.
+ */
+function httpsPostJson(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<{ status: number; data: Record<string, unknown> | null }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const bodyStr = JSON.stringify(body);
+
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(bodyStr),
+        },
+        servername: parsed.hostname,
+        agent: ipv4Agent,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          let data: Record<string, unknown> | null = null;
+          try {
+            data = JSON.parse(Buffer.concat(chunks).toString());
+          } catch {
+            /* non-JSON body – leave as null */
+          }
+          resolve({ status: res.statusCode ?? 0, data });
+        });
+      },
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error("Request timed out"));
+    });
+
+    req.on("error", reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
 
 interface TelegramConfig {
   token?: string;
@@ -99,36 +166,28 @@ export async function sendTelegram(text: string): Promise<{ ok: boolean; error?:
       return { ok: false, error: "max_attempts" };
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    try {
-      const res = await fetch(`${BOT_API_BASE}/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload(text, html)),
-        signal: controller.signal,
-      });
-      const data = await res.json().catch(() => null);
+    const { status, data } = await httpsPostJson(
+      `${BOT_API_BASE}/bot${token}/sendMessage`,
+      buildPayload(text, html),
+      10_000,
+    );
 
-      // HTML parse rejected → retry once without parse_mode (plain text) so a
-      // stray entity can never permanently kill an important trade notification.
-      if (res.status === 400 && attempt === 0) {
-        return attemptSend(attempt + 1, text, false);
-      }
-      if (res.status === 429 || res.status >= 500) {
-        const retryAfter = Number(data?.retry_after ?? 2);
-        await new Promise((r) => setTimeout(r, Math.min(retryAfter, 8) * 1000));
-        return attemptSend(attempt + 1, text, html);
-      }
-      if (!res.ok || data?.ok !== true) {
-        const detail = data?.description ?? data?.error ?? `HTTP ${res.status}`;
-        console.warn(`[telegram] send failed: ${detail}`);
-        return { ok: false, error: String(detail) };
-      }
-      return { ok: true };
-    } finally {
-      clearTimeout(timeout);
+    // HTML parse rejected → retry once without parse_mode (plain text) so a
+    // stray entity can never permanently kill an important trade notification.
+    if (status === 400 && attempt === 0) {
+      return attemptSend(attempt + 1, text, false);
     }
+    if (status === 429 || status >= 500) {
+      const retryAfter = Number(data?.retry_after ?? 2);
+      await new Promise((r) => setTimeout(r, Math.min(retryAfter, 8) * 1000));
+      return attemptSend(attempt + 1, text, html);
+    }
+    if (status < 200 || status >= 300 || data?.ok !== true) {
+      const detail = data?.description ?? data?.error ?? `HTTP ${status}`;
+      console.warn(`[telegram] send failed: ${detail}`);
+      return { ok: false, error: String(detail) };
+    }
+    return { ok: true };
   }
 }
 

@@ -112,6 +112,8 @@ export interface OpenPositionRow {
   quantity: number | null;
   filledQuantity: number | null;
   entryPrice: number | null;
+  /** Planned LIMIT entry price from the order still resting before the fill. */
+  plannedEntryPrice: number | null;
   currentPrice: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
@@ -216,6 +218,8 @@ export interface OpenPositionAnalytics {
   quantity: number | null;
   filledQuantity: number | null;
   entryPrice: number | null;
+  /** Planned LIMIT entry price while the order is still resting; actual fill price once filled. */
+  plannedEntryPrice: number | null;
   currentPrice: number | null;
   stopLoss: number | null;
   takeProfit: number | null;

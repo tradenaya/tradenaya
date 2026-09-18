@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
+import { AutoBadge } from "./AutoBadge";
 import { currencyLabel } from "@/lib/currency/store";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 
@@ -53,7 +54,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
               ) : (
                 "Auto-select automation"
               )}
-              {cfg.autoSelect && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500/80">AUTO</span>}
+              {cfg.autoSelect && <AutoBadge />}
               {dir && (
                 <Badge className={cn("text-[10px]", dir === "Long" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400")}>
                   {dir}
@@ -123,7 +124,7 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
               <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
                 <Field label="Side">{position.side === "BUY" ? "Long" : "Short"}</Field>
                 <Field label="Quantity">{position.quantity ?? "—"}</Field>
-                <Field label="Entry price">{position.entryPrice != null ? fmtMoney(position.entryPrice) : "—"}</Field>
+                <Field label="Entry price">{position.entryPrice != null ? fmtMoney(position.entryPrice) : position.plannedEntryPrice != null ? fmtMoney(position.plannedEntryPrice) : "—"}</Field>
                 <Field label="Current price">{position.currentPrice != null ? fmtMoney(position.currentPrice) : "—"}</Field>
                 <Field label="Stop loss">{position.stopLoss != null ? fmtMoney(position.stopLoss) : "—"}</Field>
                 <Field label="Take profit">{position.takeProfit != null ? fmtMoney(position.takeProfit) : "—"}</Field>
