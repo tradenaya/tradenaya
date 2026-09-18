@@ -135,7 +135,7 @@ export class AutomationEngine {
       return { signal: "WAIT", analysis };
     }
 
-    step("risk", `Risk check passed — position size ${risk.positionSize} (${risk.reason ?? "within limits"}).`);
+    step("risk", `Position sizing check passed — position size ${risk.positionSize} (${risk.reason ?? "within limits"}). Live account risk gate (drawdown / daily-loss / exposure) runs after planning.`);
     return { signal: plan.action, plan, analysis };
   }
 

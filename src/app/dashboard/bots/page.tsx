@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { CandlestickChart, Check, Eye, Loader2, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
+import { CandlestickChart, Check, Eye, Loader2, MoreVertical, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
 import { toast } from "sonner";
+
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -506,7 +508,7 @@ export default function AutomationPage() {
                 const st = statusMeta(bot.status);
                 const busy = busyId === bot.id;
                 return (
-                  <div key={bot.id} className="flex items-center gap-2.5 px-3 py-2.5">
+                  <div key={bot.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-2.5">
                     {selecting && (
                       <button
                         type="button"
@@ -557,76 +559,60 @@ export default function AutomationPage() {
                       )}
                     </div>
 
-                    <Badge className={cn("shrink-0 text-[10px]", live && !offline ? "bg-emerald-500/15 text-emerald-400" : st.className)}>
-                      {live && !offline ? "Running" : st.label}
-                    </Badge>
-
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        disabled={busy}
-                        title="Details"
-                        onClick={() => setDetailBot(bot)}
-                      >
-                        <Eye size={13} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        disabled={busy}
-                        title="Edit"
-                        onClick={() => setEditBot(bot)}
-                      >
-                        <Pencil size={13} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-7 w-7 border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30 hover:text-red-200"
-                        disabled={busy || live}
-                        title={live ? "Stop the bot before deleting" : "Delete"}
-                        onClick={() => setConfirmDelete(bot)}
-                      >
-                        {busy ? <Loader2 className="animate-spin" size={13} /> : <Trash size={13} />}
-                      </Button>
-                      {live && !offline ? (
-                        <>
+                    <div className="ml-auto flex min-w-0 shrink flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+                      <Badge className={cn("shrink-0 text-[10px]", live && !offline ? "bg-emerald-500/15 text-emerald-400" : st.className)}>
+                        {live && !offline ? "Running" : st.label}
+                      </Badge>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
                           <Button
                             size="icon"
                             variant="outline"
-                            className="h-7 w-7 border-amber-500/50 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200 hidden sm:inline-flex"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
                             disabled={busy}
-                            title="Pause"
-                            onClick={() => act(bot.id, "pause")}
+                            title="Bot actions"
                           >
-                            {busy ? <Loader2 className="animate-spin" size={13} /> : <Pause size={13} />}
+                            {busy ? <Loader2 className="animate-spin" size={13} /> : <MoreVertical size={13} />}
                           </Button>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-7 w-7 border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30 hover:text-red-200 hidden sm:inline-flex"
-                            disabled={busy}
-                            title="Stop"
-                            onClick={() => setConfirmStop(bot)}
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          <DropdownMenuItem onClick={() => setDetailBot(bot)}>
+                            <Eye size={14} />
+                            Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setEditBot(bot)}>
+                            <Pencil size={14} />
+                            Edit
+                          </DropdownMenuItem>
+                          {live && !offline ? (
+                            <>
+                              <DropdownMenuItem onClick={() => act(bot.id, "pause")}>
+                                <Pause size={14} />
+                                Pause
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setConfirmStop(bot)}>
+                                <Square className="text-red-500" size={14} />
+                                Stop
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            <DropdownMenuItem onClick={() => act(bot.id, "start")}>
+                              <Play className="text-emerald-500" size={14} />
+                              Resume
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={busy || live}
+                            title={live ? "Stop the bot before deleting" : "Delete"}
+                            onClick={() => setConfirmDelete(bot)}
                           >
-                            {busy ? <Loader2 className="animate-spin" size={13} /> : <Square size={13} />}
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-7 w-7 border-emerald-500/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 hover:text-emerald-200"
-                          disabled={busy}
-                          title="Resume"
-                          onClick={() => act(bot.id, "start")}
-                        >
-                          {busy ? <Loader2 className="animate-spin" size={13} /> : <Play size={13} />}
-                        </Button>
-                      )}
+                            <Trash size={14} />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 );

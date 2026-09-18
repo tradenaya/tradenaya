@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-interface InstrumentInfo {
+export interface InstrumentInfo {
   min_leverage: string;
   max_leverage: string;
   min_base_quantity: string;
@@ -38,7 +38,7 @@ interface InstrumentInfo {
   status?: string;
 }
 
-interface CoinAnalysis {
+export interface CoinAnalysis {
   symbol: string;
   timeframe: string;
   price: number;
@@ -1138,11 +1138,11 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
   );
 }
 
-function FieldError({ children }: { children: React.ReactNode }) {
+export function FieldError({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-red-400">{children}</p>;
 }
 
-function leverageRange(instrument: InstrumentInfo | null): { min: number; max: number } {
+export function leverageRange(instrument: InstrumentInfo | null): { min: number; max: number } {
   const rawMin = Number(instrument?.min_leverage);
   const rawMax = Number(instrument?.max_leverage);
   const min = Number.isFinite(rawMin) && rawMin >= 1 ? Math.floor(rawMin) : 1;
@@ -1150,27 +1150,27 @@ function leverageRange(instrument: InstrumentInfo | null): { min: number; max: n
   return { min, max };
 }
 
-function leverageValue(current: string, instrument: InstrumentInfo | null): number {
+export function leverageValue(current: string, instrument: InstrumentInfo | null): number {
   const { min, max } = leverageRange(instrument);
   const value = Number(current);
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
-function leveragePercentValue(current: string): number {
+export function leveragePercentValue(current: string): number {
   const value = Number(current);
   if (!Number.isFinite(value)) return 50;
   return Math.min(100, Math.max(1, Math.round(value)));
 }
 
-function clampLeverage(current: string, instrument: InstrumentInfo): string {
+export function clampLeverage(current: string, instrument: InstrumentInfo): string {
   const max = Number(instrument.max_leverage);
   const value = Number(current);
   if (Number.isFinite(value) && Number.isFinite(max) && value > max) return String(max);
   return current;
 }
 
-function SignalBadge({ signal, confidence }: { signal: CoinAnalysis["signal"]; confidence: number }) {
+export function SignalBadge({ signal, confidence }: { signal: CoinAnalysis["signal"]; confidence: number }) {
   if (signal === "BUY") {
     return (
       <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">
@@ -1190,7 +1190,7 @@ function SignalBadge({ signal, confidence }: { signal: CoinAnalysis["signal"]; c
   );
 }
 
-function FactorChip({ label, value }: { label: string; value: number }) {
+export function FactorChip({ label, value }: { label: string; value: number }) {
   const percent = Math.round((Number.isFinite(value) ? value : 0) * 100);
   const color = percent > 0 ? "text-emerald-400" : percent < 0 ? "text-red-400" : "text-muted-foreground";
   return (
@@ -1201,7 +1201,7 @@ function FactorChip({ label, value }: { label: string; value: number }) {
   );
 }
 
-function InstrumentStatusBadge({
+export function InstrumentStatusBadge({
   symbol,
   instrument,
   price,

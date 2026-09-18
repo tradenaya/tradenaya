@@ -18,6 +18,7 @@ import type { CycleResult, SchedulerConfig, SchedulerState } from "./SchedulerTy
 import { clientOrderId } from "@/automation/executor/order-id";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
+import { computeAccountEquity, resolveDrawdownPeak } from "@/automation/risk/account-equity";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
 
@@ -384,8 +385,8 @@ export class AnalysisCycleRunner {
   }
 
   private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number }> {
-    const [walletBalance, exchangePositions, openOrders, daily] = await Promise.all([
-      this.deps.client.getWalletBalance(bot.userId).catch(() => null),
+    const [wallet, exchangePositions, openOrders, daily] = await Promise.all([
+      this.deps.client.getWalletSnapshot(bot.userId).catch(() => null),
       this.deps.client.getPositions(bot.userId).catch(() => []),
       this.deps.client.getOpenOrders(bot.userId).catch(() => []),
       this.deps.store.getDailyStats(bot.userId),
@@ -394,29 +395,32 @@ export class AnalysisCycleRunner {
     const runningBots = await this.deps.lifecycle.countActiveBotsForUser(bot.userId);
     const isPercent = config.capitalMode === "percent";
     const fixedCapital = Number(config.capital) || 0;
+    const walletAvailable = wallet?.available ?? null;
     // percent mode MUST size against the live wallet; it must never silently
     // fall back to a stale fixed capital (the root cause of "uses last amount").
-    const balance = isPercent ? (walletBalance ?? 0) : (walletBalance ?? fixedCapital);
+    const balance = isPercent ? (walletAvailable ?? 0) : (walletAvailable ?? fixedCapital);
     const allocatedCapital =
       config.capitalMode === "percent"
         ? balance * ((Number(config.walletPercent) || 0) / 100)
         : fixedCapital;
 
     // --- Persistent peak-equity tracking for drawdown protection ---
-    const equity = balance;
-    const persistedPeak = bot.peakEquity ?? null;
-    let peakForDrawdown: number;
-    if (walletBalance != null && equity > 0) {
-      // Wallet fetch succeeded — update peak if equity reached a new high.
-      const newPeak = persistedPeak != null ? Math.max(persistedPeak, equity) : equity;
-      if (newPeak !== persistedPeak) {
-        void this.deps.lifecycle.updatePeakEquity(bot.id, newPeak);
-      }
-      peakForDrawdown = newPeak;
-    } else {
-      // Wallet fetch failed — use persisted peak (never reset to current equity).
-      peakForDrawdown = persistedPeak ?? equity;
+    // Equity is the TRUE account equity (wallet total balance + unrealized PnL
+    // of live positions) — NEVER total_available_balance, which falls whenever
+    // margin is locked in a position even when the account has not suffered an
+    // equivalent loss. A realised-loss-free drop in available balance must not
+    // by itself trip the drawdown gate.
+    const equity = computeAccountEquity({ wallet, positions: exchangePositions });
+    const peakInfo = resolveDrawdownPeak({
+      equity,
+      persistedPeak: bot.peakEquity ?? null,
+      persistedBasis: bot.peakEquityBasis ?? "available_balance",
+    });
+    if (peakInfo.needsPersist && peakInfo.peak != null) {
+      void this.deps.lifecycle.updatePeakEquity(bot.id, peakInfo.peak, peakInfo.basis);
     }
+    const peakForDrawdown = peakInfo.peak;
+    const equityForRisk = equity ?? 0;
 
     const input: RiskManagerInput = {
       config: {
@@ -431,7 +435,7 @@ export class AnalysisCycleRunner {
         maxDrawdownPct: 15,
         minRiskRewardRatio: config.minRiskRewardRatio ?? 2,
       },
-      wallet: { balance, equity, peakBalance: peakForDrawdown },
+      wallet: { balance, equity: equityForRisk, peakBalance: peakForDrawdown ?? equityForRisk },
       capital: {
         mode: config.capitalMode,
         amount: config.capitalMode === "fixed" ? config.capital : undefined,

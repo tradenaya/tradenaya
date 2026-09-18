@@ -187,6 +187,14 @@ export class BotScheduler {
       name: config.name,
       configJson: JSON.stringify(config),
     });
+    // Keep the DB symbol column in sync when a fixed-symbol bot's market changes.
+    // Auto-select bots re-sync their own live symbol each cycle via updateSelectedCoin.
+    if (!config.autoSelect) {
+      const symbol = String(config.symbol ?? "").trim();
+      if (symbol && !/^(AUTO|auto-select mode)$/i.test(symbol)) {
+        await this.lifecycle.updateSymbol(botId, symbol);
+      }
+    }
     await this.events.emit({ type: "BOT_CONFIG_UPDATED", botId, userId, message: `Bot ${botId} configuration updated` });
     const updated = await this.lifecycle.getBotById(botId);
     if (!updated) throw new Error("Bot not found after update");

@@ -261,3 +261,195 @@ export function evaluateLiquidationSafety(input: LiquidationSafetyInput): Liquid
       : `Stop Loss would be beyond the liquidation price (~${boundaryLabel}) at the selected ${leverage}x leverage — the stop (${stopLoss}) cannot be reached before liquidation. Rejecting the trade.`,
   };
 }
+
+/**
+ * THE single authoritative formula for the maximum liquidation-safe leverage
+ * for a given stop distance, maintenance-margin rate and safety buffer.
+ *
+ * The mandatory gate invariant is |entry − SL| / entry < 1/leverage − mm − buffer,
+ * i.e. leverage < 1 / (stopDistanceFraction + mm + buffer). The largest safe
+ * whole leverage is the floor of that bound. This helper backs BOTH:
+ *   - the AUTO resolver's conservative cap (coin-auto-selector.ts), which must
+ *     assume the widest stop the planner may place; and
+ *   - the executor's post-plan downshift (order-executor.ts), which uses the
+ *     REAL planned entry + SL.
+ *
+ * Keeping the bound in ONE place means the two callers can never disagree.
+ */
+export function maxSafeLeverageFromStopDistance(
+  stopDistanceFraction: number,
+  maintenanceMarginPct: number = SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
+  safetyBufferPct: number = SYSTEM_LIQUIDATION_SAFETY_BUFFER_PCT,
+): number | null {
+  const stop = Math.max(0, Number(stopDistanceFraction) || 0);
+  if (!(stop > 0)) return null;
+  const mm = Math.max(0, Number(maintenanceMarginPct) || 0) / 100;
+  const buffer = Math.max(0, Number(safetyBufferPct) || 0) / 100;
+  const denominator = stop + mm + buffer;
+  if (!(denominator > 0)) return null;
+  return Math.floor(1 / denominator);
+}
+
+export interface MaxSafeStopLeverageInput {
+  side: "BUY" | "SELL";
+  entryPrice: number | null;
+  stopLoss: number | null;
+  /** Per-symbol maintenance-margin rate (as % of notional) when known, else the trusted system fallback. */
+  maintenanceMarginPct?: number | null;
+  /** System safety buffer (as % of entry price). Defaults to SYSTEM_LIQUIDATION_SAFETY_BUFFER_PCT. */
+  safetyBufferPct?: number | null;
+}
+
+/**
+ * Maximum liquidation-safe leverage for a REAL planned entry + SL. Unlike the
+ * AUTO resolver (which must be conservative about a future stop), this uses the
+ * actual stop distance of the plan that is about to be submitted. Returns null
+ * when the boundary cannot be determined (fail safe).
+ */
+export function maxSafeLeverageForStop(input: MaxSafeStopLeverageInput): number | null {
+  const sideUp = String(input.side).toUpperCase();
+  if (sideUp !== "BUY" && sideUp !== "SELL") return null;
+  const entry = Number(input.entryPrice);
+  const stop = Number(input.stopLoss);
+  if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(stop) || stop <= 0) return null;
+  // Direction sanity mirrors evaluateLiquidationSafety.
+  if (sideUp === "BUY" && stop >= entry) return null;
+  if (sideUp === "SELL" && stop <= entry) return null;
+  const stopDistanceFraction = Math.abs(entry - stop) / entry;
+  return maxSafeLeverageFromStopDistance(
+    stopDistanceFraction,
+    input.maintenanceMarginPct ?? SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
+    input.safetyBufferPct ?? SYSTEM_LIQUIDATION_SAFETY_BUFFER_PCT,
+  );
+}
+
+/** Default leverage increment assumed when the exchange does not publish one. */
+export const LEVERAGE_STEP_DEFAULT = 1;
+
+/** Valid leverage increment for a symbol; the exchange enforces multiples of it. */
+export function leverageStepOfInstrument(instrument: Record<string, unknown> | null): number {
+  const step = Number(instrument?.leverage_step);
+  return Number.isFinite(step) && step >= 1 ? Math.floor(step) : LEVERAGE_STEP_DEFAULT;
+}
+
+/** Per-symbol maintenance-margin rate (as a percent of notional) when the exchange publishes it, otherwise the trusted system fallback. */
+export function maintenanceMarginPctOfInstrument(instrument: Record<string, unknown> | null): number {
+  const m = Number(instrument?.maint_margin_rate);
+  if (Number.isFinite(m) && m > 0) return m;
+  return SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT;
+}
+
+export interface InstrumentLeverageConstraints {
+  minLeverage: number;
+  maxLeverage: number | null;
+  leverageStep: number;
+}
+
+/** Normalized exchange leverage constraints (min / max / step) for a symbol. */
+export function leverageConstraintsOfInstrument(instrument: Record<string, unknown> | null): InstrumentLeverageConstraints {
+  const min = Number(instrument?.min_leverage);
+  const max = Number(instrument?.max_leverage);
+  return {
+    minLeverage: Number.isFinite(min) && min >= 1 ? Math.floor(min) : 1,
+    maxLeverage: Number.isFinite(max) && max >= 1 ? Math.floor(max) : null,
+    leverageStep: leverageStepOfInstrument(instrument),
+  };
+}
+
+export interface ResolveSafeLeverageInput {
+  side: "BUY" | "SELL";
+  entryPrice: number | null;
+  stopLoss: number | null;
+  /** The configured/resolved leverage — treated as a CEILING, never to be exceeded. */
+  requestedLeverage: number;
+  /** Preferred source: the instrument's maint_margin_rate; falls back to the system constant. */
+  maintenanceMarginPct?: number | null;
+  safetyBufferPct?: number | null;
+  minLeverage?: number | null;
+  maxLeverage?: number | null;
+  leverageStep?: number | null;
+}
+
+export interface ResolveSafeLeverageResult {
+  ok: boolean;
+  /** Final chosen leverage (≤ requested, ≤ safe max, step-rounded DOWN, ≥ exchange min), or null. */
+  leverage: number | null;
+  /** The mathematical safe ceiling before min/max/step normalization. */
+  maxSafeLeverage: number | null;
+  reason: string;
+}
+
+/**
+ * Resolve the highest leverage that is liquidation-safe for the REAL planned
+ * stop while honoring every exchange constraint:
+ *   - never above the requested/configured leverage (ceiling, never a floor);
+ *   - never above the exchange max;
+ *   - never above the liquidation-safe maximum for the actual stop;
+ *   - always rounded DOWN to a valid exchange step (never up);
+ *   - never below the exchange minimum — if the step-rounded candidate sits
+ *     below the minimum, no valid leverage exists (fail safe).
+ */
+export function resolveSafeLeverage(input: ResolveSafeLeverageInput): ResolveSafeLeverageResult {
+  const requested = Number(input.requestedLeverage);
+  if (!Number.isFinite(requested) || requested <= 0) {
+    return { ok: false, leverage: null, maxSafeLeverage: null, reason: "Requested leverage is missing or invalid." };
+  }
+
+  const maxSafe = maxSafeLeverageForStop({
+    side: input.side,
+    entryPrice: input.entryPrice,
+    stopLoss: input.stopLoss,
+    maintenanceMarginPct: input.maintenanceMarginPct ?? SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
+    safetyBufferPct: input.safetyBufferPct ?? SYSTEM_LIQUIDATION_SAFETY_BUFFER_PCT,
+  });
+  if (maxSafe == null) {
+    return {
+      ok: false,
+      leverage: null,
+      maxSafeLeverage: null,
+      reason: "Cannot determine the liquidation-safe leverage for the planned stop.",
+    };
+  }
+  if (!(maxSafe >= 1)) {
+    return {
+      ok: false,
+      leverage: null,
+      maxSafeLeverage: maxSafe,
+      reason: `No liquidation-safe leverage exists for the planned stop (safe maximum ${maxSafe}x).`,
+    };
+  }
+
+  const minLeverage = Number.isFinite(Number(input.minLeverage)) && Number(input.minLeverage)! >= 1 ? Math.floor(Number(input.minLeverage)) : 1;
+  const maxLeverage = Number.isFinite(Number(input.maxLeverage)) && Number(input.maxLeverage)! >= 1 ? Math.floor(Number(input.maxLeverage)) : null;
+  const step = Number.isFinite(Number(input.leverageStep)) && Number(input.leverageStep)! >= 1 ? Math.floor(Number(input.leverageStep)) : LEVERAGE_STEP_DEFAULT;
+
+  const ceiling = maxLeverage != null ? Math.min(requested, maxLeverage, maxSafe) : Math.min(requested, maxSafe);
+
+  // Always round DOWN to a valid exchange step; never round up.
+  let candidate = Math.floor(ceiling / step) * step;
+  if (candidate < minLeverage) {
+    // The step-rounded candidate sits below the exchange minimum. Bumping it up
+    // to the minimum could exceed the safe ceiling — only allowed when it stays
+    // within every bound; otherwise the trade is rejected.
+    candidate = minLeverage;
+  }
+
+  const overSafe = candidate > maxSafe;
+  const overRequested = candidate > requested;
+  const overMax = maxLeverage != null && candidate > maxLeverage;
+  if (candidate <= 0 || overSafe || overRequested || overMax) {
+    return {
+      ok: false,
+      leverage: null,
+      maxSafeLeverage: maxSafe,
+      reason: `No liquidation-safe leverage at or above the ${minLeverage}x exchange minimum can make the planned stop safe (safe maximum ${maxSafe}x).`,
+    };
+  }
+
+  return {
+    ok: true,
+    leverage: candidate,
+    maxSafeLeverage: maxSafe,
+    reason: `Liquidation-safe leverage resolved to ${candidate}x (safe maximum ${maxSafe}x).`,
+  };
+}

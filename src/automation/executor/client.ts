@@ -81,6 +81,30 @@ export interface ExchangePosition {
   positionMargin: number | null;
 }
 
+/**
+ * Normalized USDT futures wallet from /futures/wallet_balance.
+ *
+ * CoinSwitch semantics (verified from the API reference):
+ *   total_balance = total_available_balance + total_blocked_balance
+ * i.e. `total` is the WALLET balance and does NOT include unrealized PnL of
+ * open positions. True account equity therefore equals `total` plus the
+ * unrealized PnL of live positions — unless the wallet endpoint itself exposes
+ * an authoritative equity field, which is preferred when present.
+ *
+ * `available` (total_available_balance) is the free balance usable for new
+ * orders; it falls whenever margin is locked in a position/order, so it is NOT
+ * equity and must never be used as one.
+ */
+export interface FuturesWalletSnapshot {
+  available: number | null;
+  total: number | null;
+  blocked: number | null;
+  positionMargin: number | null;
+  openOrderMargin: number | null;
+  /** Authoritative total account equity, when the wallet exposes it directly. */
+  equity: number | null;
+}
+
 /** Normalized closed (terminal) futures order returned by /futures/orders/closed. */
 export interface ClosedOrderRecord {
   orderId: string | null;
@@ -296,20 +320,27 @@ export class CoinSwitchClient {
     if (symbol) params.symbol = symbol.toLowerCase();
     const data = await this.call("GET", "/futures/positions", params, userId);
     const rows = this.extractList(data);
-    return rows.map((p: any) => ({
-      symbol: p.symbol ?? symbol,
-      side: p.side ?? p.position_side ?? null,
-      quantity: Number(p.quantity ?? p.size ?? p.position_size ?? 0),
-      entryPrice: Number(p.entry_price ?? p.avg_entry_price ?? null) || null,
-      markPrice: Number(p.mark_price ?? null) || null,
-      unrealizedPnl: Number(p.unrealised_pnl ?? p.unrealized_pnl ?? p.pnl ?? null) || null,
-      realizedPnl: Number(p.realised_pnl ?? p.realized_pnl ?? null) || null,
-      leverage: Number(p.leverage ?? null) || null,
-      positionId: p.position_id ?? null,
-      liquidationPrice: Number(p.liquidation_price ?? null) || null,
-      maintMargin: Number(p.maint_margin ?? null) || null,
-      positionMargin: Number(p.position_margin ?? null) || null,
-    }));
+    return rows.map((p: any) => {
+      const unrealizedRaw = p.unrealised_pnl ?? p.unrealized_pnl ?? p.pnl ?? null;
+      const unrealizedPnl =
+        unrealizedRaw == null || unrealizedRaw === "" || !Number.isFinite(Number(unrealizedRaw))
+          ? null
+          : Number(unrealizedRaw);
+      return {
+        symbol: p.symbol ?? symbol,
+        side: p.side ?? p.position_side ?? null,
+        quantity: Number(p.quantity ?? p.size ?? p.position_size ?? 0),
+        entryPrice: Number(p.entry_price ?? p.avg_entry_price ?? null) || null,
+        markPrice: Number(p.mark_price ?? null) || null,
+        unrealizedPnl,
+        realizedPnl: Number(p.realised_pnl ?? p.realized_pnl ?? null) || null,
+        leverage: Number(p.leverage ?? null) || null,
+        positionId: p.position_id ?? null,
+        liquidationPrice: Number(p.liquidation_price ?? null) || null,
+        maintMargin: Number(p.maint_margin ?? null) || null,
+        positionMargin: Number(p.position_margin ?? null) || null,
+      };
+    });
   }
 
   async getOpenOrders(userId: number, symbol?: string): Promise<ExchangeOrder[]> {
@@ -466,6 +497,49 @@ export class CoinSwitchClient {
         null,
     );
     return Number.isFinite(balance) ? balance : null;
+  }
+
+  /**
+   * Read the normalized USDT futures wallet (available / total / blocked /
+   * position margin / open-order margin / authoritative equity).
+   *
+   * Prefer this over `getWalletBalance` anywhere ACCOUNT EQUITY matters (e.g.
+   * drawdown protection). `getWalletBalance` returns the *available* balance,
+   * which is the correct input for margin allocation/preflight but is NOT
+   * equity — available falls whenever margin is locked in a position even when
+   * the account has not lost money.
+   */
+  async getWalletSnapshot(userId: number): Promise<FuturesWalletSnapshot | null> {
+    const data = await this.call("GET", "/futures/wallet_balance", { exchange: "EXCHANGE_2" }, userId);
+    const raw = data?.data ?? data;
+    const usdt = Array.isArray(raw?.base_asset_balances)
+      ? raw.base_asset_balances.find(
+          (b: { base_asset?: unknown }) => String(b?.base_asset).toUpperCase() === "USDT",
+        )
+      : null;
+    const balances = (usdt?.balances ?? raw ?? {}) as Record<string, unknown>;
+    const num = (value: unknown): number | null => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+    // Authoritative equity keys — if the wallet response reports equity
+    // directly, prefer it and never add position PnL on top (no double count).
+    const equity = num(
+      balances.equity ??
+        balances.total_equity ??
+        balances.account_equity ??
+        balances.totalEquity ??
+        raw.total_equity ??
+        raw.equity,
+    );
+    return {
+      available: num(balances.total_available_balance ?? balances.available_balance ?? balances.balance),
+      total: num(balances.total_balance ?? balances.balance),
+      blocked: num(balances.total_blocked_balance),
+      positionMargin: num(balances.total_position_margin),
+      openOrderMargin: num(balances.total_open_order_margin),
+      equity,
+    };
   }
 
   /** Fetch instrument info (min/max leverage, quantity rules) for one symbol. */

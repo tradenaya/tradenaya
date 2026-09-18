@@ -11,7 +11,12 @@ import type {
   OrderExecutorResult,
 } from "./types";
 import type { TradePlan } from "@/automation/planner/types";
-import { evaluateLiquidationSafety } from "@/automation/risk/liquidation-safety";
+import {
+  evaluateLiquidationSafety,
+  leverageConstraintsOfInstrument,
+  maintenanceMarginPctOfInstrument,
+  resolveSafeLeverage,
+} from "@/automation/risk/liquidation-safety";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import {
   telegramEntryOrder,
@@ -151,28 +156,88 @@ export class OrderExecutorService {
 
   async execute(input: OrderExecutorInput): Promise<OrderExecutorResult> {
     const symbol = input.plan.symbol ?? "";
+    const side = (input.plan.side ?? input.plan.action) as "BUY" | "SELL";
+    const entryPrice = input.plan.limitPrice ?? input.plan.entryPrice ?? null;
+
+    // Fetch the instrument once up front — it drives BOTH order normalization
+    // and the liquidation-safe leverage resolution (exchange min/max/step and
+    // the authoritative per-symbol maintenance margin when available).
+    const instrument = await this.client.getInstrumentInfo(input.userId, symbol).catch(() => null);
+
+    // The configured/resolved leverage is a CEILING, not a mandate. First run
+    // the mandatory liquidation-safety check at the requested leverage; if the
+    // planned SL is not safely reachable before liquidation, downshift to the
+    // highest exchange-valid leverage that makes the SAME planned SL safe. The
+    // gate is never bypassed or weakened: when no such leverage exists the
+    // trade is cancelled, and the final leverage is re-verified below.
+    let leverage = input.leverage;
+    const unsafeAtRequested = evaluateLiquidationSafety({
+      side,
+      entryPrice,
+      stopLoss: input.plan.stopLoss,
+      leverage,
+    });
+    if (!unsafeAtRequested.ok) {
+      const constraints = leverageConstraintsOfInstrument(instrument);
+      const resolved = resolveSafeLeverage({
+        side,
+        entryPrice,
+        stopLoss: input.plan.stopLoss,
+        requestedLeverage: leverage,
+        minLeverage: constraints.minLeverage,
+        maxLeverage: constraints.maxLeverage,
+        leverageStep: constraints.leverageStep,
+        maintenanceMarginPct: maintenanceMarginPctOfInstrument(instrument),
+      });
+      if (!resolved.ok || resolved.leverage == null || resolved.leverage >= leverage) {
+        const message = `Trade cancelled: no valid leverage can make the planned SL safe before liquidation. ${resolved.reason}`;
+        await this.notify("ENTRY_CANCELLED", input, 0, message);
+        return {
+          success: false,
+          executionId: null,
+          state: "CANCELLED",
+          entryOrderId: null,
+          slOrderId: null,
+          tpOrderId: null,
+          filledQuantity: null,
+          remainingQuantity: null,
+          protectiveStatus: "NONE",
+          requiresEmergencyProtection: false,
+          message,
+        };
+      }
+      leverage = resolved.leverage;
+      console.warn(
+        `Liquidation safety: requested leverage ${input.leverage}x unsafe for planned SL; downshifting to ${leverage}x. ${resolved.reason}`,
+      );
+    }
+
     if (symbol) {
       // CoinSwitch requires leverage to be configured per contract before the
       // first order on a symbol — otherwise order placement fails with
-      // "subaccount association not found". This call is idempotent.
-      await this.client.setLeverage(input.userId, symbol, input.leverage);
+      // "subaccount association not found". Always applied with the FINAL
+      // effective leverage; this call is idempotent.
+      await this.client.setLeverage(input.userId, symbol, leverage);
     }
 
-    const instrument = await this.client.getInstrumentInfo(input.userId, input.plan.symbol ?? "").catch(() => null);
-    const normalized = normalizeEntryOrder(instrument, input);
+    // Re-derive the effective input so normalization, margin and telemetry all
+    // compute against the FINAL leverage, never the originally requested one.
+    const effectiveInput: OrderExecutorInput = { ...input, leverage };
+    const normalized = normalizeEntryOrder(instrument, effectiveInput);
 
-    // Liquidation-safety gate: re-verify at the point of no return. Once the
-    // entry order is on the book the stop-loss path cannot be changed, so a
-    // stop that sits beyond the liquidation boundary MUST block the entry here
-    // (after liquidation the placeholder but live SL keeps draining the account).
-    // This is MANDATORY and unconditional: ANY !ok verdict — including a boundary
-    // that cannot be determined — rejects the trade (fail safe), with no
-    // configuration able to disable or weaken the check.
+    // Liquidation-safety gate: re-verify at the point of no return using the
+    // FINAL effective leverage. Once the entry order is on the book the
+    // stop-loss path cannot be changed, so a stop that sits beyond the
+    // liquidation boundary MUST block the entry here (after liquidation the
+    // placeholder but live SL keeps draining the account). This is MANDATORY
+    // and unconditional: ANY !ok verdict — including a boundary that cannot be
+    // determined — rejects the trade (fail safe), with no configuration able to
+    // disable or weaken the check.
     const liq = evaluateLiquidationSafety({
-      side: (input.plan.side ?? input.plan.action) as "BUY" | "SELL",
-      entryPrice: normalized.plan?.limitPrice ?? input.plan.limitPrice,
+      side,
+      entryPrice: normalized.plan?.limitPrice ?? entryPrice,
       stopLoss: input.plan.stopLoss,
-      leverage: input.leverage,
+      leverage,
     });
     if (!liq.ok) {
       const message = `Order blocked by the liquidation-safety gate: ${liq.reason}`;
@@ -191,13 +256,16 @@ export class OrderExecutorService {
         message,
       };
     }
+    console.log(
+      `Liquidation safety passed at ${leverage}x — submitting LIMIT entry.`,
+    );
 
     // Preflight margin guard: verify the order's required exchange margin is
     // covered by the account's *available* (free, unlocked) balance. Without
     // this, the exchange silently rejects with a cryptic "Insufficient balance"
     // that becomes a confusing bot.lastError, even though the user sees USDT in
     // their wallet (some of which can be locked in open orders/positions).
-    const preflight = await this.checkFreeMargin(input, normalized);
+    const preflight = await this.checkFreeMargin(effectiveInput, normalized);
     if (!preflight.ok) {
       await this.notify("ENTRY_CANCELLED", input, 0, preflight.message);
       return {
@@ -244,7 +312,7 @@ export class OrderExecutorService {
       stopLoss: input.plan.stopLoss,
       takeProfit: input.plan.takeProfit,
       quantity: normalized.ok && normalized.quantity !== undefined ? normalized.quantity : input.quantity,
-      leverage: input.leverage,
+      leverage,
       expiresAt: input.plan.expiryTime,
     });
 
@@ -286,7 +354,7 @@ export class OrderExecutorService {
         type: input.plan.entryType === "LIMIT" && input.plan.limitPrice ? "LIMIT" : "MARKET",
         entryPrice: normalized.plan?.limitPrice ?? input.plan.limitPrice,
         quantity: normalized.quantity,
-        leverage: input.leverage,
+        leverage,
       }));
 
       const poll = await this.lifecycle.pollEntryUntilFilled(
@@ -325,8 +393,8 @@ export class OrderExecutorService {
         side: input.plan.side ?? input.plan.action,
         entry: normalized.plan?.limitPrice ?? input.plan.limitPrice ?? input.plan.entryPrice,
         quantity: openedQty,
-        leverage: input.leverage,
-        margin: input.plan.limitPrice && openedQty ? (openedQty * input.plan.limitPrice) / input.leverage : undefined,
+        leverage,
+        margin: input.plan.limitPrice && openedQty ? (openedQty * input.plan.limitPrice) / leverage : undefined,
       }));
 
       const execution = await this.store.getExecution(executionId);

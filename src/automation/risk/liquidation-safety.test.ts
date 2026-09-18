@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { evaluateLiquidationSafety, estimateLiquidationPrice, validateStopLossBoundary } from "@/automation/risk/liquidation-safety";
+import {
+  evaluateLiquidationSafety,
+  estimateLiquidationPrice,
+  validateStopLossBoundary,
+  maxSafeLeverageFromStopDistance,
+  maxSafeLeverageForStop,
+  resolveSafeLeverage,
+  leverageConstraintsOfInstrument,
+  maintenanceMarginPctOfInstrument,
+  leverageStepOfInstrument,
+  LEVERAGE_STEP_DEFAULT,
+  SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
+} from "@/automation/risk/liquidation-safety";
 
 describe("estimateLiquidationPrice", () => {
   it("places a LONG liquidation boundary below the entry", () => {
@@ -249,5 +261,216 @@ describe("validateStopLossBoundary", () => {
     expect(result.ok).toBe(true);
     // bufferBase = real = 90 → buffer = 90 * 0.003 = 0.27; minSafe = 90.27.
     expect(result.minSafeStopLoss).toBeCloseTo(90.27, 6);
+  });
+});
+
+describe("maxSafeLeverageFromStopDistance", () => {
+  it("is the floor of 1 / (stopDistance + maint margin + safety buffer)", () => {
+    // stop 5% + maint 0.65% + buffer 0.3% = 5.95% → 1/0.0595 = 16.8 → 16.
+    expect(maxSafeLeverageFromStopDistance(0.05)).toBe(16);
+    // stop 1% → 1/0.0195 = 51.28 → 51.
+    expect(maxSafeLeverageFromStopDistance(0.01)).toBe(51);
+  });
+
+  it("honors a per-symbol maintenance margin when provided", () => {
+    // stop 5% + maint 0.4% + buffer 0.3% = 5.7% → 1/0.057 = 17.54 → 17.
+    expect(maxSafeLeverageFromStopDistance(0.05, 0.4)).toBe(17);
+    expect(maxSafeLeverageFromStopDistance(0.05, SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT)).toBe(16);
+  });
+
+  it("returns null for a non-positive stop distance", () => {
+    expect(maxSafeLeverageFromStopDistance(0)).toBeNull();
+    expect(maxSafeLeverageFromStopDistance(-1)).toBeNull();
+  });
+});
+
+describe("maxSafeLeverageForStop", () => {
+  it("computes the safe ceiling from the REAL planned entry + SL", () => {
+    // 5% stop → 16x. This is the executor's authoritative post-plan ceiling.
+    expect(maxSafeLeverageForStop({ side: "BUY", entryPrice: 100, stopLoss: 95 })).toBe(16);
+  });
+
+  it("prefers the per-symbol maintenance margin", () => {
+    expect(maxSafeLeverageForStop({ side: "BUY", entryPrice: 100, stopLoss: 95, maintenanceMarginPct: 0.4 })).toBe(17);
+  });
+
+  it("returns null when the boundary cannot be determined (fail safe)", () => {
+    expect(maxSafeLeverageForStop({ side: "BUY", entryPrice: null, stopLoss: 95 })).toBeNull();
+    expect(maxSafeLeverageForStop({ side: "BUY", entryPrice: 100, stopLoss: null })).toBeNull();
+    // SL on the wrong side of the entry for a LONG.
+    expect(maxSafeLeverageForStop({ side: "BUY", entryPrice: 100, stopLoss: 105 })).toBeNull();
+    expect(maxSafeLeverageForStop({ side: "SELL", entryPrice: 100, stopLoss: 95 })).toBeNull();
+  });
+});
+
+describe("resolveSafeLeverage", () => {
+  // Requested 65x with a 5% stop: the safe ceiling is 16.8→16x. The resolver
+  // must prefer a valid lower leverage over silently cancelling.
+  it("downshifts from an unsafe requested leverage to a safe lower one", () => {
+    const result = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.leverage).toBe(16);
+    expect(result.maxSafeLeverage).toBe(16);
+    expect(evaluateLiquidationSafety({ side: "BUY", entryPrice: 100, stopLoss: 95, leverage: result.leverage! }).ok).toBe(true);
+  });
+
+  it("rounds a fractional safe ceiling DOWN to a valid step, never up", () => {
+    // Safe ceiling 16.8x with step 1 → 16 (never 17). With step 5 → 15.
+    const step1 = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+    });
+    expect(step1.leverage).toBe(16);
+
+    const step5 = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 5,
+    });
+    // floor(16/5)×5 = 15 — rounded DOWN to the exchange step, never up.
+    expect(step5.leverage).toBe(15);
+    expect(step5.leverage! % 5).toBe(0);
+  });
+
+  it("never raises leverage above the requested/configured value", () => {
+    // The safe ceiling (51x for a 1% stop) exceeds the 20x request — the
+    // configured 20x must be preserved, never increased.
+    const result = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 99,
+      requestedLeverage: 20,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.leverage).toBe(20);
+    expect(result.maxSafeLeverage).toBe(51);
+    expect(evaluateLiquidationSafety({ side: "BUY", entryPrice: 100, stopLoss: 99, leverage: 20 }).ok).toBe(true);
+  });
+
+  it("rejects when only a leverage below the exchange minimum would be safe", () => {
+    // 5% stop → safe 16x, but the exchange minimum is 20x: no valid leverage
+    // exists, so the resolver must reject (never raise into an unsafe range).
+    const result = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 20,
+      maxLeverage: 100,
+      leverageStep: 1,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.leverage).toBeNull();
+    expect(result.maxSafeLeverage).toBe(16);
+  });
+
+  it("rejects when the boundary cannot be determined (fail safe)", () => {
+    const result = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: null,
+      stopLoss: 95,
+      requestedLeverage: 65,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.leverage).toBeNull();
+  });
+
+  it("rejects an invalid/zero requested leverage", () => {
+    const result = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.leverage).toBeNull();
+  });
+
+  it("uses the per-symbol maintenance margin when available (higher ceiling)", () => {
+    const withMaint = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+      maintenanceMarginPct: 0.4,
+    });
+    expect(withMaint.leverage).toBe(17);
+    const fallback = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 95,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+      maintenanceMarginPct: SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
+    });
+    expect(fallback.leverage).toBe(16);
+  });
+
+  it("keeps the liquidation gate effective at the exact safe boundary (re-check still decides)", () => {
+    // stop 5.3% lands exactly on 1/16 − 0.65% − 0.3%: the resolver's ceiling
+    // is still 16x, but the mandatory gate at 16x has ZERO margin → must fail
+    // (the executor's final re-check is what blocks this knife-edge case).
+    const resolved = resolveSafeLeverage({
+      side: "BUY",
+      entryPrice: 100,
+      stopLoss: 94.7,
+      requestedLeverage: 65,
+      minLeverage: 1,
+      maxLeverage: 100,
+      leverageStep: 1,
+    });
+    expect(resolved.ok).toBe(true);
+    expect(resolved.leverage).toBe(16);
+    const gate = evaluateLiquidationSafety({ side: "BUY", entryPrice: 100, stopLoss: 94.7, leverage: resolved.leverage! });
+    expect(gate.ok).toBe(false);
+  });
+});
+
+describe("instrument leverage helpers", () => {
+  it("parses min/max/step from the instrument and falls back to safe defaults", () => {
+    expect(leverageConstraintsOfInstrument({ min_leverage: "2", max_leverage: "50", leverage_step: "5" })).toEqual({
+      minLeverage: 2,
+      maxLeverage: 50,
+      leverageStep: 5,
+    });
+    expect(leverageConstraintsOfInstrument(null)).toEqual({ minLeverage: 1, maxLeverage: null, leverageStep: LEVERAGE_STEP_DEFAULT });
+    expect(leverageConstraintsOfInstrument({ min_leverage: "0", max_leverage: "0" })).toEqual({ minLeverage: 1, maxLeverage: null, leverageStep: 1 });
+  });
+
+  it("prefers the per-symbol maintenance margin and falls back to the system constant", () => {
+    expect(maintenanceMarginPctOfInstrument({ maint_margin_rate: "0.4" })).toBe(0.4);
+    expect(maintenanceMarginPctOfInstrument({ maint_margin_rate: "0" })).toBe(SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT);
+    expect(maintenanceMarginPctOfInstrument(null)).toBe(SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT);
+  });
+
+  it("reads the leverage step or defaults to 1", () => {
+    expect(leverageStepOfInstrument({ leverage_step: "3" })).toBe(3);
+    expect(leverageStepOfInstrument(null)).toBe(1);
+    expect(leverageStepOfInstrument({ leverage_step: "0.5" })).toBe(1);
   });
 });
