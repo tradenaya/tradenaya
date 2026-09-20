@@ -8,7 +8,7 @@ import type { AutomationConfig, StrategySignal } from "@/automation/types";
 import type { StrategyContext, StrategyDecision } from "@/automation/strategy/types";
 import type { MarketDataService } from "@/automation/market/market-data-service";
 import { normalizeInterval } from "@/automation/market/normalizer";
-import { summarizeDecision } from "@/automation/strategy/tradiaura/humanize";
+import { summarizeDecision } from "@/automation/strategy/tradenaya/humanize";
 import type { AnalysisPhase } from "@/automation/scheduler/LiveActivityHub";
 
 export type EngineStep = { phase: AnalysisPhase; message: string; detail?: Record<string, unknown> };
@@ -55,7 +55,7 @@ export class AutomationEngine {
     step("indicators", "Computing indicators (EMA, RSI, MACD, ATR, ADX, Bollinger, VWAP, SuperTrend)…");
     const indicators = this.indicatorEngine.compute(candles);
 
-    const strategy = this.strategies.getStrategy("TradiAuraSmartV1") ?? this.strategies.getStrategies()[0];
+    const strategy = this.strategies.getStrategy("TradenayaSmartV1") ?? this.strategies.getStrategies()[0];
     if (!strategy) {
       return { signal: "WAIT", analysis: { trend: "SIDEWAYS", confidence: 0, reasons: ["no strategy configured"], price: null, summary: `No trade for ${config.symbol} — no strategy configured` } };
     }

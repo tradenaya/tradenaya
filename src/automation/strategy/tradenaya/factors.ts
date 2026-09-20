@@ -27,11 +27,11 @@ import {
   lastRich,
 } from "@/automation/indicators/rich";
 import { detectPatterns } from "@/automation/indicators/patterns";
-import { REASON, type ReasonCode, type TradiAuraThresholds } from "./config";
+import { REASON, type ReasonCode, type TradenayaThresholds } from "./config";
 import type { FactorResult, MarketView, SupportResistanceLevels, SwingPoint, TrendDirection } from "./types";
 
 /**
- * Market structure + trend + momentum factors for TRADIAURA_SMART_V1.
+ * Market structure + trend + momentum factors for TRADENAYA_SMART_V1.
  *
  * Every factor is a pure function of the MarketView (derived solely from the
  * closed candles it receives). Signed scores are positive for LONG and negative
@@ -81,7 +81,7 @@ export function detectSupportResistance(
   swings: { highs: SwingPoint[]; lows: SwingPoint[] },
   price: number,
   atrValue: number,
-  thresholds: TradiAuraThresholds,
+  thresholds: TradenayaThresholds,
 ): SupportResistanceLevels {
   const start = Math.max(0, candles.length - thresholds.supportResistanceWindow);
   const swingHighs = swings.highs.filter((s) => s.index >= start);
@@ -101,7 +101,7 @@ export function detectSupportResistance(
   };
 }
 
-export function buildMarketView(candles: MarketCandle[], thresholds: TradiAuraThresholds): MarketView {
+export function buildMarketView(candles: MarketCandle[], thresholds: TradenayaThresholds): MarketView {
   const closes = candles.map((c) => c.close);
   const highs = candles.map((c) => c.high);
   const lows = candles.map((c) => c.low);
@@ -162,7 +162,7 @@ export interface RegimeResult {
 }
 
 /** Higher-timeframe regime: price vs. its EMA, with a dead-zone around the EMA. */
-export function evaluateRegime(higherView: MarketView, thresholds: TradiAuraThresholds): RegimeResult {
+export function evaluateRegime(higherView: MarketView, thresholds: TradenayaThresholds): RegimeResult {
   const closes = higherView.closes;
   if (closes.length < 20) return { direction: 0, code: REASON.REGIME_FLAT, htfEma: null };
 
@@ -193,7 +193,7 @@ export interface TrendResult {
 }
 
 /** Entry-timeframe trend: EMA alignment + slope, scaled by ADX trend strength. */
-export function evaluateTrend(view: MarketView, thresholds: TradiAuraThresholds): TrendResult {
+export function evaluateTrend(view: MarketView, thresholds: TradenayaThresholds): TrendResult {
   const emaFast = lastValue(view.emaFast);
   const emaMedium = lastValue(view.emaMedium);
   if (emaFast == null || emaMedium == null) return { score: 0, code: REASON.TREND_FLAT, direction: "SIDEWAYS" };
@@ -270,7 +270,7 @@ export interface MomentumResult {
 }
 
 /** Momentum: RSI zone + MACD histogram. Flags extreme zones for reporting. */
-export function evaluateMomentum(view: MarketView, thresholds: TradiAuraThresholds): MomentumResult {
+export function evaluateMomentum(view: MarketView, thresholds: TradenayaThresholds): MomentumResult {
   const rsi = lastValue(view.rsi);
   const macdValue = lastValue(view.macd.macd);
   const macdSignal = lastValue(view.macd.signal);
@@ -338,7 +338,7 @@ export interface ParticipationResult {
  * only a fraction of a full bar and would otherwise trigger a spurious
  * "volume too low" veto at the start of every candle.
  */
-export function participationRatio(view: MarketView, thresholds: TradiAuraThresholds): { ratio: number | null; window: number } {
+export function participationRatio(view: MarketView, thresholds: TradenayaThresholds): { ratio: number | null; window: number } {
   const volumes = view.volumes;
   const window = Math.min(thresholds.volumePeriod, Math.max(1, Math.floor(volumes.length / 2)));
   if (volumes.length < window + 1) return { ratio: null, window };
@@ -352,7 +352,7 @@ export function participationRatio(view: MarketView, thresholds: TradiAuraThresh
 }
 
 /** Volume participation: recent volume vs. its average. Confirmation only. */
-export function evaluateParticipation(view: MarketView, thresholds: TradiAuraThresholds): ParticipationResult {
+export function evaluateParticipation(view: MarketView, thresholds: TradenayaThresholds): ParticipationResult {
   const { ratio } = participationRatio(view, thresholds);
   if (ratio == null) return { score: 0, code: REASON.PARTICIPATION_WEAK, dead: false };
 
@@ -373,7 +373,7 @@ export interface VolatilityResult {
 }
 
 /** Volatility regime: ATR% must be inside a tradable band. Symmetric. */
-export function evaluateVolatility(view: MarketView, thresholds: TradiAuraThresholds): VolatilityResult {
+export function evaluateVolatility(view: MarketView, thresholds: TradenayaThresholds): VolatilityResult {
   const atrPct = view.price > 0 ? (view.atrValue / view.price) * 100 : 0;
 
   if (atrPct > thresholds.atrPctMax) {
@@ -392,7 +392,7 @@ export function evaluateVolatility(view: MarketView, thresholds: TradiAuraThresh
 }
 
 /** Entry location: pullback to support/EMA, breakout, or extended (chasing). Side-aware. */
-export function evaluateEntryLocation(view: MarketView, side: "LONG" | "SHORT", thresholds: TradiAuraThresholds): FactorResult {
+export function evaluateEntryLocation(view: MarketView, side: "LONG" | "SHORT", thresholds: TradenayaThresholds): FactorResult {
   const price = view.price;
   const atr = view.atrValue;
   const emaFast = lastValue(view.emaFast);
@@ -448,7 +448,7 @@ export interface RiskRewardResult extends FactorResult {
  * factor (like volume), so its contribution is always positive for the tested
  * side when it agrees and small when it doesn't.
  */
-export function evaluateFlow(view: MarketView, thresholds: TradiAuraThresholds): FactorResult {
+export function evaluateFlow(view: MarketView, thresholds: TradenayaThresholds): FactorResult {
   const cci = lastRich(view.cci);
   const mfi = lastRich(view.mfi);
   const wr = lastRich(view.williamsR);
@@ -502,7 +502,7 @@ export function evaluateFlow(view: MarketView, thresholds: TradiAuraThresholds):
  * target R-multiple and the nearest opposing structural level, guaranteeing an
  * RR of at least `rrMin` when a signal is emitted.
  */
-export function evaluateRiskReward(view: MarketView, side: "LONG" | "SHORT", thresholds: TradiAuraThresholds): RiskRewardResult {
+export function evaluateRiskReward(view: MarketView, side: "LONG" | "SHORT", thresholds: TradenayaThresholds): RiskRewardResult {
   const price = view.price;
   const atr = view.atrValue;
   const { support, resistance, swingHigh, swingLow } = view.levels;
@@ -542,7 +542,7 @@ export function evaluateRiskReward(view: MarketView, side: "LONG" | "SHORT", thr
 
 function scoreRatio(
   ratio: number,
-  thresholds: TradiAuraThresholds,
+  thresholds: TradenayaThresholds,
   okCode: ReasonCode,
   lowCode: ReasonCode,
   stop: number,

@@ -496,7 +496,7 @@ export function telegramCoinSwitchError(p: {
 /** Public-facing "test" message to confirm the bot is connected. */
 export function telegramTestConnected(): string {
   return [
-    "🤖 TradiAura",
+    "🤖 Tradenaya",
     ``,
     "Telegram notifications connected successfully.",
   ].join("\n");

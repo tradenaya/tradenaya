@@ -57,14 +57,29 @@ export async function GET(req: NextRequest) {
       exchange: "EXCHANGE_2",
     });
 
-    const candidates = Object.entries((ticker.data ?? {}) as Record<string, TickerRow>)
-      .map(([symbol, value]) => ({
-        symbol,
-        quoteVolume24h: num(value.quote_asset_volume_24h) ?? 0,
-        change24h: num(value.price_24h_pcnt) ?? 0,
-        fundingRate: num(value.funding_rate) ?? 0,
-      }))
-      .filter((c) => c.symbol.length >= 5 && c.quoteVolume24h > 0)
+    const rawRows = ticker.data ?? {};
+    const rows = Array.isArray(rawRows)
+      ? rawRows.reduce<Record<string, TickerRow>>((acc, row) => {
+          const candidate = (row ?? {}) as TickerRow;
+          const symbol = typeof candidate.symbol === "string" ? candidate.symbol.trim() : "";
+          if (!symbol) return acc;
+          acc[symbol] = candidate;
+          return acc;
+        }, {})
+      : ((rawRows as Record<string, TickerRow> | null) ?? {});
+
+    const candidates = Object.entries(rows)
+      .map(([symbol, value]) => {
+        const row = (value ?? {}) as TickerRow;
+        const normalizedSymbol = typeof symbol === "string" ? symbol.trim() : typeof row.symbol === "string" ? row.symbol.trim() : "";
+        return {
+          symbol: normalizedSymbol,
+          quoteVolume24h: num(row.quote_asset_volume_24h) ?? 0,
+          change24h: num(row.price_24h_pcnt) ?? 0,
+          fundingRate: num(row.funding_rate) ?? 0,
+        };
+      })
+      .filter((c) => c.symbol && c.symbol.length >= 5 && c.quoteVolume24h > 0)
       .sort((a, b) => b.quoteVolume24h - a.quoteVolume24h)
       .slice(0, limit);
 

@@ -41,7 +41,7 @@ const RUNNING_BOT: BotRuntimeState = {
   id: 7,
   userId: 42,
   symbol: "BTCUSDT",
-  strategy: "TradiAuraSmartV1",
+  strategy: "TradenayaSmartV1",
   leverage: 5,
   capital: 100,
   capitalMode: "fixed",

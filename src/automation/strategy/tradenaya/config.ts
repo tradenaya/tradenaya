@@ -1,5 +1,5 @@
 /**
- * TRADIAURA_SMART_V1 — centralized configuration.
+ * TRADENAYA_SMART_V1 — centralized configuration.
  *
  * Single source of truth for every threshold, weight and parameter the
  * strategy uses. Nothing is hard-coded inside the factor or scoring logic; the
@@ -7,7 +7,7 @@
  * which keeps live and backtest behaviour identical and makes the algorithm
  * reproducible and auditable.
  */
-export const TRADIAURA_VERSION = "TRADIAURA_SMART_V1";
+export const TRADENAYA_VERSION = "TRADENAYA_SMART_V1";
 
 export interface TimeframeConfig {
   /** Regime/context timeframe (larger than the entry timeframe). */
@@ -64,7 +64,7 @@ export const FACTOR_WEIGHTS: FactorWeights = {
   flow: 0.05,
 };
 
-export interface TradiAuraThresholds {
+export interface TradenayaThresholds {
   /** Minimum |net score| required to emit a LONG/SHORT signal. */
   minNetScore: number;
   /** Maximum |net score| (used to normalize confidence). */
@@ -150,7 +150,7 @@ export interface TradiAuraThresholds {
   cciSell: number;
 }
 
-export const TRADIAURA_THRESHOLDS: TradiAuraThresholds = {
+export const TRADENAYA_THRESHOLDS: TradenayaThresholds = {
   minNetScore: 0.4,
   maxNetScore: 1,
   minCandles: 60,
@@ -209,15 +209,15 @@ export const TRADIAURA_THRESHOLDS: TradiAuraThresholds = {
   cciSell: -100,
 };
 
-export interface TradiAuraConfig {
+export interface TradenayaConfig {
   version: string;
-  thresholds: TradiAuraThresholds;
+  thresholds: TradenayaThresholds;
   weights: FactorWeights;
 }
 
-export const TRADIAURA_CONFIG: TradiAuraConfig = {
-  version: TRADIAURA_VERSION,
-  thresholds: TRADIAURA_THRESHOLDS,
+export const TRADENAYA_CONFIG: TradenayaConfig = {
+  version: TRADENAYA_VERSION,
+  thresholds: TRADENAYA_THRESHOLDS,
   weights: FACTOR_WEIGHTS,
 };
 

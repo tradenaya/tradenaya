@@ -7,16 +7,16 @@ import {
   DEFAULT_ENTRY_TIMEFRAME,
   REASON,
   TIMEFRAME_MAP,
-  TRADIAURA_CONFIG,
-  TRADIAURA_VERSION,
+  TRADENAYA_CONFIG,
+  TRADENAYA_VERSION,
   type ReasonCode,
 } from "./config";
 import { buildMarketView, evaluateStructure, participationRatio } from "./factors";
 import { runAnalysis } from "./scoring";
-import type { TradiAuraAnalysis, TradiAuraSignal } from "./types";
+import type { TradenayaAnalysis, TradenayaSignal } from "./types";
 
 /**
- * TRADIAURA_SMART_V1 — the core trading algorithm.
+ * TRADENAYA_SMART_V1 — the core trading algorithm.
  *
  * A rule-based, multi-factor strategy combining market structure, trend and
  * momentum. It is strictly a decision engine: it returns LONG_SIGNAL /
@@ -31,9 +31,9 @@ import type { TradiAuraAnalysis, TradiAuraSignal } from "./types";
  * there is no randomness, no wall-clock dependence and no user risk preference
  * involved in the signal.
  */
-export class TradiAuraSmartV1Strategy implements BaseStrategy {
-  name = "TradiAuraSmartV1";
-  private readonly config = TRADIAURA_CONFIG;
+export class TradenayaSmartV1Strategy implements BaseStrategy {
+  name = "TradenayaSmartV1";
+  private readonly config = TRADENAYA_CONFIG;
 
   async analyze(context: StrategyContext): Promise<StrategyDecision> {
     const candles = context.candles;
@@ -81,7 +81,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
   }
 
   private toDecision(
-    analysis: TradiAuraAnalysis,
+    analysis: TradenayaAnalysis,
     entryView: ReturnType<typeof buildMarketView>,
     entryLabel: string,
     higherLabel: string,
@@ -109,7 +109,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
   }
 
   private buildIndicators(
-    analysis: TradiAuraAnalysis,
+    analysis: TradenayaAnalysis,
     view: ReturnType<typeof buildMarketView>,
     entryLabel: string,
     higherLabel: string,
@@ -128,7 +128,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
     const participation = participationRatio(view, this.config.thresholds);
 
     return {
-      version: TRADIAURA_VERSION,
+      version: TRADENAYA_VERSION,
       signal: analysis.signal,
       referencePrice: round(view.price),
       timeframe: entryLabel,
@@ -185,7 +185,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
       confidence: 0,
       trend: "SIDEWAYS",
       reasons: [code],
-      indicators: { version: TRADIAURA_VERSION, signal: "NO_TRADE", reason },
+      indicators: { version: TRADENAYA_VERSION, signal: "NO_TRADE", reason },
       timestamp: new Date().toISOString(),
     };
   }
@@ -202,7 +202,7 @@ export class TradiAuraSmartV1Strategy implements BaseStrategy {
   }
 }
 
-function toStrategySignal(signal: TradiAuraSignal): StrategySignal {
+function toStrategySignal(signal: TradenayaSignal): StrategySignal {
   if (signal === "LONG_SIGNAL") return "BUY";
   if (signal === "SHORT_SIGNAL") return "SELL";
   return "WAIT";
@@ -230,5 +230,5 @@ function roundOpt(value: number | null | undefined): number | null | undefined {
   return value == null ? value : round(value);
 }
 
-export { TRADIAURA_CONFIG, TRADIAURA_VERSION };
-export type { TradiAuraConfig } from "./config";
+export { TRADENAYA_CONFIG, TRADENAYA_VERSION };
+export type { TradenayaConfig } from "./config";

@@ -161,7 +161,7 @@ h1, h2, h3, h4, h5, h6 {
     cursor: pointer;
   }
   /* Primary buttons: use dark-gold gradient while keeping text readable */
-  .group/button[data-variant="default"] {
+  [class~="group/button"][data-variant="default"] {
     background-image: var(--primary-gradient);
     background-color: var(--primary);
     color: var(--primary-foreground);

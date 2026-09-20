@@ -1,7 +1,7 @@
 import type { MarketCandle } from "@/automation/types";
 
 /**
- * Pure, deterministic technical indicator math used by the TRADIAURA_SMART_V1
+ * Pure, deterministic technical indicator math used by the TRADENAYA_SMART_V1
  * strategy and the technical indicator engine.
  *
  * Every function here is a pure transformation of its inputs: the same candles

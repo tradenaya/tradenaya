@@ -14,7 +14,7 @@ import { AutomationEngine, type EngineStep } from "./automation-engine";
  */
 
 // Deterministic 5m candle series (mirrors the strategy suite's fixture so the
-// stock TradiAuraSmartV1 strategy reliably emits a LONG signal).
+// stock TradenayaSmartV1 strategy reliably emits a LONG signal).
 function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {

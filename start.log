@@ -1,10 +1,25 @@
 
-> tradiaura@0.1.0 start
+> tradenaya@0.1.0 start
 > next start
 
 ▲ Next.js 16.2.6
 - Local:         http://localhost:3000
 - Network:       http://172.17.0.1:3000
-✓ Ready in 650ms
+✓ Ready in 835ms
 [cleanup] pruned activity logs older than 1 hour: scheduler=0 position=0 notification=0
 [cleanup] pruned activity logs older than 1 hour: scheduler=0 position=0 notification=0
+[AUTO SELECTOR] selectBestOpportunity ENTER userId=1 limit=5
+[AUTO SELECTOR] selectRankedOpportunities ENTER userId=1 limit=5 count=1
+[AUTO SELECTOR] selectBestOpportunity ENTER userId=1 limit=5
+[AUTO SELECTOR] selectRankedOpportunities ENTER userId=1 limit=5 count=1
+[AUTO SELECTOR] selectBestOpportunity ENTER userId=1 limit=5
+[AUTO SELECTOR] selectRankedOpportunities ENTER userId=1 limit=5 count=1
+[AUTO SELECTOR] selectBestOpportunity ENTER userId=2 limit=5
+[AUTO SELECTOR] selectRankedOpportunities ENTER userId=2 limit=5 count=1
+[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=1 resolved=AVAXUSDT,ARBUSDT,CLUSDT,IOSTUSDT,FFUSDT
+[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=1 resolved=GPSUSDT,AVAXUSDT,CLUSDT,COTIUSDT,IOSTUSDT
+[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=1 resolved=ACEUSDT,STABLEUSDT,METAUSDT,HBARUSDT,4STOCKUSDT
+[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=2 resolved=AVAAIUSDT,INTCUSDT,GPSUSDT,BANUSDT,SHELLUSDT
+[AUTO SELECTOR] selectBestOpportunity ENTER userId=1 limit=5
+[AUTO SELECTOR] selectRankedOpportunities ENTER userId=1 limit=5 count=1
+[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=1 resolved=TRXUSDT,SUSDT,JTOUSDT,EGLDUSDT,SIRENUSDT

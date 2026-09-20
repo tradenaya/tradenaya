@@ -104,7 +104,7 @@ export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "lev
     symbol: raw.symbol != null ? String(raw.symbol) : String(bot.symbol ?? ""),
     name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : bot.name?.trim() || undefined,
     timeframe: String(raw.timeframe ?? "5m"),
-    strategy: String(raw.strategy ?? bot.strategy ?? "TradiAuraSmartV1"),
+    strategy: String(raw.strategy ?? bot.strategy ?? "TradenayaSmartV1"),
     leverage: Number(raw.leverage ?? bot.leverage),
     autoSelect: Boolean(raw.autoSelect),
     side: raw.side === "SHORT" || raw.side === "SELL" ? "SHORT" : raw.side === "LONG" || raw.side === "BUY" ? "LONG" : undefined,

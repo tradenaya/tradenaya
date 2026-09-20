@@ -769,7 +769,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 size="sm"
                 disabled={analyzingCoins}
                 onClick={analyzeCoins}
-                title="Scan the most liquid coins with the full TradiAura factor stack and rank them"
+                title="Scan the most liquid coins with the full Tradenaya factor stack and rank them"
               >
                 {analyzingCoins ? <Loader2 className="animate-spin" /> : <TrendingUp size={14} />}
                 {analyzingCoins ? "Scanning…" : "Find best coins"}

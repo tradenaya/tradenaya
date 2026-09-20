@@ -59,7 +59,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         <button onClick={onMenuClick} className="cursor-pointer">
           <Menu size={24} />
         </button>
-        <h1 className="text-lg font-semibold">{tenant.tenantName || "TradiAura"}</h1>
+        <h1 className="text-lg font-semibold">{tenant.tenantName || "Tradenaya"}</h1>
       </div>
 
       {!mounted ? (

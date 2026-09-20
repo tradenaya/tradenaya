@@ -2,10 +2,10 @@ import type { MarketCandle } from "@/automation/types";
 import { clamp, lastValue } from "@/automation/indicators/series";
 import { resampleCandles } from "@/automation/indicators/candle-resampler";
 import { normalizeInterval } from "@/automation/market/normalizer";
-import { buildMarketView } from "../strategy/tradiaura/factors";
-import { runAnalysis } from "../strategy/tradiaura/scoring";
-import { DEFAULT_ENTRY_TIMEFRAME, TIMEFRAME_MAP, TRADIAURA_CONFIG } from "../strategy/tradiaura/config";
-import { humanizeReason } from "../strategy/tradiaura/humanize";
+import { buildMarketView } from "../strategy/tradenaya/factors";
+import { runAnalysis } from "../strategy/tradenaya/scoring";
+import { DEFAULT_ENTRY_TIMEFRAME, TIMEFRAME_MAP, TRADENAYA_CONFIG } from "../strategy/tradenaya/config";
+import { humanizeReason } from "../strategy/tradenaya/humanize";
 
 export interface CoinOpportunityFactors {
   regime: number;
@@ -104,7 +104,7 @@ function toSignal(signal: "LONG_SIGNAL" | "SHORT_SIGNAL" | "NO_TRADE"): "BUY" | 
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 /**
- * Analyze a single symbol's candles with the full TradiAura factor stack and
+ * Analyze a single symbol's candles with the full Tradenaya factor stack and
  * produce a ranked "opportunity" record. Pure function of the candles (plus an
  * optional liquidity hint) — deterministic and safe to unit test.
  */
@@ -114,7 +114,7 @@ export function scanCandles(
   candles: MarketCandle[],
   options: ScanOptions = {},
 ): CoinOpportunity | null {
-  const thresholds = TRADIAURA_CONFIG.thresholds;
+  const thresholds = TRADENAYA_CONFIG.thresholds;
   if (!candles || candles.length < thresholds.minCandles) {
     return {
       symbol,
@@ -160,7 +160,7 @@ export function scanCandles(
   const higherView = higherCandles.length > 0 ? buildMarketView(higherCandles, thresholds) : null;
   const mediumView = mediumCandles.length > 0 ? buildMarketView(mediumCandles, thresholds) : null;
 
-  const analysis = runAnalysis(entryView, higherView, mediumView, TRADIAURA_CONFIG);
+  const analysis = runAnalysis(entryView, higherView, mediumView, TRADENAYA_CONFIG);
 
   const longValid = analysis.long.vetoes.length === 0 && analysis.long.netScore >= thresholds.minNetScore;
   const shortValid = analysis.short.vetoes.length === 0 && analysis.short.netScore >= thresholds.minNetScore;

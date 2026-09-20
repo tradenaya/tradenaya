@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.TRADIAURA_AUTH_SECRET || process.env.JWT_SECRET || "tradenaya-local-dev-secret";
+const JWT_SECRET = process.env.TRADENAYA_AUTH_SECRET || process.env.JWT_SECRET || "tradenaya-local-dev-secret";
 const JWT_EXPIRES_IN = "7d" as const;
 
 export interface AdminPayload {

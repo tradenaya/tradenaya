@@ -53,8 +53,8 @@ export default function SigninPage() {
       dispatch(
         customerLogin({
           tenantId: 1,
-          tenantCode: "tradiaura",
-          tenantName: "TradiAura",
+          tenantCode: "tradenaya",
+          tenantName: "Tradenaya",
           profileId: data.user.id,
           profileCode: `CUS-${data.user.id}`,
           firstName: data.user.firstName,
@@ -77,7 +77,7 @@ export default function SigninPage() {
 
       <Card className="relative z-10 w-full max-w-md border shadow-2xl" style={{ backgroundColor: "#171a20", color: "#f5f7fa", borderColor: "#2a2f38" }}>
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl">TradiAura</CardTitle>
+          <CardTitle className="text-3xl">Tradenaya</CardTitle>
           <CardDescription>User Sign In</CardDescription>
         </CardHeader>
 

@@ -3,7 +3,7 @@ import { coinswitchClient, CoinSwitchClient } from "@/automation/executor/client
 import { orderExecutor, OrderExecutorService, maxSafeAllocationPct, MARGIN_HEADROOM, MARGIN_FEE_BUFFER } from "@/automation/executor/order-executor";
 import { AutomationEngine } from "@/automation/engine/automation-engine";
 import { serverMarketDataService } from "@/automation/market/service";
-import { CoinAutoSelector } from "@/automation/coinauto/coin-auto-selector";
+import { AutoBestSelector } from "@/automation/coinauto/auto-best-selector";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import { BotLifecycleService, type BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { AutomationConfig } from "@/automation/types";
@@ -37,7 +37,7 @@ export class BotScheduler {
   private readonly events: SchedulerEventBus;
   private readonly recovery: SchedulerRecovery;
   private readonly cycles: AnalysisCycleRunner;
-  private readonly coinAutoSelector: CoinAutoSelector;
+  private readonly coinAutoSelector: AutoBestSelector;
   private readonly inProcess = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -52,7 +52,7 @@ export class BotScheduler {
     this.events = deps.events ?? new SchedulerEventBus((event) => store.saveEvent(event));
     this.stateManager = deps.stateManager ?? new SchedulerStateManager(this.lifecycle);
     this.lock = new SchedulerLock(this.lifecycle, this.config.leaseTtlSeconds);
-    this.coinAutoSelector = new CoinAutoSelector({
+    this.coinAutoSelector = new AutoBestSelector({
       client,
       marketData: (userId) => serverMarketDataService.adapterFor(userId),
     });
@@ -256,7 +256,7 @@ export class BotScheduler {
     const botId = await this.lifecycle.createBot({
       userId,
       symbol: initialSymbol,
-      strategy: "TradiAuraSmartV1",
+      strategy: "TradenayaSmartV1",
       leverage: config.leverage,
       capital: config.capital,
       capitalMode: config.capitalMode,
@@ -278,7 +278,7 @@ export class BotScheduler {
       timeframe: config.timeframe,
       leverage: config.leverage,
       capital: config.capital,
-      strategy: bot?.strategy ?? "TradiAuraSmartV1",
+      strategy: bot?.strategy ?? "TradenayaSmartV1",
       name: bot?.name ?? config.name,
     }));
     if (bot) {

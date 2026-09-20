@@ -3,8 +3,8 @@ import type { MarketCandle, MarketSnapshot } from "@/automation/types";
 import type { StrategyContext } from "@/automation/strategy/types";
 import { buildMarketView, evaluateRegime } from "./factors";
 import { runAnalysis } from "./scoring";
-import { TradiAuraSmartV1Strategy } from "./index";
-import { TRADIAURA_CONFIG, TRADIAURA_VERSION } from "./config";
+import { TradenayaSmartV1Strategy } from "./index";
+import { TRADENAYA_CONFIG, TRADENAYA_VERSION } from "./config";
 
 const INTERVAL_MS = 5 * 60_000;
 
@@ -69,15 +69,15 @@ function makeContext(candles: MarketCandle[], overrides: Partial<StrategyContext
   };
 }
 
-describe("TRADIAURA_SMART_V1", () => {
+describe("TRADENAYA_SMART_V1", () => {
   it("signals LONG on a persistent uptrend and SHORT on a downtrend", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
 
     const up = await strategy.analyze(makeContext(buildCandles(320, 0.0018, 7)));
     expect(up.signal).toBe("BUY");
     expect(up.confidence).toBeGreaterThanOrEqual(0.55);
     expect(up.trend).toBe("UP");
-    expect(up.indicators.version).toBe(TRADIAURA_VERSION);
+    expect(up.indicators.version).toBe(TRADENAYA_VERSION);
     // LONG geometry: stop below price, entry a pullback limit at/below price, target above.
     expect(up.stopLossSuggestion!).toBeLessThan(Number(up.indicators.referencePrice));
     expect(up.entryZone!).toBeLessThanOrEqual(Number(up.indicators.referencePrice));
@@ -96,20 +96,20 @@ describe("TRADIAURA_SMART_V1", () => {
   });
 
   it("stays NO_TRADE in a sideways market", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
     const result = await strategy.analyze(makeContext(buildCandles(320, 0, 21, 0.0004, 0)));
     expect(result.signal).toBe("WAIT");
   });
 
   it("waits when there is not enough data", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
     const result = await strategy.analyze(makeContext(buildCandles(50, 0.0018, 1)));
     expect(result.signal).toBe("WAIT");
     expect(result.reasons).toContain("insufficient-data");
   });
 
   it("vetoes a LONG when the higher-timeframe regime is bearish", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
     const entry = buildCandles(320, 0.0018, 7);
     const bearishHigher = buildCandles(320, -0.0018, 13);
 
@@ -127,7 +127,7 @@ describe("TRADIAURA_SMART_V1", () => {
   });
 
   it("is fully deterministic for the same candles", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
     const candles = buildCandles(320, 0.0018, 7);
     const first = await strategy.analyze(makeContext(candles));
     const second = await strategy.analyze(makeContext(candles));
@@ -138,21 +138,21 @@ describe("TRADIAURA_SMART_V1", () => {
 
   it("does not look ahead: the decision at a slice depends only on that slice", () => {
     const candles = buildCandles(300, 0.0018, 7);
-    const full = buildMarketView(candles, TRADIAURA_CONFIG.thresholds);
-    const prefix = buildMarketView(candles.slice(0, 150), TRADIAURA_CONFIG.thresholds);
+    const full = buildMarketView(candles, TRADENAYA_CONFIG.thresholds);
+    const prefix = buildMarketView(candles.slice(0, 150), TRADENAYA_CONFIG.thresholds);
 
-    const fullAnalysis = runAnalysis(full, null, null, TRADIAURA_CONFIG);
-    const prefixAnalysis = runAnalysis(prefix, null, null, TRADIAURA_CONFIG);
+    const fullAnalysis = runAnalysis(full, null, null, TRADENAYA_CONFIG);
+    const prefixAnalysis = runAnalysis(prefix, null, null, TRADENAYA_CONFIG);
 
     // Re-running with the exact same (partial) input is deterministic, and the
     // regime over the full set respects only completed higher-timeframe buckets.
-    const fullAgain = runAnalysis(full, null, null, TRADIAURA_CONFIG);
+    const fullAgain = runAnalysis(full, null, null, TRADENAYA_CONFIG);
     expect(fullAgain).toEqual(fullAnalysis);
     expect(prefixAnalysis.netScore).toBeTypeOf("number");
   });
 
   it("produces documented reason codes on a signal", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
     const result = await strategy.analyze(makeContext(buildCandles(320, 0.0018, 7)));
     expect(result.reasons.length).toBeGreaterThan(0);
     for (const reason of result.reasons) {
@@ -166,13 +166,13 @@ describe("TRADIAURA_SMART_V1", () => {
   it("higher-timeframe regime reads the resampled 15m context", () => {
     const entry = buildCandles(320, 0.0018, 7);
     const higher = entry.filter((_, i) => i % 3 === 0).length > 0 ? entry.slice(0, 300) : entry;
-    const view = buildMarketView(higher, TRADIAURA_CONFIG.thresholds);
-    const regime = evaluateRegime(view, TRADIAURA_CONFIG.thresholds);
+    const view = buildMarketView(higher, TRADENAYA_CONFIG.thresholds);
+    const regime = evaluateRegime(view, TRADENAYA_CONFIG.thresholds);
     expect(regime.direction).not.toBe(-1);
   });
 
   it("does not zero a valid signal when the live in-progress candle has tiny partial volume", async () => {
-    const strategy = new TradiAuraSmartV1Strategy();
+    const strategy = new TradenayaSmartV1Strategy();
 
     const closed = buildCandles(320, 0.0018, 7);
     const base = await strategy.analyze(makeContext(closed));
