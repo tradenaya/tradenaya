@@ -53,7 +53,7 @@ const RUNNING_BOT: BotRuntimeState = {
     symbol: "BTCUSDT",
     timeframe: "5m",
     leverage: 5,
-    capital: 100,
+    capital: 85,
     capitalMode: "fixed",
     maxRiskPerTrade: 1,
     dailyLossLimit: 5,
@@ -108,22 +108,7 @@ function makeDeps() {
           openOrderMargin: 0,
           equity: null,
         })),
-        getPositions: vi.fn(async () => [
-          {
-            symbol: "BTCUSDT",
-            side: "LONG",
-            quantity: 1,
-            entryPrice: 100_000,
-            markPrice: 98_500,
-            unrealizedPnl: -15,
-            realizedPnl: 0,
-            leverage: 10,
-            positionId: "pos-1",
-            liquidationPrice: null,
-            maintMargin: null,
-            positionMargin: null,
-          },
-        ]),
+        getPositions: vi.fn(async () => []),
         getOpenOrders: vi.fn(async () => []),
       },
       engine: vi.fn(() => ({
@@ -258,6 +243,9 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
           countActiveBotsForUser: vi.fn(async () => 0),
           setRetryCount: vi.fn(async () => {}),
           scheduleNextRun,
+          // Persisting updated config + selected coin during AUTO selection
+          setConfig: vi.fn(async () => {}),
+          updateSelectedCoin: vi.fn(async () => {}),
         },
         client: {
           getWalletSnapshot: vi.fn(async () => ({
@@ -275,6 +263,9 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
         },
         engine: vi.fn(() => ({ run: engineRun })),
         riskManager: new DefaultRiskManager(),
+        executor: {
+          execute: vi.fn(async () => ({ state: "CANCELLED", message: "executor cancelled", executionId: "x", filledQuantity: 0 })),
+        },
         config: { analysisIntervalMinutes: 5 },
         refreshLease: vi.fn(async () => true),
         coinAutoSelector: {
@@ -305,17 +296,22 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     // 5-minute wait of its own.
     expect(scheduleNextRun.mock.calls.length).toBe(1);
 
-    // Both candidates rejected → consolidated RISK_REJECTED scan-complete.
+    // Candidate #1 was rejected; candidate #2 reached order submission and
+    // returns the mocked executor result (CANCELLED). Validate that the
+    // cycle completed as ANALYZED with the executor message rather than the
+    // "all candidates rejected" message (which applies only when every
+    // candidate fails pre-submission validation).
     expect(result.executed).toBe(true);
     expect(result.state).toBe("RUNNING");
-    expect(result.message).toContain("2 ranked candidate(s) rejected");
+    expect(result.message).toContain("executor cancelled");
 
-const rejectionEvent = eventsEmit.mock.calls
+    // Ensure no consolidated RISK_REJECTED was emitted for the scan (only
+    // per-candidate rejections for #1 should exist). Instead, an AUTO_SCAN
+    // completion with ORDER_SUBMITTED must have been emitted for candidate #2.
+    const scanCompleteEvent = eventsEmit.mock.calls
       .map(([event]) => event as { type?: string; message?: string })
-      .find((event) => event?.type === "RISK_REJECTED");
-    expect(rejectionEvent).toBeDefined();
-    expect(rejectionEvent?.message).toContain("BTCUSDT");
-    expect(rejectionEvent?.message).toContain("ETHUSDT");
+      .find((event) => event?.type === "AUTO_SCAN_COMPLETE" && typeof event?.message === "string" && event.message.includes("ORDER_SUBMITTED"));
+    expect(scanCompleteEvent).toBeDefined();
 
     // Every per-candidate rejection was surfaced in the activity hub, including
     // the strategy/planner WAIT of candidate #1 (not hidden).

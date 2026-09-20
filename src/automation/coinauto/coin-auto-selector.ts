@@ -445,7 +445,7 @@ export class CoinAutoSelector {
       scannedCount,
       eligibleCount: scanned.length,
       rankingCriteria: `${scanned.length} tradable, directional opportunities ranked by opportunity score (descending)`,
-      requestedCount: count,
+      requestedCount: options.count ?? 0,
     };
   }
 
