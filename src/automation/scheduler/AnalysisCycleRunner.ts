@@ -85,11 +85,25 @@ export interface AnalysisCycleDependencies {
 }
 
 export class AnalysisCycleRunner {
+  private readonly inFlight = new Set<number>();
+
   constructor(private readonly deps: AnalysisCycleDependencies) {}
 
   async runCycle(botId: number): Promise<CycleResult> {
-    const bot = await this.deps.store.getBot(botId);
-    if (!bot) return this.skipped("Bot not found");
+    // Guard: prevent concurrent cycles for the same bot (in-flight concurrency).
+    if (this.inFlight.has(botId)) {
+      console.log(`[cycle] runCycle skipped for bot=${botId} — cycle already in progress`);
+      return { executed: false, state: "RUNNING", action: "SKIPPED", message: "Cycle already in progress" };
+    }
+    this.inFlight.add(botId);
+    let bot: BotRuntimeState | null = null;
+    try {
+      bot = await this.deps.store.getBot(botId);
+      if (!bot) return this.skipped("Bot not found");
+
+    // Execution continues inside the TRY block; the in-flight marker is
+    // cleared in the FINALLY appended at the end of this function so the
+    // guard covers the entire cycle.
 
     const desired = bot.desiredStatus ?? "RUNNING";
     if (desired !== "RUNNING") {
@@ -131,6 +145,11 @@ export class AnalysisCycleRunner {
     }
     console.log(`[AUTO DEBUG] executionPath=fixed-symbol`);
     return this.runFixedSymbolCycle(bot, config);
+    } finally {
+      // Clear the in-flight marker for this bot once the cycle has fully
+      // completed (or errored) so subsequent ticks can proceed.
+      this.inFlight.delete(botId);
+    }
   }
 
   /**

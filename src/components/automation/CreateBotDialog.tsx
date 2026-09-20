@@ -173,19 +173,21 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
   useEffect(() => {
     if (!settings.autoSelect || !open) return;
     let cancelled = false;
+    const controller = new AbortController();
     queueMicrotask(() => {
       if (cancelled) return;
       setAutoLoading(true);
       setAutoError("");
     });
-    fetch(autoPreviewUrl, { cache: "no-store" })
+    fetch(autoPreviewUrl, { cache: "no-store", signal: controller.signal })
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
         if (json.success) setAutoPreview(json.data?.best ?? null);
         else setAutoError(json.message || "Failed to preview auto-selection");
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
         if (!cancelled) setAutoError("Failed to preview auto-selection");
       })
       .finally(() => {
@@ -193,6 +195,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [autoPreviewUrl, settings.autoSelect, open]);
 

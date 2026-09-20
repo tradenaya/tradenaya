@@ -235,19 +235,21 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
   useEffect(() => {
     if (!cfg.autoSelect || !open) return;
     let cancelled = false;
+    const controller = new AbortController();
     queueMicrotask(() => {
       if (cancelled) return;
       setAutoLoading(true);
       setAutoError("");
     });
-    fetch(autoPreviewUrl, { cache: "no-store" })
+    fetch(autoPreviewUrl, { cache: "no-store", signal: controller.signal })
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
         if (json.success) setAutoPreview(json.data?.best ?? null);
         else setAutoError(json.message || "Failed to preview auto-selection");
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
         if (!cancelled) setAutoError("Failed to preview auto-selection");
       })
       .finally(() => {
@@ -255,6 +257,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [autoPreviewUrl, cfg.autoSelect, open]);
 
