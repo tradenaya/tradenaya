@@ -6,7 +6,7 @@
  * against 1.5 while the live account risk gate silently defaulted to 2.0).
  *
  * The fallback (1.5) matches the strategy's own documented RR floor
- * (`TRADIAURA_THRESHOLDS.rrMin`) and the planner's historic default.
+ * (`TRADENAYA_THRESHOLDS.rrMin`) and the planner's historic default.
  */
 export const DEFAULT_MIN_RISK_REWARD_RATIO = 1.5;
 

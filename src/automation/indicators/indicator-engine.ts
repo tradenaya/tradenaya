@@ -21,7 +21,7 @@ export interface IndicatorEngine {
 
 /**
  * Technical indicator engine. Produces the latest indicator values for the
- * current candle set. The TRADIAURA_SMART_V1 strategy reuses the same pure
+ * current candle set. The TRADENAYA_SMART_V1 strategy reuses the same pure
  * series functions from `./series` so live and backtest computations are
  * identical.
  */

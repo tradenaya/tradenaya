@@ -3,7 +3,7 @@ import crypto from "crypto";
 const ALGO = "aes-256-gcm";
 
 function getMasterKey() {
-  const key = process.env.COINSWITCH_ENCRYPTION_KEY || process.env.TRADIAURA_AUTH_SECRET || process.env.JWT_SECRET || "fallback-secret-key-please-set";
+  const key = process.env.COINSWITCH_ENCRYPTION_KEY || process.env.TRADENAYA_AUTH_SECRET || process.env.JWT_SECRET || "fallback-secret-key-please-set";
   // Derive 32 byte key
   return crypto.createHash("sha256").update(key).digest();
 }

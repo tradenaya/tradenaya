@@ -1,11 +1,11 @@
-import { TradiAuraSmartV1Strategy } from "./tradiaura";
+import { TradenayaSmartV1Strategy } from "./tradenaya";
 import type { BaseStrategy } from "./types";
 
 export class StrategyRegistry {
   private readonly strategies: BaseStrategy[] = [];
 
   constructor() {
-    this.register(new TradiAuraSmartV1Strategy());
+    this.register(new TradenayaSmartV1Strategy());
   }
 
   register(strategy: BaseStrategy) {

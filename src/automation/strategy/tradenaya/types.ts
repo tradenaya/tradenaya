@@ -4,7 +4,7 @@ import type { StochRsiSeries, KeltnerSeries, IchimokuSeries, AdxSeries } from "@
 import type { PatternSignal } from "@/automation/indicators/patterns";
 import type { ReasonCode } from "./config";
 
-export type TradiAuraSignal = "LONG_SIGNAL" | "SHORT_SIGNAL" | "NO_TRADE";
+export type TradenayaSignal = "LONG_SIGNAL" | "SHORT_SIGNAL" | "NO_TRADE";
 
 export type TrendDirection = "UP" | "DOWN" | "SIDEWAYS";
 
@@ -89,8 +89,8 @@ export interface SwingPoint {
   price: number;
 }
 
-export interface TradiAuraAnalysis {
-  signal: TradiAuraSignal;
+export interface TradenayaAnalysis {
+  signal: TradenayaSignal;
   /** Signed net score of the chosen side (positive for LONG). */
   netScore: number;
   confidence: number;

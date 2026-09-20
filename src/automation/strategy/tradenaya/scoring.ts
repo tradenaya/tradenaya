@@ -1,5 +1,5 @@
 import { clamp } from "@/automation/indicators/series";
-import { REASON, type ReasonCode, type TradiAuraConfig } from "./config";
+import { REASON, type ReasonCode, type TradenayaConfig } from "./config";
 import { humanizeFactor } from "./humanize";
 import {
   evaluateEntryLocation,
@@ -18,12 +18,12 @@ import type {
   MarketView,
   SideEvaluation,
   SideFactors,
-  TradiAuraAnalysis,
+  TradenayaAnalysis,
   TrendDirection,
 } from "./types";
 
 /**
- * Deterministic scoring for TRADIAURA_SMART_V1.
+ * Deterministic scoring for TRADENAYA_SMART_V1.
  *
  * Each side (LONG/SHORT) is evaluated independently. A side's net score is the
  * weighted sum of its factor contributions. Factors that are directional
@@ -53,7 +53,7 @@ function evaluateSide(
   side: "LONG" | "SHORT",
   view: MarketView,
   regime: RegimeResult,
-  config: TradiAuraConfig,
+  config: TradenayaConfig,
   report?: (message: string, detail?: Record<string, unknown>) => void,
 ): SideEvaluation {
   const { thresholds, weights } = config;
@@ -128,7 +128,7 @@ function confidenceFromScore(netScore: number, minNetScore: number): number {
   return clamp(0.55 + (netScore - minNetScore) * 0.5, 0.55, 0.92);
 }
 
-function trendDirection(view: MarketView, thresholds: TradiAuraConfig["thresholds"]): TrendDirection {
+function trendDirection(view: MarketView, thresholds: TradenayaConfig["thresholds"]): TrendDirection {
   const score = evaluateTrend(view, thresholds).score;
   if (score > 0.05) return "UP";
   if (score < -0.05) return "DOWN";
@@ -138,7 +138,7 @@ function trendDirection(view: MarketView, thresholds: TradiAuraConfig["threshold
 function buildSuggestions(
   chosen: SideEvaluation,
   view: MarketView,
-  config: TradiAuraConfig,
+  config: TradenayaConfig,
 ): { entryZone?: number; stopLossSuggestion?: number; takeProfitSuggestion?: number } {
   const { thresholds } = config;
   const price = view.price;
@@ -168,7 +168,7 @@ function round(value: number): number {
   return Math.round(value * 1e4) / 1e4;
 }
 
-function collectReasons(chosen: SideEvaluation | null, config: TradiAuraConfig): ReasonCode[] {
+function collectReasons(chosen: SideEvaluation | null, config: TradenayaConfig): ReasonCode[] {
   if (!chosen) return [];
   const reasons = FACTOR_ORDER.map((key) => chosen.factors[key].code);
   if (chosen.vetoes.length === 0) {
@@ -186,7 +186,7 @@ function collectReasons(chosen: SideEvaluation | null, config: TradiAuraConfig):
 function resolveRegime(
   higherView: MarketView | null,
   mediumView: MarketView | null,
-  thresholds: TradiAuraConfig["thresholds"],
+  thresholds: TradenayaConfig["thresholds"],
 ): RegimeResult {
   if (!higherView) return { direction: 0, code: REASON.REGIME_FLAT, htfEma: null };
   const higher = evaluateRegime(higherView, thresholds);
@@ -202,9 +202,9 @@ export function runAnalysis(
   entryView: MarketView,
   higherView: MarketView | null,
   mediumView: MarketView | null,
-  config: TradiAuraConfig,
+  config: TradenayaConfig,
   report?: (message: string, detail?: Record<string, unknown>) => void,
-): TradiAuraAnalysis {
+): TradenayaAnalysis {
   const regime = resolveRegime(higherView, mediumView, config.thresholds);
   report?.(`Higher timeframe regime: ${humanizeFactor(regime.code)}.`);
   const long = evaluateSide("LONG", entryView, regime, config, report);

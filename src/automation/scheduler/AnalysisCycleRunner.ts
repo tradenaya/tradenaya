@@ -5,7 +5,7 @@ import { OrderExecutorService } from "@/automation/executor/order-executor";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import type { OpenOrderSnapshot, OpenPositionSnapshot, RiskDecision, RiskManagerInput } from "@/automation/risk/types";
 import type { AutomationConfig } from "@/automation/types";
-import type { CoinAutoSelector, RankedOpportunityResult, SelectedOpportunity } from "@/automation/coinauto/coin-auto-selector";
+import type { AutoBestSelector, AutoBestOpportunity } from "@/automation/coinauto/auto-best-selector";
 import type { BotLifecycleService, BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { ExecutionRecord } from "@/automation/executor/types";
 import type { PositionManagerConfig } from "@/automation/position/PositionManagerTypes";
