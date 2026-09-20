@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
       client: coinswitchClient,
       marketData: (userId) => serverMarketDataService.adapterFor(userId),
     });
-    const best = await selector.selectBestOpportunity(userId, config, { limit: 30 });
+    const best = await selector.selectBestOpportunity(userId, config);
 
     if (!best) {
       return ok({ best: null, message: "No suitable trading opportunity currently meets the bot's requirements." });

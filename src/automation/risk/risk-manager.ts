@@ -5,8 +5,6 @@ import type { PositionSizeCalculator } from "./position-size-calculator";
 import { DefaultPositionSizeCalculator } from "./position-size-calculator";
 import type { RiskValidator } from "./risk-validator";
 import { DefaultRiskValidator } from "./risk-validator";
-import type { DrawdownProtection } from "./drawdown-protection";
-import { DefaultDrawdownProtection } from "./drawdown-protection";
 import type { DailyLossProtection } from "./daily-loss-protection";
 import { DefaultDailyLossProtection } from "./daily-loss-protection";
 import type { ExposureManager } from "./exposure-manager";
@@ -26,7 +24,6 @@ export class DefaultRiskManager implements RiskManager {
     private readonly capitalAllocation: CapitalAllocation = new DefaultCapitalAllocation(),
     private readonly positionSizeCalculator: PositionSizeCalculator = new DefaultPositionSizeCalculator(),
     private readonly riskValidator: RiskValidator = new DefaultRiskValidator(),
-    private readonly drawdownProtection: DrawdownProtection = new DefaultDrawdownProtection(),
     private readonly dailyLossProtection: DailyLossProtection = new DefaultDailyLossProtection(),
     private readonly exposureManager: ExposureManager = new DefaultExposureManager(),
     private readonly validationEngine: ValidationEngine = new DefaultValidationEngine(),

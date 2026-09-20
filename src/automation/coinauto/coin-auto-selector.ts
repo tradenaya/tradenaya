@@ -4,6 +4,7 @@ import type { MarketSnapshot } from "@/automation/types";
 import { coinSwitchRequest } from "@/lib/coinswitch";
 import { getKeysForUser } from "@/lib/coinswitch.store";
 import { scanCandles, type CoinOpportunity } from "@/automation/opportunity/scanner";
+import { TRADIAURA_CONFIG } from "@/automation/strategy/tradiaura/config";
 import { normalizeInterval } from "@/automation/market/normalizer";
 import {
   SYSTEM_LIQUIDATION_MAINTENANCE_MARGIN_PCT,
@@ -35,6 +36,21 @@ export interface SelectedOpportunity {
   leverage: number;
 }
 
+export interface RankedOpportunityResult {
+  /** Ranked candidate list (score descending) to try in order. */
+  candidates: SelectedOpportunity[];
+  /** Number of symbols fetched from the exchange ticker (before scanning). */
+  fetchedCount: number;
+  /** Number that produced a fresh snapshot and were scanned. */
+  scannedCount: number;
+  /** Number that emitted a tradable, directional opportunity. */
+  eligibleCount: number;
+  /** Human-readable description of the ranking criteria. */
+  rankingCriteria: string;
+  /** Trade count requested (per-scan candidate budget). */
+  requestedCount: number;
+}
+
 export interface InstrumentLeverageRules {
   minLeverage: number;
   maxLeverage: number;
@@ -63,7 +79,10 @@ export const LEVERAGE_UNSAFE = 0;
 export async function fetchEligibleCoins(
   apiKey: string,
   apiSecret: string,
-  limit = 30,
+  // limit is intentionally ignored — return the full universe the exchange
+  // provides and let the caller decide filtering/ranking. Passing a limit is
+  // deprecated and will be ignored.
+  _limit?: number,
 ): Promise<EligibleCoin[]> {
   const ticker = await coinSwitchRequest("/futures/all-pairs/ticker", "GET", apiKey, apiSecret, undefined, {
     exchange: "EXCHANGE_2",
@@ -78,7 +97,9 @@ export async function fetchEligibleCoins(
     }))
     .filter((c) => c.symbol.length >= 5 && c.quoteVolume24h > 0)
     .sort((a, b) => b.quoteVolume24h - a.quoteVolume24h)
-    .slice(0, Math.max(5, Math.min(100, limit)));
+    // Do not truncate the fetched universe here. Return all eligible symbols
+    // sorted by quote volume to let callers build a complete ranked list.
+    ;
 }
 
 /** Extract a valid leverage number for a symbol from its instrument rules. */
@@ -306,6 +327,26 @@ export class CoinAutoSelector {
     config: AutomationConfig,
     options: { limit?: number } = {},
   ): Promise<SelectedOpportunity | null> {
+        console.log(`[AUTO SELECTOR] selectBestOpportunity ENTER userId=${userId} limit=${options.limit ?? "n/a"}`);
+    const ranked = await this.selectRankedOpportunities(userId, config, { limit: options.limit, count: 1 });
+    return ranked?.candidates[0] ?? null;
+  }
+
+  /**
+   * Scan the eligible symbol universe and return a RANKED list of candidates
+   * (highest opportunity score first) instead of a single best coin. Cheap
+   * eligibility filters run first (24h quote-volume ranking + fresh snapshot +
+   * min-candles guard), then the full TradiAura factor stack runs only on the
+   * remaining candidates, then the top-N by score are resolved to concrete
+   * tradable specs (leverage recomputed per coin). This powers the "try
+   * candidate #1, on failure try #2…" scanning loop in the analysis cycle.
+   */
+  async selectRankedOpportunities(
+    userId: number,
+    config: AutomationConfig,
+    options: { limit?: number; count?: number } = {},
+  ): Promise<RankedOpportunityResult | null> {
+        console.log(`[AUTO SELECTOR] selectRankedOpportunities ENTER userId=${userId} limit=${options.limit ?? "n/a"} count=${options.count ?? "n/a"}`);
     const keys = await getKeysForUser(userId);
     if (!keys || keys.status !== "A") return null;
 
@@ -322,12 +363,14 @@ export class CoinAutoSelector {
       timeframe;
 
     const scanned: CoinOpportunity[] = [];
+    let scannedCount = 0;
     await mapConcurrently(candidates, 4, async (candidate) => {
       try {
         const snapshot = await adapter.getSnapshot(candidate.symbol, timeframe);
         if (snapshot.isFresh === "STALE" || snapshot.isFresh === "UNAVAILABLE") {
           return;
         }
+        scannedCount += 1;
         const candles =
           snapshot.candles[timeframe] ??
           snapshot.candles[candlesKey] ??
@@ -351,24 +394,58 @@ export class CoinAutoSelector {
     });
 
     if (scanned.length === 0) return null;
-    scanned.sort((a, b) => b.score - a.score);
 
-    const best = scanned[0];
-    const instrument = await this.deps.client.getInstrumentInfo(userId, best.symbol).catch(() => null);
-    const leverage = resolveLeverage(config, instrument, best);
-    if (leverage === LEVERAGE_UNSAFE) {
-      // No liquidation-safe leverage exists for the best opportunity (even the
-      // exchange minimum would risk liquidation). Reject/WAIT — the planner and
-      // executor gates would reject it anyway; never clamp upward into unsafe.
-      return null;
+    // Expand per-symbol opportunities into side-specific candidates so a
+    // single symbol can produce both LONG and SHORT candidates. Use the
+    // strategy's configured minimum net-score to decide which side(s) are
+    // considered "valid" opportunities.
+    const minNet = TRADIAURA_CONFIG.thresholds.minNetScore;
+    const expanded: (CoinOpportunity & { sideToUse: "LONG" | "SHORT" })[] = [];
+    for (const s of scanned) {
+      if (s.longNetScore >= minNet) {
+        expanded.push({ ...s, sideToUse: "LONG", score: s.longNetScore });
+      }
+      if (s.shortNetScore >= minNet) {
+        expanded.push({ ...s, sideToUse: "SHORT", score: s.shortNetScore });
+      }
     }
 
+    if (expanded.length === 0) return null;
+
+    // Rank all expanded opportunities by their side-specific score and liquidity.
+    expanded.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.quoteVolume24h ?? 0) - (a.quoteVolume24h ?? 0));
+
+    const candidatesResolved: SelectedOpportunity[] = [];
+    for (const best of expanded) {
+      const instrument = await this.deps.client.getInstrumentInfo(userId, best.symbol).catch(() => null);
+      // Use the side-specific candidate details: prefer the score & side we
+      // computed above rather than the original opportunity.lead side.
+      const opportunityForSide: CoinOpportunity = { ...best, side: best.sideToUse } as CoinOpportunity;
+      const leverage = resolveLeverage(config, instrument, opportunityForSide);
+      if (leverage === LEVERAGE_UNSAFE) {
+        // No liquidation-safe leverage exists for this opportunity — skip this
+        // candidate but keep evaluating the rest of the ranked list.
+        continue;
+      }
+      candidatesResolved.push({
+        symbol: best.symbol,
+        side: best.sideToUse as "LONG" | "SHORT",
+        instrument,
+        opportunity: { ...best, side: best.sideToUse, score: best.score } as CoinOpportunity,
+        leverage,
+      });
+    }
+
+    if (candidatesResolved.length === 0) return null;
+
+        console.log(`[AUTO SELECTOR] selectRankedOpportunities COMPLETE userId=${userId} resolved=${candidatesResolved.map((c) => c.symbol).join(",")}`);
     return {
-      symbol: best.symbol,
-      side: best.side as "LONG" | "SHORT",
-      instrument,
-      opportunity: best,
-      leverage,
+      candidates: candidatesResolved,
+      fetchedCount: candidates.length,
+      scannedCount,
+      eligibleCount: scanned.length,
+      rankingCriteria: `${scanned.length} tradable, directional opportunities ranked by opportunity score (descending)`,
+      requestedCount: count,
     };
   }
 

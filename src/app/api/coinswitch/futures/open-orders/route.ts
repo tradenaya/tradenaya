@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     };
 
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = await buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "POST",
@@ -23,18 +23,6 @@ export async function GET(req: NextRequest) {
 
     const raw = await res.text();
     const data = JSON.parse(raw);
-    const responsePayload = data?.data ?? data;
-    let orders: any[] = [];
-
-    if (Array.isArray(responsePayload)) {
-      orders = responsePayload;
-    } else if (Array.isArray(responsePayload?.orders)) {
-      orders = responsePayload.orders;
-    } else if (Array.isArray(responsePayload?.data)) {
-      orders = responsePayload.data;
-    } else if (responsePayload && typeof responsePayload === "object") {
-      orders = [responsePayload];
-    }
 
     if (!res.ok) {
       return NextResponse.json(
@@ -43,8 +31,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, data: orders });
+    return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
+    console.log("OPEN ORDERS ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

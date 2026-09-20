@@ -1,5 +1,6 @@
 import type { PlannerContext, PlannerValidationResult } from "./types";
 import { evaluateLiquidationSafety } from "@/automation/risk/liquidation-safety";
+import { resolveMinRiskReward } from "./risk-reward-constants";
 
 export interface RiskRewardValidator {
   validate(context: PlannerContext, entryPrice: number, stopLoss: number, takeProfit: number): PlannerValidationResult;
@@ -22,14 +23,24 @@ export class DefaultRiskRewardValidator implements RiskRewardValidator {
     const stopDistance = Math.abs(entryPrice - stopLoss);
     const takeProfitDistance = Math.abs(takeProfit - entryPrice);
     const riskRewardRatio = stopDistance > 0 ? takeProfitDistance / stopDistance : 0;
-    const minRiskRewardRatio = context.config.minRiskRewardRatio ?? 1.5;
+    const minRiskRewardRatio = resolveMinRiskReward(context.config);
     const minStopDistancePct = context.config.minStopDistancePct ?? 0.008;
     const maxStopDistancePct = context.config.maxStopDistancePct ?? 0.05;
     const maxVolatilityPct = context.config.maxVolatilityPct ?? 0.03;
     const volatilityPct = price > 0 ? atr / price : 0;
 
-    if (riskRewardRatio < minRiskRewardRatio) {
-      reasons.push(`Risk reward ratio ${riskRewardRatio.toFixed(2)} is below ${minRiskRewardRatio}`);
+    const symbol = context.config.symbol;
+    const logLine =
+      `[rr] ${symbol} R:R validation — entry ${entryPrice} | SL ${stopLoss} | TP ${takeProfit} | ` +
+      `risk distance ${stopDistance.toFixed(6)} | reward distance ${takeProfitDistance.toFixed(6)} | ` +
+      `computed R:R ${riskRewardRatio.toFixed(2)} | required min R:R ${minRiskRewardRatio.value} ` +
+      `(source: ${minRiskRewardRatio.source}) | comparison ${riskRewardRatio.toFixed(2)} >= ${minRiskRewardRatio.value} ? ${riskRewardRatio >= minRiskRewardRatio.value}`;
+
+    if (riskRewardRatio < minRiskRewardRatio.value) {
+      reasons.push(`Risk reward ratio ${riskRewardRatio.toFixed(2)} is below ${minRiskRewardRatio.value}`);
+      console.warn(`${logLine} -> REJECT`);
+    } else {
+      console.log(`${logLine} -> pass`);
     }
 
     if (stopDistance < price * minStopDistancePct) {

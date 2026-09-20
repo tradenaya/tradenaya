@@ -82,6 +82,9 @@ const EVENT_META: Record<string, { label: string; icon: typeof ActivityIcon; ton
   CYCLE_RETRY: { label: "Retrying", icon: Loader2, tone: "text-amber-400" },
   LOCK_ACQUIRED: { label: "Lock acquired", icon: Lock, tone: "text-zinc-400" },
   LOCK_RELEASED: { label: "Lock released", icon: Lock, tone: "text-zinc-400" },
+  AUTO_CANDIDATE: { label: "Auto candidate", icon: Radar, tone: "text-sky-400" },
+  AUTO_CANDIDATE_RESULT: { label: "Auto candidate result", icon: ShieldAlert, tone: "text-amber-400" },
+  AUTO_SCAN_COMPLETE: { label: "Auto scan", icon: FlaskConical, tone: "text-zinc-400" },
 };
 
 const PHASE_META: Record<string, { label: string; tone: string; icon: typeof ActivityIcon }> = {

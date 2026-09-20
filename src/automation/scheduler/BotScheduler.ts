@@ -217,7 +217,7 @@ export class BotScheduler {
   /** Seed the DB symbol column for an auto-select bot with the current best coin. */
   private async resolveInitialSymbol(userId: number, config: AutomationConfig): Promise<string> {
     try {
-      const selected = await this.coinAutoSelector.selectBestOpportunity(userId, config, { limit: 30 });
+      const selected = await this.coinAutoSelector.selectBestOpportunity(userId, config);
       if (selected) return selected.symbol;
     } catch (error) {
       console.error("[auto-select] initial symbol resolution failed", error);

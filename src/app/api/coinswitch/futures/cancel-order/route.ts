@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     const payload = { exchange: "EXCHANGE_2", order_id };
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = await buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "DELETE",
@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
+    console.log("CANCEL ORDER ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

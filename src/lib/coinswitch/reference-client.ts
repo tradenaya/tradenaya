@@ -1,10 +1,12 @@
 import crypto from "crypto";
-import { getCoinSwitchEpoch } from "./time-sync";
 
 export const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
-if (!BASE_URL) {
-  // don't throw here so the app can still run if the base URL is not configured
+const DEFAULT_API_KEY = process.env.COINSWITCH_API_KEY!;
+const DEFAULT_API_SECRET = process.env.COINSWITCH_API_SECRET!;
+
+if (!DEFAULT_API_KEY || !DEFAULT_API_SECRET || !BASE_URL) {
+  // don't throw here so the app can still run if keys are user-scoped
 }
 
 function createSignature(
@@ -48,20 +50,16 @@ export interface SignedRequest {
  *                   both get embedded into the signed path as a query string,
  *                   same as the existing kline route does for GET.
  */
-export async function buildSignedRequest(
+export function buildSignedRequest(
   method: "GET" | "POST" | "DELETE",
   endpoint: string,
   params?: Record<string, any>,
   apiKey?: string,
   apiSecret?: string
-): Promise<SignedRequest> {
+): SignedRequest {
   let query = "";
 
-  // CoinSwitch signs GET parameters as a query string on the path, but
-  // POST/DELETE send their parameters as the JSON request body — the signed
-  // path must stay clean there, or the signature never matches and the API
-  // rejects the request with "Malformed request data".
-  if (method === "GET" && params && Object.keys(params).length > 0) {
+  if (params && Object.keys(params).length > 0) {
     query =
       "?" +
       new URLSearchParams(
@@ -75,19 +73,18 @@ export async function buildSignedRequest(
   const fullEndpoint = `${endpoint}${query}`;
   const signPath = `/trade/api/v2${fullEndpoint}`;
 
-  const epoch = await getCoinSwitchEpoch();
+  const epoch = Date.now().toString();
 
-  if (!apiKey || !apiSecret) {
-    throw new Error("CoinSwitch credentials are missing. Please reconnect your CoinSwitch account to continue.");
-  }
+  const keyToUse = apiKey || DEFAULT_API_KEY;
+  const secretToUse = apiSecret || DEFAULT_API_SECRET;
 
-  const signature = createSignature(method, signPath, apiSecret, epoch);
+  const signature = createSignature(method, signPath, secretToUse, epoch);
 
   return {
     url: `${BASE_URL}${fullEndpoint}`,
     headers: {
       "Content-Type": "application/json",
-      "X-AUTH-APIKEY": apiKey,
+      "X-AUTH-APIKEY": keyToUse,
       "X-AUTH-SIGNATURE": signature,
       "X-AUTH-EPOCH": epoch,
     },

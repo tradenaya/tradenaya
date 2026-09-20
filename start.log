@@ -1,4 +1,10 @@
+
+> tradiaura@0.1.0 start
+> next start
+
 ▲ Next.js 16.2.6
 - Local:         http://localhost:3000
-- Network:       http://172.31.240.1:3000
-✓ Ready in 316ms
+- Network:       http://172.17.0.1:3000
+✓ Ready in 650ms
+[cleanup] pruned activity logs older than 1 hour: scheduler=0 position=0 notification=0
+[cleanup] pruned activity logs older than 1 hour: scheduler=0 position=0 notification=0

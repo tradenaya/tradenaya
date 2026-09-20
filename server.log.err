@@ -1,0 +1,6 @@
+[auto-select] failed for bot 29 Error: {"message":"Invalid access"}
+    at i (C:\Users\HP\Desktop\trade\tradenaya\.next\server\chunks\[root-of-the-server]__06oy7o3._.js:1:806)
+    at async _ (C:\Users\HP\Desktop\trade\tradenaya\.next\server\chunks\[root-of-the-server]__06oy7o3._.js:1:6100)
+    at async Object.selectBestOpportunity (C:\Users\HP\Desktop\trade\tradenaya\.next\server\chunks\[root-of-the-server]__06oy7o3._.js:1:6996)
+    at async B.runCycle (C:\Users\HP\Desktop\trade\tradenaya\.next\server\chunks\src_automation_scheduler_BotScheduler_ts_0gcfa-q._.js:13:5759)
+    at async M.runBotCycle (C:\Users\HP\Desktop\trade\tradenaya\.next\server\chunks\src_automation_scheduler_BotScheduler_ts_0gcfa-q._.js:13:23520)

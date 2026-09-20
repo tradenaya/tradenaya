@@ -11,19 +11,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const apiKey = body?.apiKey;
-    const apiSecret = body?.apiSecret;
-    const validUntil: string | null | undefined = body?.validUntil;
+    const apiKey = body?.apiKey || process.env.COINSWITCH_API_KEY;
+    const apiSecret = body?.apiSecret || process.env.COINSWITCH_API_SECRET;
 
     if (!apiKey || !apiSecret) {
-      return NextResponse.json({ success: false, message: "Please enter your CoinSwitch API key and secret before connecting." }, { status: 400 });
+      return NextResponse.json({ success: false, message: "CoinSwitch credentials missing" }, { status: 400 });
     }
 
     // verify connection first
     const response = await verifyConnection(apiKey, apiSecret);
 
     // save keys for this user (encrypted)
-    await saveKeysForUser(customer.customerId, apiKey, apiSecret, validUntil);
+    await saveKeysForUser(customer.customerId, apiKey, apiSecret);
 
     return NextResponse.json({ success: true, data: response });
   } catch (error: any) {

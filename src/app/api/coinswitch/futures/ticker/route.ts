@@ -9,18 +9,11 @@ export async function GET(req: NextRequest) {
 
     const keys = await getKeysFromRequest(req as any);
 
-    const apiKey = keys?.apiKey;
-    const apiSecret = keys?.apiSecret;
-
-    if (!apiKey || !apiSecret) {
-      throw new Error("No saved CoinSwitch credentials were found for this account. Please reconnect your CoinSwitch account.");
-    }
-
     const response = await coinSwitchRequest(
       "/futures/all-pairs/ticker",
       "GET",
-      apiKey,
-      apiSecret,
+      keys?.apiKey || process.env.COINSWITCH_API_KEY!,
+      keys?.apiSecret || process.env.COINSWITCH_API_SECRET!,
       undefined,
       {
         exchange: "EXCHANGE_2"
@@ -36,6 +29,10 @@ export async function GET(req: NextRequest) {
 
   } catch(error:any){
 
+    console.log(
+      "FUTURES TICKER ERROR",
+      error
+    );
 
 
     return NextResponse.json(

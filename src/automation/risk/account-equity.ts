@@ -32,15 +32,26 @@ export interface AccountEquityInput {
  */
 export function computeAccountEquity(input: AccountEquityInput): number | null {
   const wallet = input.wallet;
-  if (!wallet) return null;
+  if (!wallet) {
+    console.warn("[drawdown] computeAccountEquity — no wallet snapshot; equity = null (cannot measure)");
+    return null;
+  }
 
   // Authoritative equity from the wallet — positional PnL is already inside it.
   if (wallet.equity != null && Number.isFinite(wallet.equity) && wallet.equity > 0) {
+    console.log(
+      `[drawdown] account equity source = wallet.equity (authoritative exchange field), value ${wallet.equity}`,
+    );
     return wallet.equity;
   }
 
   const total = wallet.total;
-  if (total == null || !Number.isFinite(total) || total <= 0) return null;
+  if (total == null || !Number.isFinite(total) || total <= 0) {
+    console.warn(
+      `[drawdown] computeAccountEquity — wallet.total missing/invalid (${total}); equity = null (fail safe)`,
+    );
+    return null;
+  }
 
   const positions = Array.isArray(input.positions) ? input.positions : [];
   let unrealized = 0;
@@ -49,11 +60,17 @@ export function computeAccountEquity(input: AccountEquityInput): number | null {
     if (pnl == null || !Number.isFinite(Number(pnl))) {
       // A live position whose PnL is unknown → equity cannot be determined
       // safely. Fail rather than slot in 0 (which could mask a real loss).
+      console.warn(
+        `[drawdown] computeAccountEquity — position ${position?.symbol} has unknown unrealized PnL; equity = null (fail safe)`,
+      );
       return null;
     }
     unrealized += Number(pnl);
   }
 
+  console.log(
+    `[drawdown] account equity source = wallet.total ${total} + Σ unrealized PnL ${unrealized} of ${positions.length} open position(s) = ${total + unrealized}`,
+  );
   return total + unrealized;
 }
 
@@ -96,6 +113,9 @@ export function resolveDrawdownPeak(input: DrawdownPeakInput): DrawdownPeakResul
   const persistedBasis: PeakEquityBasis = input.persistedBasis === "equity" ? "equity" : "available_balance";
 
   if (!validEquity) {
+    console.warn(
+      `[drawdown] peak resolution — equity invalid; preserving persisted peak ${input.persistedPeak} (basis ${persistedBasis}), no persist`,
+    );
     return {
       peak: input.persistedPeak != null && input.persistedPeak > 0 ? input.persistedPeak : null,
       basis: persistedBasis,
@@ -106,10 +126,16 @@ export function resolveDrawdownPeak(input: DrawdownPeakInput): DrawdownPeakResul
   // Normal ratchet under the current equity metric.
   if (persistedBasis === "equity" && input.persistedPeak != null && input.persistedPeak > 0) {
     const peak = Math.max(input.persistedPeak, input.equity as number);
+    console.log(
+      `[drawdown] peak ratchet (equity basis) — persisted peak ${input.persistedPeak}, current equity ${input.equity} -> peak ${peak}${peak !== input.persistedPeak ? " (raised)" : " (unchanged)"}`,
+    );
     return { peak, basis: "equity", needsPersist: peak !== input.persistedPeak };
   }
 
   // Legacy available-balance peak (or no peak yet): re-baseline explicitly to
   // the current true equity and mark the row as equity-basis.
+  console.log(
+    `[drawdown] peak re-baseline — legacy/absent persisted peak ${input.persistedPeak} (basis ${persistedBasis}); rebaselining to current true equity ${input.equity}`,
+  );
   return { peak: input.equity as number, basis: "equity", needsPersist: true };
 }

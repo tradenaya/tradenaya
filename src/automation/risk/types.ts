@@ -1,4 +1,5 @@
 import type { TradePlan } from "@/automation/planner/types";
+import { DEFAULT_MIN_RISK_REWARD_RATIO } from "@/automation/planner/risk-reward-constants";
 
 export type RiskVerdict = "APPROVED" | "REJECTED";
 
@@ -26,7 +27,7 @@ export const DEFAULT_RISK_CONFIG: RiskManagerConfig = {
   dailyLossLimitPct: 5,
   dailyTradeLimit: 20,
   maxDrawdownPct: 15,
-  minRiskRewardRatio: 2,
+  minRiskRewardRatio: DEFAULT_MIN_RISK_REWARD_RATIO,
   tolerance: 1e-9,
 };
 

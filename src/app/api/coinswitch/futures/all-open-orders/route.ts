@@ -4,34 +4,18 @@ import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 
 export async function GET(req: NextRequest) {
   try {
-    const requestPayload = { exchange: "EXCHANGE_2", limit: 50 };
+    const payload = { exchange: "EXCHANGE_2", limit: 50 };
     const keys = await getKeysFromRequest(req as any);
-    const { url, headers } = await buildSignedRequest("POST", "/futures/orders/open", requestPayload, keys?.apiKey, keys?.apiSecret);
+    const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(requestPayload),
+      body: JSON.stringify(payload),
     });
 
     const raw = await res.text();
     const data = JSON.parse(raw);
-    const responsePayload = data?.data ?? data;
-    let orders: unknown[] = [];
-
-    if (Array.isArray(responsePayload)) {
-      orders = responsePayload;
-    } else if (responsePayload && typeof responsePayload === "object") {
-      const maybeOrders = (responsePayload as { orders?: unknown[] }).orders;
-      const maybeData = (responsePayload as { data?: unknown[] }).data;
-      if (Array.isArray(maybeOrders)) {
-        orders = maybeOrders;
-      } else if (Array.isArray(maybeData)) {
-        orders = maybeData;
-      } else {
-        orders = [responsePayload];
-      }
-    }
 
     if (!res.ok) {
       return NextResponse.json(
@@ -40,8 +24,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, data: orders });
+    return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
+    console.log("ALL OPEN ORDERS ERROR", error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

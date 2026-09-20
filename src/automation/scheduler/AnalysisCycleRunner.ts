@@ -5,7 +5,7 @@ import { OrderExecutorService } from "@/automation/executor/order-executor";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import type { OpenOrderSnapshot, OpenPositionSnapshot, RiskDecision, RiskManagerInput } from "@/automation/risk/types";
 import type { AutomationConfig } from "@/automation/types";
-import type { CoinAutoSelector, SelectedOpportunity } from "@/automation/coinauto/coin-auto-selector";
+import type { CoinAutoSelector, RankedOpportunityResult, SelectedOpportunity } from "@/automation/coinauto/coin-auto-selector";
 import type { BotLifecycleService, BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { ExecutionRecord } from "@/automation/executor/types";
 import type { PositionManagerConfig } from "@/automation/position/PositionManagerTypes";
@@ -19,8 +19,12 @@ import { clientOrderId } from "@/automation/executor/order-id";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
 import { computeAccountEquity, resolveDrawdownPeak } from "@/automation/risk/account-equity";
+import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
+
+/** Per-scan candidate budget: try up to N ranked candidates before the next 5-min scan. */
+// No fixed candidate budget: evaluate the full ranked opportunity list.
 
 function normalizeErrorMessage(message: string): string {
   const trimmed = message.trim();
@@ -113,39 +117,235 @@ export class AnalysisCycleRunner {
       return this.handleCycleError(bot, error);
     }
 
-    // Auto-select best coin: resolve the strongest current opportunity before
-    // running the engine. Every downstream step (planner, risk, executor) keys
-    // off config.symbol / plan.symbol, so overriding them here routes the whole
-    // trade to the selected coin without touching position-manager logic. If no
-    // valid opportunity exists, wait for the next analysis cycle (rotation).
-    let selected: SelectedOpportunity | undefined;
+    // Mandatory debug logs to trace AUTO-selection runtime path
+    console.log(`[AUTO DEBUG] botId=${bot.id} selectionMode=${config.autoSelect ? "AUTO" : "FIXED"}`);
+    console.log(`[AUTO DEBUG] configuredCoin=${bot.symbol}`);
+    // FIX 3 — auto-select bots scan the ranked candidate list for THIS 5-minute
+    // cycle. Candidate #1 is evaluated first; if it fails any validation/risk
+    // check, candidate #2 is evaluated IMMEDIATELY (no waiting for the next
+    // scan). The cycle only ends when a candidate passes all checks and an order
+    // is submitted, or every eligible candidate has been rejected.
     if (config.autoSelect && this.deps.coinAutoSelector) {
-      const instrumentResult = await this.deps.coinAutoSelector
-        .selectBestOpportunity(bot.userId, config)
-        .catch((error) => {
-          console.error(`[auto-select] failed for bot ${bot.id}`, error);
-          return null;
+      console.log(`[AUTO DEBUG] executionPath=auto-select`);
+      return this.runAutoSelectScan(bot, config);
+    }
+    console.log(`[AUTO DEBUG] executionPath=fixed-symbol`);
+    return this.runFixedSymbolCycle(bot, config);
+  }
+
+  /**
+   * Auto-select scan: build a ranked candidate list for this 5-minute scan and
+   * try candidates in score order until one trades or all are rejected. Cheap
+   * eligibility filtering (ticker volume + fresh snapshot + min-candles) already
+   * happened inside the selector; the expensive strategy stack runs only on the
+   * returned top-N.
+   */
+  private async runAutoSelectScan(bot: BotRuntimeState, baseConfig: AutomationConfig): Promise<CycleResult> {
+    const selector = this.deps.coinAutoSelector;
+    if (!selector) return this.runFixedSymbolCycle(bot, baseConfig);
+
+    const scanId = `${bot.id}-${Date.now()}`;
+    console.log(`[AUTO DEBUG] runAutoSelectScan ENTERED scanId=${scanId} botId=${bot.id}`);
+    let ranked: RankedOpportunityResult | null = null;
+    try {
+      // Request a full ranked list — do not impose an artificial count limit.
+      ranked = await selector.selectRankedOpportunities(bot.userId, baseConfig, {
+        limit: undefined,
+      });
+    } catch (error) {
+      return this.handleCycleError(bot, error);
+    }
+
+    const candidates = ranked?.candidates ?? [];
+    console.log(
+      `[scan] SCAN START — timeframe ${baseConfig.timeframe} | symbols fetched ${ranked?.fetchedCount ?? 0} | ` +
+        `eligible (tradable & directional) ${ranked?.eligibleCount ?? 0} | ranking: ${ranked?.rankingCriteria ?? "n/a"}`,
+    );
+    console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} rankedCandidates=[${(candidates || []).map((c) => c.symbol).join(",")} ]`);
+    liveActivityHub.publish({
+      botId: bot.id,
+      userId: bot.userId,
+      symbol: "AUTO",
+      phase: "lifecycle",
+      message: `Scan started for ${baseConfig.timeframe}: ${candidates.length} ranked candidate(s) available`,
+    });
+
+    if (candidates.length === 0) {
+      const message = "No suitable trading opportunity currently meets the bot's requirements. Will re-check next cycle.";
+      await this.completeAnalysis(bot, "WAIT", message);
+      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
+      console.log(
+        `[scan] SCAN COMPLETE — candidates evaluated 0 | rejected 0 | rejection reasons: none (no eligible candidates) | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
+      );
+      return { executed: true, state: "RUNNING", action: "ANALYZED", message };
+    }
+
+    const rejections: string[] = [];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const index = i + 1;
+      console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} START`);
+      // Persist a lightweight candidate-start event so the UI activity feed and
+      // historical queries see the per-candidate evaluation in the same
+      // pipeline used by other scheduler events.
+      try {
+        await this.deps.events.emit({
+          type: "AUTO_CANDIDATE",
+          botId: bot.id,
+          userId: bot.userId,
+          message: `scanId=${scanId} candidate=${index}/${candidates.length} START symbol=${candidate.symbol}`,
+          data: { scanId, candidateIndex: index, totalCandidates: candidates.length, symbol: candidate.symbol },
         });
-      if (!instrumentResult) {
-        const message = "No suitable trading opportunity currently meets the bot's requirements. Will re-check next cycle.";
-        await this.completeAnalysis(bot, "WAIT", message);
-        liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
-        return { executed: true, state: "RUNNING", action: "ANALYZED", message };
+      } catch {
+        // non-fatal — live trace remains authoritative
       }
-      selected = instrumentResult;
-      config = { ...config, symbol: instrumentResult.symbol, leverage: instrumentResult.leverage };
+      const outcome = await this.tryCandidate(bot, baseConfig, candidate, index, scanId);
+      if (outcome.status === "SUCCESS") {
+        console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} ORDER SUBMITTED`);
+        // Persist scan-level completion as ORDER_SUBMITTED
+        try {
+          await this.deps.events.emit({
+            type: "AUTO_SCAN_COMPLETE",
+            botId: bot.id,
+            userId: bot.userId,
+            message: `scanId=${scanId} COMPLETE reason=ORDER_SUBMITTED symbol=${candidate.symbol} candidate=${index}/${candidates.length}`,
+            data: { scanId, completedReason: "ORDER_SUBMITTED", symbol: candidate.symbol, candidateIndex: index },
+          });
+        } catch {}
+        console.log(`[AUTO SCAN] COMPLETE scanId=${scanId} reason=ORDER_SUBMITTED`);
+        return outcome.result;
+      }
+      console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} REJECTED reason=${outcome.reason}`);
+      try {
+        await this.deps.events.emit({
+          type: "AUTO_CANDIDATE_RESULT",
+          botId: bot.id,
+          userId: bot.userId,
+          message: `scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} RESULT=REJECT reason=${outcome.reason}`,
+          data: { scanId, candidateIndex: index, totalCandidates: candidates.length, symbol: candidate.symbol, reason: outcome.reason },
+        });
+      } catch {}
+      if (index < candidates.length) console.log(`[AUTO SCAN] CONTINUING TO candidate ${index + 1}/${candidates.length}`);
+      rejections.push(`#${index} ${candidate.symbol}: ${outcome.reason}`);
+    }
+
+    const grouped = this.groupRejectionReasons(rejections);
+    const rejectedSymbols = candidates.map((c) => c.symbol).join(", ");
+    const summary = `All ${candidates.length} ranked candidate(s) rejected for this scan (${rejectedSymbols}). ${grouped}`;
+    console.log(
+      `[scan] SCAN COMPLETE — candidates evaluated ${candidates.length} | rejected ${rejections.length} | ` +
+        `${grouped} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
+    );
+    console.log(`[AUTO SCAN] COMPLETE scanId=${scanId} reason=ALL_CANDIDATES_REJECTED`);
+    await this.deps.events.emit({
+      type: "RISK_REJECTED",
+      botId: bot.id,
+      userId: bot.userId,
+      message: summary,
+      data: { status: "RISK_REJECTED", candidatesEvaluated: candidates.length, rejected: rejections.length, rejections },
+    });
+    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message: `Scan complete — ${summary}` });
+    await this.completeAnalysis(bot, "RISK_REJECTED", summary);
+    // Persist an AUTO scan completion marker for the activity feed/history.
+    try {
       await this.deps.events.emit({
-        type: "ANALYSIS_STARTED",
+        type: "AUTO_SCAN_COMPLETE",
         botId: bot.id,
         userId: bot.userId,
-        message: `Auto-selected ${instrumentResult.side} ${instrumentResult.symbol} (${instrumentResult.leverage}x, score ${instrumentResult.opportunity.score})`,
-        data: { selectedSymbol: instrumentResult.symbol, side: instrumentResult.side, leverage: instrumentResult.leverage },
+        message: `scanId=${scanId} COMPLETE reason=ALL_CANDIDATES_REJECTED evaluated=${candidates.length} rejected=${rejections.length}`,
+        data: { scanId, evaluated: candidates.length, rejected: rejections.length, rejections },
       });
-      void this.persistAutoSelection(bot.id, instrumentResult);
-    }
-    // Use the selected coin for messaging when auto-select is active.
-    const cycleSymbol = selected ? selected.symbol : bot.symbol;
+    } catch {}
+    return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${summary}` };
+  }
 
+  /** Fixed-symbol cycle: evaluate the single configured symbol (no coin rotation). */
+  private async runFixedSymbolCycle(bot: BotRuntimeState, baseConfig: AutomationConfig): Promise<CycleResult> {
+    const cycleSymbol = bot.symbol;
+    console.log(`[scan] SCAN START — fixed symbol ${cycleSymbol} | timeframe ${baseConfig.timeframe} | candidates 1`);
+
+    const planned = await this.runEngineAndPlan(bot, baseConfig, cycleSymbol);
+    if (planned.status === "ERROR") return planned.result;
+    if (planned.status === "NO_PLAN") {
+      await this.completeAnalysis(bot, "WAIT", planned.reason);
+      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message: planned.reason });
+      console.log(
+        `[scan] SCAN COMPLETE — candidates evaluated 1 | rejected 1 | reason: ${planned.reason} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
+      );
+      return { executed: true, state: "RUNNING", action: "ANALYZED", message: planned.reason };
+    }
+
+    const submitted = await this.checkRiskAndSubmit(bot, planned.config, planned.plan, cycleSymbol, 1);
+    if (submitted.status === "DONE") return submitted.result;
+
+    await this.deps.events.emit({ type: "RISK_REJECTED", botId: bot.id, userId: bot.userId, message: submitted.reason });
+    await this.completeAnalysis(bot, "RISK_REJECTED", submitted.reason);
+    console.log(
+      `[scan] SCAN COMPLETE — candidates evaluated 1 | rejected 1 | reason: ${submitted.reason} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
+    );
+    return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${submitted.reason}` };
+  }
+
+  /**
+   * Evaluate one ranked candidate end-to-end (engine -> plan -> live risk ->
+   * order). Returns SUCCESS when the cycle is fully handled (order submitted or
+   * a terminal control-flow exit) or REJECTED with the reason when the candidate
+   * failed any pre-submission validation so the caller can try candidate #N+1
+   * immediately instead of waiting for the next 5-minute scan.
+   */
+  private async tryCandidate(
+    bot: BotRuntimeState,
+    baseConfig: AutomationConfig,
+    selected: SelectedOpportunity,
+    index: number,
+    scanId?: string,
+  ): Promise<{ status: "SUCCESS"; result: CycleResult } | { status: "REJECTED"; reason: string }> {
+    const config: AutomationConfig = {
+      ...baseConfig,
+      symbol: selected.symbol,
+      leverage: selected.leverage,
+    };
+    const cycleSymbol = selected.symbol;
+    const opp = selected.opportunity;
+    const confidenceText = opp?.confidence != null ? `${Math.round(Number(opp.confidence) * 100)}%` : "n/a";
+    console.log(
+      `[scan] CANDIDATE #${index} — symbol ${cycleSymbol} | strategy direction ${selected.side} | ` +
+        `confidence ${confidenceText} | score ${opp?.score ?? "n/a"} | entry ${opp?.price ?? "n/a"}`,
+    );
+    if (scanId) console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} candidate=${index} symbol=${cycleSymbol} SELECTED_FOR_EVALUATION`);
+    liveActivityHub.publish({
+      botId: bot.id,
+      userId: bot.userId,
+      symbol: cycleSymbol,
+      phase: "strategy",
+      message: `CANDIDATE #${index}: ${selected.side} ${cycleSymbol} (confidence ${confidenceText}, score ${opp?.score ?? "n/a"}) — evaluating…`,
+      detail: { side: selected.side, leverage: selected.leverage, score: opp?.score, confidence: opp?.confidence },
+    });
+    // Keep the DB / display symbol in sync with the candidate currently analyzed.
+    void this.persistAutoSelection(bot.id, selected);
+
+    const planned = await this.runEngineAndPlan(bot, config, cycleSymbol);
+    if (planned.status === "ERROR") return { status: "SUCCESS", result: planned.result };
+    if (planned.status === "NO_PLAN") {
+      this.rejectCandidate(bot, cycleSymbol, index, planned.reason, "strategy/planner");
+      return { status: "REJECTED", reason: planned.reason };
+    }
+
+    const submitted = await this.checkRiskAndSubmit(bot, planned.config, planned.plan, cycleSymbol, index, scanId);
+    if (submitted.status === "DONE") return { status: "SUCCESS", result: submitted.result };
+    return { status: "REJECTED", reason: submitted.reason };
+  }
+
+  /** Run the strategy engine + planner for one symbol; emit the TRADE_PLANNED event. */
+  private async runEngineAndPlan(
+    bot: BotRuntimeState,
+    config: AutomationConfig,
+    cycleSymbol: string,
+  ): Promise<
+    | { status: "PLAN"; config: AutomationConfig; plan: TradePlan }
+    | { status: "NO_PLAN"; reason: string }
+    | { status: "ERROR"; result: CycleResult }
+  > {
     let engineResult;
     try {
       engineResult = await this.deps.engine(bot.userId).run(config, (step) => {
@@ -159,16 +359,13 @@ export class AnalysisCycleRunner {
         });
       });
     } catch (error) {
-      return this.handleCycleError(bot, error);
+      return { status: "ERROR", result: await this.handleCycleError(bot, error) };
     }
 
     await this.deps.refreshLease?.(bot.id);
 
     if (engineResult.signal === "WAIT" || !engineResult.plan) {
-      const message = engineResult.analysis?.summary ?? `No valid opportunity for ${cycleSymbol}`;
-      await this.completeAnalysis(bot, "WAIT", message);
-      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message });
-      return { executed: true, state: "RUNNING", action: "ANALYZED", message };
+      return { status: "NO_PLAN", reason: engineResult.analysis?.summary ?? `No valid opportunity for ${cycleSymbol}` };
     }
 
     const plan = engineResult.plan;
@@ -179,25 +376,46 @@ export class AnalysisCycleRunner {
     await this.deps.events.emit({ type: "TRADE_PLANNED", botId: bot.id, userId: bot.userId, message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, data: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence, analysis: engineResult.analysis } });
     liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "plan", message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, detail: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence } });
 
+    return { status: "PLAN", config, plan };
+  }
+
+  /**
+   * Live account risk gate for one planned candidate, then order submission.
+   * On risk rejection publishes the failure and returns CONTINUE so the scan
+   * loop can immediately evaluate the next ranked candidate.
+   */
+  private async checkRiskAndSubmit(
+    bot: BotRuntimeState,
+    config: AutomationConfig,
+    plan: TradePlan,
+    cycleSymbol: string,
+    index: number,
+    scanId?: string,
+  ): Promise<{ status: "CONTINUE"; reason: string } | { status: "DONE"; result: CycleResult }> {
     const risk = await this.evaluateRisk(bot, config, plan);
+    const riskSnapshotTs = new Date().toISOString();
+    // Log detailed risk snapshot metadata for traceability across candidates
+    if (scanId) console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} userId=${bot.userId} candidate=${index} symbol=${cycleSymbol} riskSnapshotTs=${riskSnapshotTs} decision_approved=${risk.decision.approved} positionSize=${risk.decision.positionSize}`);
+    this.logCandidateDetails(cycleSymbol, plan, risk.decision);
+
     if (!risk.decision.approved || risk.decision.positionSize <= 0) {
-      await this.deps.events.emit({ type: "RISK_REJECTED", botId: bot.id, userId: bot.userId, message: risk.decision.reason });
-      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "risk", message: `Risk check rejected: ${risk.decision.reason}` });
-      await this.completeAnalysis(bot, "RISK_REJECTED", risk.decision.reason);
-      return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${risk.decision.reason}` };
+      this.rejectCandidate(bot, cycleSymbol, index, risk.decision.reason, "risk");
+      return { status: "CONTINUE", reason: risk.decision.reason };
     }
-    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "risk", message: `Risk check passed — position size ${risk.decision.positionSize}.` });
+    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "risk", message: `Risk check passed — position size ${risk.decision.positionSize}.` });
+    console.log(`[scan] CANDIDATE #${index} (${cycleSymbol}) → PASSED — proceeding to order submission`);
 
     const freshBeforeOrder = await this.deps.store.getBot(bot.id);
     if ((freshBeforeOrder?.desiredStatus ?? "RUNNING") !== "RUNNING") {
       await this.deps.stateManager.transition(bot.id, "TRADE_PLANNED", "STOPPED", JSON.stringify(plan));
       await this.deps.events.emit({ type: "BOT_STOPPED", botId: bot.id, userId: bot.userId, message: "Bot was stopped before order placement; no trade created" });
-      return { executed: false, state: "STOPPED", action: "SKIPPED", message: "Bot stopped before order placement" };
+      return { status: "DONE", result: { executed: false, state: "STOPPED", action: "SKIPPED", message: "Bot stopped before order placement" } };
     }
 
     await this.deps.stateManager.transition(bot.id, "TRADE_PLANNED", "ORDER_PENDING");
     await this.deps.refreshLease?.(bot.id);
 
+    console.log(`[scan] ORDER SUBMISSION START — ${plan.side ?? plan.action} ${cycleSymbol} | size ${risk.decision.positionSize} | leverage ${config.leverage}`);
     let executionResult;
     try {
       executionResult = await this.deps.executor.execute({
@@ -209,11 +427,12 @@ export class AnalysisCycleRunner {
         allocatedCapital: risk.allocatedCapital,
       });
     } catch (error) {
-      return this.handleCycleError(bot, error);
+      return { status: "DONE", result: await this.handleCycleError(bot, error) };
     }
 
     await this.deps.lifecycle.updateBotHeartbeat(bot.id, null, new Date().toISOString());
     await this.deps.lifecycle.updateHeartbeatAt(bot.id);
+    console.log(`[scan] ORDER RESULT — state ${executionResult.state} | ${executionResult.message}`);
 
     switch (executionResult.state) {
       case "MONITORING_ENTRY":
@@ -236,27 +455,77 @@ export class AnalysisCycleRunner {
           data: { executionId: executionResult.executionId, filledQuantity: executionResult.filledQuantity, remainingQuantity: executionResult.remainingQuantity },
         });
         liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message: executionResult.message });
-        return { executed: true, state: "ORDER_PENDING", action: "ANALYZED", message: executionResult.message };
+        return { status: "DONE", result: { executed: true, state: "ORDER_PENDING", action: "ANALYZED", message: executionResult.message } };
       case "ENTRY_FILLED":
       case "PARTIALLY_FILLED":
         await this.deps.lifecycle.setRetryCount(bot.id, 0);
         await this.handoff(bot);
         await this.deps.events.emit({ type: "POSITION_OPENED", botId: bot.id, userId: bot.userId, message: `Position opened for ${bot.symbol}`, data: { executionId: executionResult.executionId, filledQuantity: executionResult.filledQuantity } });
         liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "execution", message: `Entry filled — position opened for ${bot.symbol} (${executionResult.filledQuantity}).` });
-        return { executed: true, state: "POSITION_OPEN", action: "TRADE_EXECUTED", message: "Entry filled; responsibility transferred to Position Manager" };
+        return { status: "DONE", result: { executed: true, state: "POSITION_OPEN", action: "TRADE_EXECUTED", message: "Entry filled; responsibility transferred to Position Manager" } };
       case "UNPROTECTED":
         await this.deps.lifecycle.setRetryCount(bot.id, 0);
         await this.handoff(bot);
-        return { executed: true, state: "POSITION_OPEN", action: "TRADE_EXECUTED", message: "Entry filled but unprotected; Position Manager will attempt emergency protection" };
+        return { status: "DONE", result: { executed: true, state: "POSITION_OPEN", action: "TRADE_EXECUTED", message: "Entry filled but unprotected; Position Manager will attempt emergency protection" } };
       case "CANCELLED":
         await this.completeAnalysis(bot, "CANCELLED", executionResult.message);
-        return { executed: true, state: "RUNNING", action: "ANALYZED", message: executionResult.message };
+        return { status: "DONE", result: { executed: true, state: "RUNNING", action: "ANALYZED", message: executionResult.message } };
       case "FAILED":
-        return this.handleCycleError(bot, new Error(executionResult.message || "Execution failed"));
+        return { status: "DONE", result: await this.handleCycleError(bot, new Error(executionResult.message || "Execution failed")) };
       default:
         await this.completeAnalysis(bot, "CANCELLED", executionResult.message);
-        return { executed: true, state: "RUNNING", action: "ANALYZED", message: executionResult.message };
+        return { status: "DONE", result: { executed: true, state: "RUNNING", action: "ANALYZED", message: executionResult.message } };
     }
+  }
+
+  /** Log + publish one candidate rejection. The scan loop decides what happens next. */
+  private rejectCandidate(bot: BotRuntimeState, cycleSymbol: string, index: number, reason: string, source: string): void {
+    console.log(`[scan] CANDIDATE #${index} (${cycleSymbol}) → REJECTED — ${source}: ${reason}`);
+    const publishMessage =
+      source === "risk"
+        ? `Risk check rejected: ${reason}`
+        : `CANDIDATE #${index} (${cycleSymbol}) rejected (${source}): ${reason}`;
+    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "risk", message: publishMessage });
+  }
+
+  /** Full per-candidate disclosure: levels, distances, R:R and EVERY risk check result. */
+  private logCandidateDetails(cycleSymbol: string, plan: TradePlan, decision: RiskDecision): void {
+    const entry = Number(plan.limitPrice ?? plan.entryPrice);
+    const stop = Number(plan.stopLoss);
+    const take = Number(plan.takeProfit);
+    const stopDistance = Math.abs(entry - stop);
+    const rewardDistance = Math.abs(take - entry);
+    const rr = stopDistance > 0 ? rewardDistance / stopDistance : 0;
+    const entrySafe = Number.isFinite(entry) && entry > 0;
+    const lines = [
+      `[scan] CANDIDATE DETAILS — ${cycleSymbol}`,
+      `  strategy direction: ${plan.side ?? plan.action}`,
+      `  confidence: ${plan.confidence != null ? `${Math.round(plan.confidence * 100)}%` : "n/a"}`,
+      `  entry: ${entry}`,
+      `  SL: ${stop}`,
+      `  TP: ${take}`,
+      `  risk distance: ${stopDistance.toFixed(6)}${entrySafe ? ` (${((stopDistance / entry) * 100).toFixed(2)}%)` : ""}`,
+      `  reward distance: ${rewardDistance.toFixed(6)}${entrySafe ? ` (${((rewardDistance / entry) * 100).toFixed(2)}%)` : ""}`,
+      `  calculated R:R: ${rr.toFixed(2)}`,
+    ];
+    for (const check of decision.checks ?? []) {
+      lines.push(`  risk ${check.name}: ${check.passed ? "PASS" : "FAIL"} — ${check.message}`);
+    }
+    console.log(lines.join("\n"));
+  }
+
+  /** Group the scan's rejection reasons, counting identical reasons so repeats are obvious. */
+  private groupRejectionReasons(rejections: string[]): string {
+    if (rejections.length === 0) return "no rejection reasons";
+    const counts = new Map<string, number>();
+    for (const reason of rejections) {
+      const key = reason.replace(/^#[0-9]+ \S+: /, "");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const parts = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => `${key}${count > 1 ? ` (${count}x)` : ""}`);
+    return `rejection reasons: ${parts.length === 1 ? parts[0] : parts.join("; ")}`;
   }
 
   async handoff(bot: BotRuntimeState): Promise<void> {
@@ -422,6 +691,29 @@ export class AnalysisCycleRunner {
     const peakForDrawdown = peakInfo.peak;
     const equityForRisk = equity ?? 0;
 
+    // R:R gate — ONE resolved floor per candidate via the shared resolver. The
+    // historical bug: this gate silently defaulted to 2.0 while the planner
+    // validated against 1.5, so a legit 1.8 R:R died here. Now the planner and
+    // this live gate always resolve the SAME number (bot config, else the
+    // documented 1.5 fallback) and every rejection is logged with its inputs.
+    const resolvedMinRR = resolveMinRiskReward(config);
+    const entry = Number(plan.limitPrice ?? plan.entryPrice);
+    const stop = Number(plan.stopLoss);
+    const take = Number(plan.takeProfit);
+    const stopDistance = Math.abs(entry - stop);
+    const rewardDistance = Math.abs(take - entry);
+    const computedRR = stopDistance > 0 ? rewardDistance / stopDistance : 0;
+    const rrSource =
+      resolvedMinRR.source === "bot-config"
+        ? `bot config (minRiskRewardRatio ${resolvedMinRR.value})`
+        : "fallback (documented system default 1.5)";
+    console.log(
+      `[scan] R:R validation — symbol ${plan.symbol ?? config.symbol} | entry ${entry} | SL ${stop} | TP ${take} | ` +
+        `risk distance ${stopDistance.toFixed(6)} | reward distance ${rewardDistance.toFixed(6)} | ` +
+        `calculated R:R ${computedRR.toFixed(2)} | required min R:R ${resolvedMinRR.value} ` +
+        `(source: ${rrSource}) | comparison ${computedRR.toFixed(2)} >= ${resolvedMinRR.value} ? ${computedRR >= resolvedMinRR.value}`,
+    );
+
     const input: RiskManagerInput = {
       config: {
         maxRiskPerTradePct: config.maxRiskPerTrade,
@@ -432,8 +724,11 @@ export class AnalysisCycleRunner {
         maxSimultaneousBots: 5,
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
-        maxDrawdownPct: 15,
-        minRiskRewardRatio: config.minRiskRewardRatio ?? 2,
+        // Disable account-level max-drawdown as an execution gate for automated
+        // trading. The system still records peak/equity for analytics/history
+        // (see computeAccountEquity / resolveDrawdownPeak), but it must not
+        // cause candidate rejection here — set to a permissive value.
+        minRiskRewardRatio: resolvedMinRR.value,
       },
       wallet: { balance, equity: equityForRisk, peakBalance: peakForDrawdown ?? equityForRisk },
       capital: {

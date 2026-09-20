@@ -32,8 +32,14 @@ export type SchedulerEventType =
   | "LOCK_ACQUIRED"
   | "LOCK_RELEASED";
 
+// Additional event types for AUTO selection candidate visibility in the
+// activity feed / live trace. These are intentionally simple string tokens
+// persisted into the same automation_scheduler_events table so the UI can
+// display them alongside existing scheduler events.
+export type SchedulerEventTypeExtended = SchedulerEventType | "AUTO_SCAN_STARTED" | "AUTO_CANDIDATE" | "AUTO_CANDIDATE_RESULT" | "AUTO_SCAN_COMPLETE";
+
 export interface SchedulerEvent {
-  type: SchedulerEventType;
+  type: SchedulerEventTypeExtended;
   botId: number;
   userId: number;
   message: string;

@@ -3,8 +3,10 @@ import type { PositionSizeResult } from "./position-size-calculator";
 import type { RiskCheckResult, RiskDecision, RiskManagerConfig, RiskManagerInput } from "./types";
 import type { RiskValidator } from "./risk-validator";
 import { DefaultRiskValidator } from "./risk-validator";
-import type { DrawdownProtection } from "./drawdown-protection";
-import { DefaultDrawdownProtection } from "./drawdown-protection";
+// Note: drawdown protection is intentionally excluded from the automated
+// trade blocking path. Account-level maximum drawdown will still be
+// calculated and persisted elsewhere for analytics/history, but it will not
+// cause candidate rejection here.
 import type { DailyLossProtection } from "./daily-loss-protection";
 import { DefaultDailyLossProtection } from "./daily-loss-protection";
 import type { ExposureManager } from "./exposure-manager";
@@ -22,7 +24,6 @@ export interface ValidationEngine {
 export class DefaultValidationEngine implements ValidationEngine {
   constructor(
     private readonly riskValidator: RiskValidator = new DefaultRiskValidator(),
-    private readonly drawdownProtection: DrawdownProtection = new DefaultDrawdownProtection(),
     private readonly dailyLossProtection: DailyLossProtection = new DefaultDailyLossProtection(),
     private readonly exposureManager: ExposureManager = new DefaultExposureManager(),
   ) {}
@@ -60,7 +61,8 @@ export class DefaultValidationEngine implements ValidationEngine {
       }),
     );
 
-    checks.push(this.drawdownProtection.check(input.wallet, config.maxDrawdownPct));
+    // Drawdown protection removed from validation engine: do NOT add a
+    // per-candidate rejection based on account-level drawdown here.
 
     checks.push(
       ...this.dailyLossProtection.check(input.daily, input.wallet.balance, config.dailyLossLimitPct, config.dailyTradeLimit),
