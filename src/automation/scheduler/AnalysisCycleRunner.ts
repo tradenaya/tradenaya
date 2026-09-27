@@ -81,7 +81,7 @@ export interface AnalysisCycleDependencies {
   config: Required<SchedulerConfig>;
   refreshLease?: (botId: number) => Promise<boolean>;
   /** Server-side coin auto selector (auto-select best coin mode). */
-  coinAutoSelector?: CoinAutoSelector;
+  coinAutoSelector?: AutoBestSelector;
 }
 
 export class AnalysisCycleRunner {
@@ -153,11 +153,12 @@ export class AnalysisCycleRunner {
   }
 
   /**
-   * Auto-select scan: build a ranked candidate list for this 5-minute scan and
-   * try candidates in score order until one trades or all are rejected. Cheap
-   * eligibility filtering (ticker volume + fresh snapshot + min-candles) already
-   * happened inside the selector; the expensive strategy stack runs only on the
-   * returned top-N.
+   * Auto-select scan: ask the selector for the single currently-best tradable
+   * opportunity. Cheap eligibility filtering (ticker volume + fresh snapshot +
+   * min-candles) and the expensive strategy stack already ran inside the
+   * selector; the winner's leverage was validated there too. The cycle then
+   * evaluates that one opportunity end-to-end (engine -> plan -> live risk ->
+   * order) and trades it, or completes as WAIT / RISK_REJECTED.
    */
   private async runAutoSelectScan(bot: BotRuntimeState, baseConfig: AutomationConfig): Promise<CycleResult> {
     const selector = this.deps.coinAutoSelector;
@@ -165,31 +166,14 @@ export class AnalysisCycleRunner {
 
     const scanId = `${bot.id}-${Date.now()}`;
     console.log(`[AUTO DEBUG] runAutoSelectScan ENTERED scanId=${scanId} botId=${bot.id}`);
-    let ranked: RankedOpportunityResult | null = null;
+    let selected: AutoBestOpportunity | null = null;
     try {
-      // Request a full ranked list — do not impose an artificial count limit.
-      ranked = await selector.selectRankedOpportunities(bot.userId, baseConfig, {
-        limit: undefined,
-      });
+      selected = await selector.selectBestOpportunity(bot.userId, baseConfig);
     } catch (error) {
       return this.handleCycleError(bot, error);
     }
 
-    const candidates = ranked?.candidates ?? [];
-    console.log(
-      `[scan] SCAN START — timeframe ${baseConfig.timeframe} | symbols fetched ${ranked?.fetchedCount ?? 0} | ` +
-        `eligible (tradable & directional) ${ranked?.eligibleCount ?? 0} | ranking: ${ranked?.rankingCriteria ?? "n/a"}`,
-    );
-    console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} rankedCandidates=[${(candidates || []).map((c) => c.symbol).join(",")} ]`);
-    liveActivityHub.publish({
-      botId: bot.id,
-      userId: bot.userId,
-      symbol: "AUTO",
-      phase: "lifecycle",
-      message: `Scan started for ${baseConfig.timeframe}: ${candidates.length} ranked candidate(s) available`,
-    });
-
-    if (candidates.length === 0) {
+    if (!selected) {
       const message = "No suitable trading opportunity currently meets the bot's requirements. Will re-check next cycle.";
       await this.completeAnalysis(bot, "WAIT", message);
       liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
@@ -199,83 +183,24 @@ export class AnalysisCycleRunner {
       return { executed: true, state: "RUNNING", action: "ANALYZED", message };
     }
 
-    const rejections: string[] = [];
-    for (let i = 0; i < candidates.length; i += 1) {
-      const candidate = candidates[i];
-      const index = i + 1;
-      console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} START`);
-      // Persist a lightweight candidate-start event so the UI activity feed and
-      // historical queries see the per-candidate evaluation in the same
-      // pipeline used by other scheduler events.
-      try {
-        await this.deps.events.emit({
-          type: "AUTO_CANDIDATE",
-          botId: bot.id,
-          userId: bot.userId,
-          message: `scanId=${scanId} candidate=${index}/${candidates.length} START symbol=${candidate.symbol}`,
-          data: { scanId, candidateIndex: index, totalCandidates: candidates.length, symbol: candidate.symbol },
-        });
-      } catch {
-        // non-fatal — live trace remains authoritative
-      }
-      const outcome = await this.tryCandidate(bot, baseConfig, candidate, index, scanId);
-      if (outcome.status === "SUCCESS") {
-        console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} ORDER SUBMITTED`);
-        // Persist scan-level completion as ORDER_SUBMITTED
-        try {
-          await this.deps.events.emit({
-            type: "AUTO_SCAN_COMPLETE",
-            botId: bot.id,
-            userId: bot.userId,
-            message: `scanId=${scanId} COMPLETE reason=ORDER_SUBMITTED symbol=${candidate.symbol} candidate=${index}/${candidates.length}`,
-            data: { scanId, completedReason: "ORDER_SUBMITTED", symbol: candidate.symbol, candidateIndex: index },
-          });
-        } catch {}
-        console.log(`[AUTO SCAN] COMPLETE scanId=${scanId} reason=ORDER_SUBMITTED`);
-        return outcome.result;
-      }
-      console.log(`[AUTO SCAN] scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} REJECTED reason=${outcome.reason}`);
-      try {
-        await this.deps.events.emit({
-          type: "AUTO_CANDIDATE_RESULT",
-          botId: bot.id,
-          userId: bot.userId,
-          message: `scanId=${scanId} candidate=${index}/${candidates.length} symbol=${candidate.symbol} RESULT=REJECT reason=${outcome.reason}`,
-          data: { scanId, candidateIndex: index, totalCandidates: candidates.length, symbol: candidate.symbol, reason: outcome.reason },
-        });
-      } catch {}
-      if (index < candidates.length) console.log(`[AUTO SCAN] CONTINUING TO candidate ${index + 1}/${candidates.length}`);
-      rejections.push(`#${index} ${candidate.symbol}: ${outcome.reason}`);
-    }
-
-    const grouped = this.groupRejectionReasons(rejections);
-    const rejectedSymbols = candidates.map((c) => c.symbol).join(", ");
-    const summary = `All ${candidates.length} ranked candidate(s) rejected for this scan (${rejectedSymbols}). ${grouped}`;
-    console.log(
-      `[scan] SCAN COMPLETE — candidates evaluated ${candidates.length} | rejected ${rejections.length} | ` +
-        `${grouped} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
-    );
-    console.log(`[AUTO SCAN] COMPLETE scanId=${scanId} reason=ALL_CANDIDATES_REJECTED`);
-    await this.deps.events.emit({
-      type: "RISK_REJECTED",
+    const connection = {
       botId: bot.id,
       userId: bot.userId,
-      message: summary,
-      data: { status: "RISK_REJECTED", candidatesEvaluated: candidates.length, rejected: rejections.length, rejections },
+      symbol: selected.symbol,
+      phase: "lifecycle" as const,
+    };
+    console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} best=${selected.symbol} side=${selected.side} score=${selected.score}`);
+    liveActivityHub.publish({
+      ...connection,
+      message: `Auto-select: best opportunity ${selected.side} ${selected.symbol} (score ${selected.score}, confidence ${Math.round(Number(selected.confidence ?? 0) * 100)}%)`,
     });
-    liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message: `Scan complete — ${summary}` });
-    await this.completeAnalysis(bot, "RISK_REJECTED", summary);
-    // Persist an AUTO scan completion marker for the activity feed/history.
-    try {
-      await this.deps.events.emit({
-        type: "AUTO_SCAN_COMPLETE",
-        botId: bot.id,
-        userId: bot.userId,
-        message: `scanId=${scanId} COMPLETE reason=ALL_CANDIDATES_REJECTED evaluated=${candidates.length} rejected=${rejections.length}`,
-        data: { scanId, evaluated: candidates.length, rejected: rejections.length, rejections },
-      });
-    } catch {}
-    return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${summary}` };
+
+    const outcome = await this.tryCandidate(bot, baseConfig, selected, 1, scanId);
+    if (outcome.status === "SUCCESS") {
+      console.log(`[AUTO SCAN] scanId=${scanId} symbol=${selected.symbol} ORDER SUBMITTED`);
+      return outcome.result;
+    }
+    return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${selected.symbol} — ${outcome.reason}` };
   }
 
   /** Fixed-symbol cycle: evaluate the single configured symbol (no coin rotation). */
@@ -315,7 +240,7 @@ export class AnalysisCycleRunner {
   private async tryCandidate(
     bot: BotRuntimeState,
     baseConfig: AutomationConfig,
-    selected: SelectedOpportunity,
+    selected: AutoBestOpportunity,
     index: number,
     scanId?: string,
   ): Promise<{ status: "SUCCESS"; result: CycleResult } | { status: "REJECTED"; reason: string }> {
@@ -325,11 +250,10 @@ export class AnalysisCycleRunner {
       leverage: selected.leverage,
     };
     const cycleSymbol = selected.symbol;
-    const opp = selected.opportunity;
-    const confidenceText = opp?.confidence != null ? `${Math.round(Number(opp.confidence) * 100)}%` : "n/a";
+    const confidenceText = selected.confidence != null ? `${Math.round(Number(selected.confidence) * 100)}%` : "n/a";
     console.log(
       `[scan] CANDIDATE #${index} — symbol ${cycleSymbol} | strategy direction ${selected.side} | ` +
-        `confidence ${confidenceText} | score ${opp?.score ?? "n/a"} | entry ${opp?.price ?? "n/a"}`,
+        `confidence ${confidenceText} | score ${selected.score} | entry ${selected.price}`,
     );
     if (scanId) console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} candidate=${index} symbol=${cycleSymbol} SELECTED_FOR_EVALUATION`);
     liveActivityHub.publish({
@@ -337,8 +261,8 @@ export class AnalysisCycleRunner {
       userId: bot.userId,
       symbol: cycleSymbol,
       phase: "strategy",
-      message: `CANDIDATE #${index}: ${selected.side} ${cycleSymbol} (confidence ${confidenceText}, score ${opp?.score ?? "n/a"}) — evaluating…`,
-      detail: { side: selected.side, leverage: selected.leverage, score: opp?.score, confidence: opp?.confidence },
+      message: `CANDIDATE #${index}: ${selected.side} ${cycleSymbol} (confidence ${confidenceText}, score ${selected.score}) — evaluating…`,
+      detail: { side: selected.side, leverage: selected.leverage, score: selected.score, confidence: selected.confidence },
     });
     // Keep the DB / display symbol in sync with the candidate currently analyzed.
     void this.persistAutoSelection(bot.id, selected);
@@ -531,20 +455,6 @@ export class AnalysisCycleRunner {
       lines.push(`  risk ${check.name}: ${check.passed ? "PASS" : "FAIL"} — ${check.message}`);
     }
     console.log(lines.join("\n"));
-  }
-
-  /** Group the scan's rejection reasons, counting identical reasons so repeats are obvious. */
-  private groupRejectionReasons(rejections: string[]): string {
-    if (rejections.length === 0) return "no rejection reasons";
-    const counts = new Map<string, number>();
-    for (const reason of rejections) {
-      const key = reason.replace(/^#[0-9]+ \S+: /, "");
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    const parts = [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([key, count]) => `${key}${count > 1 ? ` (${count}x)` : ""}`);
-    return `rejection reasons: ${parts.length === 1 ? parts[0] : parts.join("; ")}`;
   }
 
   async handoff(bot: BotRuntimeState): Promise<void> {
@@ -866,7 +776,7 @@ export class AnalysisCycleRunner {
    * reflects its latest symbol / direction / leverage / cycle state without
    * waiting for the next analysis to complete.
    */
-  private async persistAutoSelection(botId: number, selected: SelectedOpportunity): Promise<void> {
+  private async persistAutoSelection(botId: number, selected: AutoBestOpportunity): Promise<void> {
     try {
       const current = await this.deps.store.getBot(botId);
       if (!current) return;

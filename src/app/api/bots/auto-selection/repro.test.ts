@@ -150,7 +150,7 @@ describe("repro /api/bots/auto-selection", () => {
     const originalTimeout = process.env.AUTO_SELECTION_TIMEOUT_MS;
     process.env.AUTO_SELECTION_TIMEOUT_MS = "50";
 
-    const selectSpy = vi.spyOn((await import("@/automation/coinauto/coin-auto-selector")).CoinAutoSelector.prototype, "selectBestOpportunity");
+    const selectSpy = vi.spyOn((await import("@/automation/coinauto/auto-best-selector")).AutoBestSelector.prototype, "selectBestOpportunity");
     selectSpy.mockImplementation(async () => {
       await new Promise(() => undefined);
       return null;

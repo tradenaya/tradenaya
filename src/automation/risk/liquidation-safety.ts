@@ -269,7 +269,7 @@ export function evaluateLiquidationSafety(input: LiquidationSafetyInput): Liquid
  * The mandatory gate invariant is |entry − SL| / entry < 1/leverage − mm − buffer,
  * i.e. leverage < 1 / (stopDistanceFraction + mm + buffer). The largest safe
  * whole leverage is the floor of that bound. This helper backs BOTH:
- *   - the AUTO resolver's conservative cap (coin-auto-selector.ts), which must
+ *   - the AUTO resolver's conservative cap (auto-best-selector.ts), which must
  *     assume the widest stop the planner may place; and
  *   - the executor's post-plan downshift (order-executor.ts), which uses the
  *     REAL planned entry + SL.

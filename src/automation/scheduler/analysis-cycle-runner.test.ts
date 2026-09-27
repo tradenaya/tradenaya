@@ -3,7 +3,7 @@ import type { BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { TradePlan } from "@/automation/planner/types";
 import type { AnalysisCycleDependencies } from "./AnalysisCycleRunner";
 import type { AutomationConfig } from "@/automation/types";
-import type { CoinAutoSelector, SelectedOpportunity } from "@/automation/coinauto/coin-auto-selector";
+import type { AutoBestOpportunity } from "@/automation/coinauto/auto-best-selector";
 
 const { publishMock } = vi.hoisted(() => ({
   publishMock: vi.fn((payload: unknown): void => {
@@ -173,9 +173,7 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     ).toBe(false);
   });
 
-  it("auto-select scan: a failing candidate is skipped and candidate #2 is evaluated immediately (no 5-min wait between partial failures)", async () => {
-    // FIX 3 — candidate #1 has no tradable setup (engine WAIT). The scan must
-    // NOT stop and wait 5 minutes; it must immediately evaluate candidate #2.
+  it("auto-select scan: the single best opportunity is selected and evaluated end-to-end", async () => {
     const autoBot: BotRuntimeState = {
       ...RUNNING_BOT,
       symbol: "AUTO",
@@ -187,45 +185,40 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
       }),
     };
 
-    const engineRun = vi.fn(async (config: AutomationConfig) => {
-      if (config.symbol === "BTCUSDT") {
-        return {
-          signal: "WAIT",
-          analysis: {
-            trend: "SIDEWAYS",
-            confidence: 0,
-            reasons: [],
-            price: null,
-            summary: `No valid opportunity for BTCUSDT`,
-          },
-        };
-      }
-      return {
-        signal: "BUY",
-        plan: { ...PLAN, symbol: config.symbol },
-        analysis: { trend: "UP", confidence: 0.8, reasons: [], price: 100_000, summary: "Test" },
-      };
-    });
+    const engineRun = vi.fn(async (config: AutomationConfig) => ({
+      signal: "BUY",
+      plan: { ...PLAN, symbol: config.symbol },
+      analysis: { trend: "UP", confidence: 0.8, reasons: [], price: 100_000, summary: "Test" },
+    }));
 
     const scheduleNextRun = vi.fn(async () => {});
     const eventsEmit = vi.fn(async (event: unknown): Promise<void> => {
       void event;
     });
 
-    const makeCandidate = (symbol: string, score: number): SelectedOpportunity =>
+    const makeOpportunity = (symbol: string, score: number): AutoBestOpportunity =>
       ({
         symbol,
         side: "LONG",
         instrument: null,
         leverage: 5,
-        opportunity: {
-          symbol,
-          score,
-          confidence: 0.7,
-          price: 100_000,
-          side: "LONG",
+        score,
+        confidence: 0.7,
+        price: 100_000,
+        atrPct: 0.5,
+        trend: "UP",
+        factors: {
+          regime: 0.5,
+          trend: 0.6,
+          structure: 0.7,
+          momentum: 0.6,
+          participation: 0.5,
+          volatility: 0.3,
+          entryLocation: 0.7,
+          riskReward: 0.8,
+          flow: 0.5,
         },
-      }) as SelectedOpportunity;
+      }) as AutoBestOpportunity;
 
     const runner = new AnalysisCycleRunner(
       {
@@ -256,8 +249,6 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
             openOrderMargin: 0,
             equity: null,
           })),
-          // No live positions; equity 100 keeps the drawdown gate PASSING, so any
-          // rejection seen here is NOT the drawdown gate misfiring.
           getPositions: vi.fn(async () => []),
           getOpenOrders: vi.fn(async () => []),
         },
@@ -269,55 +260,92 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
         config: { analysisIntervalMinutes: 5 },
         refreshLease: vi.fn(async () => true),
         coinAutoSelector: {
-          selectRankedOpportunities: vi.fn(async () => ({
-            candidates: [
-              makeCandidate("BTCUSDT", 90),
-              makeCandidate("ETHUSDT", 80),
-            ],
-            fetchedCount: 2,
-            scannedCount: 2,
-            eligibleCount: 2,
-            rankingCriteria: "opportunity score (descending)",
-            requestedCount: 2,
-          })),
-          selectBestOpportunity: vi.fn(async () => null),
-        } as unknown as CoinAutoSelector,
+          selectBestOpportunity: vi.fn(async () => makeOpportunity("BTCUSDT", 90)),
+        },
       } as unknown as AnalysisCycleDependencies,
     );
 
     const result = await runner.runCycle(autoBot.id);
 
-    // Candidate #2 WAS analyzed — proves the loop did not give up after #1.
+    // The single best opportunity was evaluated — no multi-candidate loop.
     const symbolsRun = engineRun.mock.calls.map(([config]) => (config as AutomationConfig).symbol);
-    expect(symbolsRun).toEqual(["BTCUSDT", "ETHUSDT"]);
+    expect(symbolsRun).toEqual(["BTCUSDT"]);
 
-    // Only ONE next-run was scheduled (at the very end when BOTH candidates
-    // were rejected) — an intermediate candidate failure must NOT schedule a
-    // 5-minute wait of its own.
+    // Exactly ONE next-run was scheduled, at cycle completion.
     expect(scheduleNextRun.mock.calls.length).toBe(1);
 
-    // Candidate #1 was rejected; candidate #2 reached order submission and
-    // returns the mocked executor result (CANCELLED). Validate that the
-    // cycle completed as ANALYZED with the executor message rather than the
-    // "all candidates rejected" message (which applies only when every
-    // candidate fails pre-submission validation).
+    // The cycle reached order submission and returned the mocked executor
+    // message rather than a "no candidates" outcome.
     expect(result.executed).toBe(true);
     expect(result.state).toBe("RUNNING");
     expect(result.message).toContain("executor cancelled");
+  });
 
-    // Ensure no consolidated RISK_REJECTED was emitted for the scan (only
-    // per-candidate rejections for #1 should exist). Instead, an AUTO_SCAN
-    // completion with ORDER_SUBMITTED must have been emitted for candidate #2.
-    const scanCompleteEvent = eventsEmit.mock.calls
-      .map(([event]) => event as { type?: string; message?: string })
-      .find((event) => event?.type === "AUTO_SCAN_COMPLETE" && typeof event?.message === "string" && event.message.includes("ORDER_SUBMITTED"));
-    expect(scanCompleteEvent).toBeDefined();
+  it("auto-select scan: no best opportunity completes as WAIT without touching the executor", async () => {
+    const autoBot: BotRuntimeState = {
+      ...RUNNING_BOT,
+      symbol: "AUTO",
+      peakEquity: 100,
+      peakEquityBasis: "equity",
+      configJson: JSON.stringify({
+        ...JSON.parse(RUNNING_BOT.configJson as string),
+        autoSelect: true,
+      }),
+    };
 
-    // Every per-candidate rejection was surfaced in the activity hub, including
-    // the strategy/planner WAIT of candidate #1 (not hidden).
-    const strategyReject = publishMock.mock.calls
-      .map(([payload]) => payload as { message?: string })
-      .find((payload) => typeof payload?.message === "string" && payload.message.includes("rejected (strategy/planner)"));
-    expect(strategyReject).toBeDefined();
+    const engineRun = vi.fn();
+    const execute = vi.fn();
+    const scheduleNextRun = vi.fn(async () => {});
+    const eventsEmit = vi.fn(async (event: unknown): Promise<void> => {
+      void event;
+    });
+
+    const runner = new AnalysisCycleRunner(
+      {
+        store: {
+          getBot: vi.fn(async () => autoBot),
+          hasActiveTradeForBot: vi.fn(async () => false),
+          getDailyStats: vi.fn(async () => ({ realizedPnl: 0, tradeCount: 0 })),
+        },
+        stateManager: { transition: vi.fn(async () => true) },
+        events: { emit: eventsEmit },
+        lifecycle: {
+          setRuntimeError: vi.fn(async () => {}),
+          updateBotHeartbeat: vi.fn(async () => {}),
+          updateHeartbeatAt: vi.fn(async () => {}),
+          countActiveBotsForUser: vi.fn(async () => 0),
+          setRetryCount: vi.fn(async () => {}),
+          scheduleNextRun,
+          setConfig: vi.fn(async () => {}),
+          updateSelectedCoin: vi.fn(async () => {}),
+        },
+        client: {
+          getWalletSnapshot: vi.fn(async () => ({ available: 85, total: 100, blocked: 15, positionMargin: 15, openOrderMargin: 0, equity: null })),
+          getPositions: vi.fn(async () => []),
+          getOpenOrders: vi.fn(async () => []),
+        },
+        engine: vi.fn(() => ({ run: engineRun })),
+        riskManager: new DefaultRiskManager(),
+        executor: { execute },
+        config: { analysisIntervalMinutes: 5 },
+        refreshLease: vi.fn(async () => true),
+        coinAutoSelector: {
+          selectBestOpportunity: vi.fn(async () => null),
+        },
+      } as unknown as AnalysisCycleDependencies,
+    );
+
+    const result = await runner.runCycle(autoBot.id);
+
+    // No opportunity → the cycle paused as a routine WAIT and re-checks next cycle.
+    expect(result.executed).toBe(true);
+    expect(result.state).toBe("RUNNING");
+    expect(result.action).toBe("ANALYZED");
+    expect(result.message).toContain("No suitable trading opportunity");
+
+    // Neither the engine nor the executor was invoked, and one next-run was scheduled.
+    expect(engineRun.mock.calls.length).toBe(0);
+    expect(execute.mock.calls.length).toBe(0);
+    expect(scheduleNextRun.mock.calls.length).toBe(1);
   });
 });
