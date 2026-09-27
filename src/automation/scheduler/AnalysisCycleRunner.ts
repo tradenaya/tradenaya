@@ -199,7 +199,21 @@ export class AnalysisCycleRunner {
       console.log(`[AUTO SCAN] scanId=${scanId} symbol=${selected.symbol} ORDER SUBMITTED`);
       return outcome.result;
     }
-    return { executed: true, state: "RUNNING", action: "ANALYZED", message: `Risk rejected: ${selected.symbol} — ${outcome.reason}` };
+
+    // The cycle MUST always close out here. runCycle moved the bot to ANALYZING
+    // before scanning, and getSchedulableBots() only selects bots whose status is
+    // RUNNING/RECOVERING/STARTING. Returning without completing the analysis left
+    // the bot stuck in ANALYZING forever: invisible to the scheduler, no further
+    // cycles, and a live trace frozen on the rejection line below. completeAnalysis
+    // is what restores RUNNING and arms next_run_at for the following cycle.
+    const rejectionStatus = outcome.source === "risk" ? "RISK_REJECTED" : "WAIT";
+    const reason = `No trade for ${selected.symbol}: ${outcome.reason}`;
+    await this.completeAnalysis(bot, rejectionStatus, reason);
+    liveActivityHub.publish({ ...connection, message: reason });
+    console.log(
+      `[scan] SCAN COMPLETE — candidates evaluated 1 | rejected 1 | reason: ${outcome.reason} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
+    );
+    return { executed: true, state: "RUNNING", action: "ANALYZED", message: reason };
   }
 
   /** Fixed-symbol cycle: evaluate the single configured symbol (no coin rotation). */
@@ -242,7 +256,10 @@ export class AnalysisCycleRunner {
     selected: AutoBestOpportunity,
     index: number,
     scanId?: string,
-  ): Promise<{ status: "SUCCESS"; result: CycleResult } | { status: "REJECTED"; reason: string }> {
+  ): Promise<
+    | { status: "SUCCESS"; result: CycleResult }
+    | { status: "REJECTED"; reason: string; source: "strategy/planner" | "risk" }
+  > {
     const config: AutomationConfig = {
       ...baseConfig,
       symbol: selected.symbol,
@@ -270,12 +287,12 @@ export class AnalysisCycleRunner {
     if (planned.status === "ERROR") return { status: "SUCCESS", result: planned.result };
     if (planned.status === "NO_PLAN") {
       this.rejectCandidate(bot, cycleSymbol, index, planned.reason, "strategy/planner");
-      return { status: "REJECTED", reason: planned.reason };
+      return { status: "REJECTED", reason: planned.reason, source: "strategy/planner" };
     }
 
     const submitted = await this.checkRiskAndSubmit(bot, planned.config, planned.plan, cycleSymbol, index, scanId);
     if (submitted.status === "DONE") return { status: "SUCCESS", result: submitted.result };
-    return { status: "REJECTED", reason: submitted.reason };
+    return { status: "REJECTED", reason: submitted.reason, source: "risk" };
   }
 
   /** Run the strategy engine + planner for one symbol; emit the TRADE_PLANNED event. */
