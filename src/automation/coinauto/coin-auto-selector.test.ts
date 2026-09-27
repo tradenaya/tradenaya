@@ -7,7 +7,7 @@ import {
   liquidationSafeMaxLeverage,
   maintenanceMarginPctOf,
   resolveLeverage,
-} from "./leverage";
+} from "./coin-auto-selector";
 import type { CoinOpportunity } from "@/automation/opportunity/scanner";
 import { evaluateLiquidationSafety } from "@/automation/risk/liquidation-safety";
 
