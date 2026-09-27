@@ -280,6 +280,95 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     expect(result.message).toContain("executor cancelled");
   });
 
+  it("auto-select scan: a rejected candidate still closes the cycle and schedules the next one", async () => {
+    // Regression: a rejected candidate used to return straight out of the scan
+    // without completing the analysis. The bot had already been moved to
+    // ANALYZING by runCycle, and getSchedulableBots() only selects bots in
+    // RUNNING/RECOVERING/STARTING — so the bot stayed ANALYZING forever, was never
+    // picked up again, and the live trace froze on the rejection line.
+    const autoBot: BotRuntimeState = {
+      ...RUNNING_BOT,
+      symbol: "AUTO",
+      configJson: JSON.stringify({
+        ...JSON.parse(RUNNING_BOT.configJson as string),
+        autoSelect: true,
+      }),
+    };
+
+    const execute = vi.fn();
+    const scheduleNextRun = vi.fn(async () => {});
+    const transition = vi.fn(async (_botId: number, _from: string, _to: string) => true);
+    const eventsEmit = vi.fn(async (event: unknown): Promise<void> => {
+      void event;
+    });
+
+    // The strategy refuses to plan (the downtrend / no-setup case).
+    const engineRun = vi.fn(async () => ({ plan: null, analysis: null }));
+
+    const runner = new AnalysisCycleRunner(
+      {
+        store: {
+          getBot: vi.fn(async () => autoBot),
+          hasActiveTradeForBot: vi.fn(async () => false),
+          getDailyStats: vi.fn(async () => ({ realizedPnl: 0, tradeCount: 0 })),
+        },
+        stateManager: { transition },
+        events: { emit: eventsEmit },
+        lifecycle: {
+          setRuntimeError: vi.fn(async () => {}),
+          updateBotHeartbeat: vi.fn(async () => {}),
+          updateHeartbeatAt: vi.fn(async () => {}),
+          countActiveBotsForUser: vi.fn(async () => 0),
+          setRetryCount: vi.fn(async () => {}),
+          scheduleNextRun,
+          setConfig: vi.fn(async () => {}),
+          updateSelectedCoin: vi.fn(async () => {}),
+        },
+        client: {
+          getWalletSnapshot: vi.fn(async () => ({ available: 85, total: 100, blocked: 15, positionMargin: 15, openOrderMargin: 0, equity: null })),
+          getPositions: vi.fn(async () => []),
+          getOpenOrders: vi.fn(async () => []),
+        },
+        engine: vi.fn(() => ({ run: engineRun })),
+        riskManager: new DefaultRiskManager(),
+        executor: { execute },
+        config: { analysisIntervalMinutes: 5 },
+        refreshLease: vi.fn(async () => true),
+        coinAutoSelector: {
+          selectBestOpportunity: vi.fn(async () => ({
+            symbol: "SOLUSDT",
+            side: "SELL",
+            instrument: null,
+            leverage: 5,
+            score: 70,
+            confidence: 0.66,
+            price: 121.54,
+            atrPct: 0.5,
+            trend: "DOWN",
+            factors: {},
+          })),
+        },
+      } as unknown as AnalysisCycleDependencies,
+    );
+
+    const result = await runner.runCycle(autoBot.id);
+
+    // The bot must be handed back to RUNNING so getSchedulableBots() can see it again.
+    const states = transition.mock.calls.map((call) => call[2]);
+    expect(states).toContain("ANALYZING");
+    expect(states[states.length - 1]).toBe("RUNNING");
+
+    // A next run must be armed, otherwise the bot never re-scans.
+    expect(scheduleNextRun).toHaveBeenCalledOnce();
+
+    // No order was placed, and the cycle reports a clean non-error outcome.
+    expect(execute.mock.calls.length).toBe(0);
+    expect(result.executed).toBe(true);
+    expect(result.state).toBe("RUNNING");
+    expect(result.action).toBe("ANALYZED");
+    expect(result.message).toContain("SOLUSDT");
+  });
+
   it("auto-select scan: no best opportunity completes as WAIT without touching the executor", async () => {
     const autoBot: BotRuntimeState = {
       ...RUNNING_BOT,
