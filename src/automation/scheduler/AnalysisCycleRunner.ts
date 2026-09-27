@@ -18,7 +18,6 @@ import type { CycleResult, SchedulerConfig, SchedulerState } from "./SchedulerTy
 import { clientOrderId } from "@/automation/executor/order-id";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
-import { computeAccountEquity, resolveDrawdownPeak } from "@/automation/risk/account-equity";
 import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
@@ -602,24 +601,6 @@ export class AnalysisCycleRunner {
         ? balance * ((Number(config.walletPercent) || 0) / 100)
         : fixedCapital;
 
-    // --- Persistent peak-equity tracking for drawdown protection ---
-    // Equity is the TRUE account equity (wallet total balance + unrealized PnL
-    // of live positions) — NEVER total_available_balance, which falls whenever
-    // margin is locked in a position even when the account has not suffered an
-    // equivalent loss. A realised-loss-free drop in available balance must not
-    // by itself trip the drawdown gate.
-    const equity = computeAccountEquity({ wallet, positions: exchangePositions });
-    const peakInfo = resolveDrawdownPeak({
-      equity,
-      persistedPeak: bot.peakEquity ?? null,
-      persistedBasis: bot.peakEquityBasis ?? "available_balance",
-    });
-    if (peakInfo.needsPersist && peakInfo.peak != null) {
-      void this.deps.lifecycle.updatePeakEquity(bot.id, peakInfo.peak, peakInfo.basis);
-    }
-    const peakForDrawdown = peakInfo.peak;
-    const equityForRisk = equity ?? 0;
-
     // R:R gate — ONE resolved floor per candidate via the shared resolver. The
     // historical bug: this gate silently defaulted to 2.0 while the planner
     // validated against 1.5, so a legit 1.8 R:R died here. Now the planner and
@@ -653,13 +634,9 @@ export class AnalysisCycleRunner {
         maxSimultaneousBots: 5,
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
-        // Disable account-level max-drawdown as an execution gate for automated
-        // trading. The system still records peak/equity for analytics/history
-        // (see computeAccountEquity / resolveDrawdownPeak), but it must not
-        // cause candidate rejection here — set to a permissive value.
         minRiskRewardRatio: resolvedMinRR.value,
       },
-      wallet: { balance, equity: equityForRisk, peakBalance: peakForDrawdown ?? equityForRisk },
+      wallet: { balance },
       capital: {
         mode: config.capitalMode,
         amount: config.capitalMode === "fixed" ? config.capital : undefined,

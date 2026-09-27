@@ -1,6 +1,31 @@
 import { db } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/crypto";
 
+/**
+ * Convert a datetime-local value ("YYYY-MM-DDTHH:mm[:ss]", or a MySQL
+ * "YYYY-MM-DD HH:mm:ss") to the MySQL "YYYY-MM-DD HH:MM:SS" literal, taking the
+ * wall-clock components EXACTLY as given.
+ *
+ * The literal datetime-local form is written through verbatim on purpose: the
+ * user picks a specific expiry date and time, and any timezone conversion here
+ * (e.g. toISOString()) would silently shift it by the server's UTC offset.
+ */
+const LITERAL_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/;
+
+/** Resolve a user-supplied expiry to a MySQL DATETIME literal, or null. */
+export function toMySQLDatetime(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const literal = LITERAL_DATETIME.exec(String(value));
+  if (literal) {
+    const [, year, month, day, hour, minute, second = "00"] = literal;
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
+}
+
 export interface CoinSwitchRow {
   id: number;
   user_id: number;
@@ -27,7 +52,7 @@ export async function ensureTable() {
   `);
 }
 
-export async function saveKeysForUser(userId: number, apiKey: string, apiSecret: string) {
+export async function saveKeysForUser(userId: number, apiKey: string, apiSecret: string, validUntil?: string | null) {
   await ensureTable();
   const api_secret_enc = encrypt(apiSecret);
   const mask = (k: string) => {
@@ -37,10 +62,11 @@ export async function saveKeysForUser(userId: number, apiKey: string, apiSecret:
     return `${s.slice(0, 4)}...${s.slice(-4)}`;
   };
   const api_key_masked = mask(apiKey);
-  // upsert
+  const vu = toMySQLDatetime(validUntil);
+  // upsert (created_at is refreshed on rotation so "linked on" stays accurate)
   await db.query(
-    `INSERT INTO coinswitch_keys (user_id, api_key, api_key_masked, api_secret_enc, status) VALUES (?, ?, ?, ?, 'A') ON DUPLICATE KEY UPDATE api_key=VALUES(api_key), api_key_masked=VALUES(api_key_masked), api_secret_enc=VALUES(api_secret_enc), status='A'`,
-    [userId, apiKey, api_key_masked, api_secret_enc]
+    `INSERT INTO coinswitch_keys (user_id, api_key, api_key_masked, api_secret_enc, status, valid_until) VALUES (?, ?, ?, ?, 'A', ?) ON DUPLICATE KEY UPDATE api_key=VALUES(api_key), api_key_masked=VALUES(api_key_masked), api_secret_enc=VALUES(api_secret_enc), status='A', valid_until=VALUES(valid_until), created_at=CURRENT_TIMESTAMP`,
+    [userId, apiKey, api_key_masked, api_secret_enc, vu]
   );
 }
 
@@ -59,8 +85,7 @@ export async function getKeyMetaForUser(userId: number): Promise<{ apiKeyMasked:
 
 export async function setExpiryForUser(userId: number, validUntil: string | null): Promise<void> {
   await ensureTable();
-  const dt = validUntil ? new Date(validUntil) : null;
-  await db.query(`UPDATE coinswitch_keys SET valid_until = ? WHERE user_id = ?`, [dt ? dt.toISOString().slice(0, 19).replace('T', ' ') : null, userId]);
+  await db.query(`UPDATE coinswitch_keys SET valid_until = ? WHERE user_id = ?`, [toMySQLDatetime(validUntil), userId]);
 }
 
 export async function getKeysForUser(userId: number): Promise<{ apiKey: string; apiSecret: string; status: string } | null> {

@@ -44,13 +44,6 @@ export interface BotRuntimeState {
   heartbeatAt?: string | null;
   leaseOwner?: string | null;
   leaseExpiresAt?: string | null;
-  peakEquity?: number | null;
-  /**
-   * Metric the persisted peak_equity was captured under. Legacy rows default to
-   * "available_balance" (the pre-fix metric); the drawdown logic re-baselines
-   * them to true equity exactly once.
-   */
-  peakEquityBasis?: "equity" | "available_balance" | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -65,10 +58,6 @@ const SCHEDULER_COLUMNS: Array<[string, string]> = [
   ["heartbeat_at", "TIMESTAMP NULL"],
   ["lease_owner", "VARCHAR(64) NULL"],
   ["lease_expires_at", "TIMESTAMP NULL"],
-  ["peak_equity", "DECIMAL(18,8) NULL"],
-  // Default "available_balance" so rows created before the equity fix are
-  // recognizable as legacy peaks and re-baselined (not mixed with equity).
-  ["peak_equity_basis", "VARCHAR(20) NOT NULL DEFAULT 'available_balance'"],
 ];
 
 export class BotLifecycleService {
@@ -247,14 +236,6 @@ export class BotLifecycleService {
     );
   }
 
-  async updatePeakEquity(id: number, peakEquity: number, basis: "equity" | "available_balance" = "equity") {
-    await this.ensureSchedulerSchema();
-    await db.query(
-      `UPDATE automation_bots SET peak_equity = ?, peak_equity_basis = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
-      [peakEquity, basis, id],
-    );
-  }
-
   async acquireLease(id: number, owner: string, ttlSeconds: number): Promise<boolean> {
     await this.ensureSchedulerSchema();
     const [result] = await db.query(
@@ -366,8 +347,6 @@ export class BotLifecycleService {
       heartbeatAt: row.heartbeat_at ?? null,
       leaseOwner: row.lease_owner ?? null,
       leaseExpiresAt: row.lease_expires_at ?? null,
-      peakEquity: row.peak_equity != null ? Number(row.peak_equity) : null,
-      peakEquityBasis: row.peak_equity_basis ?? "available_balance",
       createdAt: row.created_at ?? null,
       updatedAt: row.updated_at ?? null,
     };

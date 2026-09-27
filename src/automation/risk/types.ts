@@ -12,7 +12,6 @@ export interface RiskManagerConfig {
   maxSimultaneousBots: number;
   dailyLossLimitPct: number;
   dailyTradeLimit: number;
-  maxDrawdownPct: number;
   minRiskRewardRatio: number;
   tolerance?: number;
 }
@@ -26,15 +25,12 @@ export const DEFAULT_RISK_CONFIG: RiskManagerConfig = {
   maxSimultaneousBots: 5,
   dailyLossLimitPct: 5,
   dailyTradeLimit: 20,
-  maxDrawdownPct: 15,
   minRiskRewardRatio: DEFAULT_MIN_RISK_REWARD_RATIO,
   tolerance: 1e-9,
 };
 
 export interface WalletInfo {
   balance: number;
-  equity?: number;
-  peakBalance?: number;
 }
 
 export interface CapitalSelection {

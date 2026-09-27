@@ -29,12 +29,13 @@ import { AnalysisCycleRunner } from "./AnalysisCycleRunner";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 
 /**
- * FIX 3 — the AnalysisCycleRunner (live account risk gate) remains the ONLY
- * authority that can approve/reject based on drawdown / daily-loss / exposure.
- * A genuine live-equity drawdown ≥ 15% must still emit a RISK_REJECTED event
- * and publish a visible "Risk check rejected" message — these are what the
- * production UI / activity hub surface, and they must NOT be lost now that the
- * engine's cosmetic PASS was reworded.
+ * Drawdown protection is removed from the automated trading path.
+ *
+ * There is no account-level maximum-drawdown check: no drawdown % is computed,
+ * no peak equity is tracked or persisted, and a candidate is never rejected
+ * because of how far the account sits below a historical peak. The remaining
+ * live gate (daily-loss / exposure / R:R / sizing) stays authoritative and
+ * visible, and must still emit RISK_REJECTED when it fails.
  */
 
 const RUNNING_BOT: BotRuntimeState = {
@@ -47,8 +48,6 @@ const RUNNING_BOT: BotRuntimeState = {
   capitalMode: "fixed",
   status: "RUNNING",
   desiredStatus: "RUNNING",
-  peakEquity: 100,
-  peakEquityBasis: "equity",
   configJson: JSON.stringify({
     symbol: "BTCUSDT",
     timeframe: "5m",
@@ -98,8 +97,9 @@ function makeDeps() {
         scheduleNextRun: vi.fn(async () => {}),
       },
       client: {
-        // Equity: wallet total 100 + position PnL −15 → 85 (a genuine 15% drop
-        // from the persisted peak of 100). available is NOT used as equity.
+        // A wallet well below any plausible historical peak: available 85 while
+        // total is 100. Under the removed drawdown gate this was a 15% drop
+        // from a persisted peak of 100 and would have been rejected.
         getWalletSnapshot: vi.fn(async () => ({
           available: 85,
           total: 100,
@@ -137,21 +137,22 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     dispatchTelegramMock.mockClear();
   });
 
-  it("rejects the trade and makes the rejection visible (RISK_REJECTED event + activity message)", async () => {
+  it("does NOT reject a candidate that exceeds the old 15% maximum-drawdown threshold", async () => {
+    // The account sits 15% below the peak the removed gate used to track
+    // (available 85 against a peak of 100). Drawdown protection is gone, so the
+    // cycle must run through to order submission, and must not emit a
+    // RISK_REJECTED event or any "Maximum drawdown ... reached" message.
     const { runner, eventsEmit } = makeDeps();
     const result = await runner.runCycle(RUNNING_BOT.id);
-      // With drawdown removed from the automated blocking path the cycle proceeds
-      // to the execution path. Our deps include a lightweight executor mock that
-      // returns a CANCELLED result — the cycle completes as ANALYZED and no
-      // RISK_REJECTED event is emitted for maximum-drawdown.
-      expect(result.executed).toBe(true);
-      expect(result.state).toBe("RUNNING");
-      expect(result.action).toBe("ANALYZED");
 
-      const rejectionEvent = eventsEmit.mock.calls
-        .map(([event]) => event as { type?: string; message?: string })
-        .find((event) => event?.type === "RISK_REJECTED");
-      expect(rejectionEvent).toBeUndefined();
+    expect(result.executed).toBe(true);
+    expect(result.state).toBe("RUNNING");
+    expect(result.action).toBe("ANALYZED");
+    expect(result.message).not.toContain("Maximum drawdown");
+
+    const emitted = eventsEmit.mock.calls.map(([event]) => event as { type?: string; message?: string });
+    expect(emitted.some((event) => event?.type === "RISK_REJECTED")).toBe(false);
+    expect(emitted.some((event) => /drawdown/i.test(event?.message ?? ""))).toBe(false);
   });
 
   it("does not place an order when the live gate rejects (authoritative execution gate)", async () => {
@@ -160,9 +161,9 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     // executor. The deps above contain no executor at all — reaching it would
     // throw — so a completed cycle is itself the proof.
     // With drawdown checks removed from the blocking path there is no
-    // authoritative RISK_REJECTED emitted for maximum-drawdown; the cycle
-    // completes and the execution path is invoked (our executor mock will
-    // return CANCELLED and the cycle ends as ANALYZED).
+    // RISK_REJECTED emitted for maximum-drawdown; the cycle completes and the
+    // execution path is invoked (our executor mock will return CANCELLED and
+    // the cycle ends as ANALYZED).
     const { runner, eventsEmit } = makeDeps();
     const result = await runner.runCycle(RUNNING_BOT.id);
     expect(result.action).toBe("ANALYZED");
@@ -177,8 +178,6 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     const autoBot: BotRuntimeState = {
       ...RUNNING_BOT,
       symbol: "AUTO",
-      peakEquity: 100,
-      peakEquityBasis: "equity",
       configJson: JSON.stringify({
         ...JSON.parse(RUNNING_BOT.configJson as string),
         autoSelect: true,
@@ -285,8 +284,6 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     const autoBot: BotRuntimeState = {
       ...RUNNING_BOT,
       symbol: "AUTO",
-      peakEquity: 100,
-      peakEquityBasis: "equity",
       configJson: JSON.stringify({
         ...JSON.parse(RUNNING_BOT.configJson as string),
         autoSelect: true,

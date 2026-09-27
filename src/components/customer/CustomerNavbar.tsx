@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, User, LogOut, Plug, ChevronDown } from "lucide-react";
+import { Menu, User, LogOut, Plug, KeyRound, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
@@ -104,6 +104,16 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
                   <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>{customerAuth.email}</div>
                   <div className="text-xs mt-1" style={{ color: "var(--primary)" }}>{customerAuth.role}</div>
                 </div>
+                <button
+                  onClick={() => { setOpen(false); router.push("/coinswitch/connect"); }}
+                  className="w-full flex items-center gap-2 px-4 py-3 transition cursor-pointer"
+                  style={{ color: "var(--foreground)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--muted, rgba(0,0,0,0.05))"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+                >
+                  <KeyRound size={18} />
+                  Secret Keys
+                </button>
                 <button
                   onClick={handleDisconnect}
                   className="w-full flex items-center gap-2 px-4 py-3 text-yellow-300 transition cursor-pointer"

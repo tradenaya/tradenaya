@@ -53,7 +53,7 @@ const steps = [
   {
     num: "05",
     title: "Set capital & risk",
-    body: "Decide how much of your wallet each trade should use. Our risk engine calculates position size, liquidation safety and drawdown limits for you.",
+    body: "Decide how much of your wallet each trade should use. Our risk engine calculates position size and liquidation safety for you.",
   },
   {
     num: "06",

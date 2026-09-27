@@ -255,10 +255,9 @@ export class BacktestingEngine {
         maxSimultaneousBots: 5,
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
-        maxDrawdownPct: 15,
         minRiskRewardRatio: config.minRiskRewardRatio ?? 2,
       },
-      wallet: { balance: wallet.balance, equity: wallet.equity, peakBalance: wallet.peakBalance },
+      wallet: { balance: wallet.balance },
       capital: {
         mode: config.capitalMode,
         amount: config.capitalMode === "fixed" ? config.initialCapital : undefined,
