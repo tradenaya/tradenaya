@@ -67,10 +67,9 @@ export class DefaultRiskManager implements RiskManager {
         maxSimultaneousPositions: Number.POSITIVE_INFINITY,
         maxSimultaneousBots: Number.POSITIVE_INFINITY,
         dailyTradeLimit: Number.POSITIVE_INFINITY,
-        maxDrawdownPct: 100,
         minRiskRewardRatio: 1,
       },
-      wallet: { balance: config.capital, equity: config.capital },
+      wallet: { balance: config.capital },
       capital: {
         mode: config.capitalMode,
         amount: config.capitalMode === "fixed" ? config.capital : undefined,

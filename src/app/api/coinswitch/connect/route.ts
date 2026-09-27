@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const apiKey = body?.apiKey || process.env.COINSWITCH_API_KEY;
     const apiSecret = body?.apiSecret || process.env.COINSWITCH_API_SECRET;
+    const validUntil: string | null | undefined = body?.validUntil;
 
     if (!apiKey || !apiSecret) {
       return NextResponse.json({ success: false, message: "CoinSwitch credentials missing" }, { status: 400 });
@@ -21,8 +22,8 @@ export async function POST(request: NextRequest) {
     // verify connection first
     const response = await verifyConnection(apiKey, apiSecret);
 
-    // save keys for this user (encrypted)
-    await saveKeysForUser(customer.customerId, apiKey, apiSecret);
+    // save keys for this user (encrypted), together with the chosen key expiry
+    await saveKeysForUser(customer.customerId, apiKey, apiSecret, validUntil);
 
     return NextResponse.json({ success: true, data: response });
   } catch (error: any) {

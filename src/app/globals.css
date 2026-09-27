@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "react-datepicker/dist/react-datepicker.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -216,4 +217,248 @@ h1, h2, h3, h4, h5, h6 {
     background: rgba(201, 154, 88, 0.08);
     color: #eee5d8;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Native date & time inputs
+   The browser draws the calendar/clock indicator using the *light* color
+   scheme, so on this dark UI it renders solid black and is invisible.
+   `color-scheme: dark` makes the UA draw the control (and its indicator) in
+   dark mode, which is the standard fix. Do not also apply an invert() filter
+   here — the two together cancel each other out.
+   --------------------------------------------------------------------------- */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="month"]::-webkit-calendar-picker-indicator:hover,
+input[type="week"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+
+/* ---------------------------------------------------------------------------
+   react-datepicker — dark-gold theme
+   --------------------------------------------------------------------------- */
+.react-datepicker {
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
+  color: var(--foreground);
+  font-family: inherit;
+}
+
+.react-datepicker__header {
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: 0.75rem;
+  border-top-right-radius: 0.75rem;
+}
+
+.react-datepicker__current-month,
+.react-datepicker__day-name,
+.react-datepicker__time-name {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.react-datepicker__day {
+  color: var(--foreground);
+  border-radius: 0.5rem;
+}
+
+.react-datepicker__day:hover {
+  background: color-mix(in oklab, var(--primary) 18%, transparent);
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--selected:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+}
+
+.react-datepicker__day--keyboard-selected,
+.react-datepicker__day--keyboard-selected:hover,
+.react-datepicker__day--highlighted {
+  background: color-mix(in oklab, var(--primary) 18%, transparent);
+  color: var(--foreground);
+}
+
+.react-datepicker__day--today {
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.react-datepicker__day--today:not(.react-datepicker__day--selected) {
+  color: var(--primary);
+}
+
+.react-datepicker__day--disabled,
+.react-datepicker__day--disabled:hover {
+  color: var(--text-muted);
+  opacity: 0.35;
+}
+
+.react-datepicker__navigation-icon {
+  fill: var(--primary);
+}
+
+.react-datepicker__navigation:hover .react-datepicker__navigation-icon {
+  fill: var(--primary-hover);
+}
+
+.react-datepicker__triangle {
+  fill: var(--popover);
+  stroke: var(--border);
+}
+
+.react-datepicker__today-button {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: 0.5rem;
+  margin: 0 0.25rem 0.5rem;
+}
+
+.react-datepicker__today-button:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.react-datepicker__input-container {
+  padding: 0;
+}
+
+.react-datepicker__input {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--input);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color-scheme: dark;
+}
+
+.react-datepicker__input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 30%, transparent);
+  outline: none;
+}
+
+.react-datepicker__input::placeholder {
+  color: var(--text-muted);
+}
+
+.react-datepicker__close-icon {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   CoinSwitch connect screen — control affordance
+
+   The app's own tokens are almost invisible on this screen: --border is gold at
+   12% alpha and --input (#0d1017) sits on a #0b0d10 card, roughly 2/255 apart in
+   each channel. react-datepicker ships no border for its input at all (Tailwind
+   preflight strips it), so all three controls read as plain text. These rules
+   use an opaque border so the fields and the button look like real controls.
+   --------------------------------------------------------------------------- */
+.cs-input,
+.cs-date-field .react-datepicker__input-container > input {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #07090d;
+  color: var(--foreground);
+  border-radius: 0.5rem;
+  height: 2.5rem;
+  width: 100%;
+  padding: 0 0.625rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cs-input::placeholder,
+.cs-date-field .react-datepicker__input-container > input::placeholder {
+  color: #78808f;
+}
+
+.cs-input:hover,
+.cs-date-field .react-datepicker__input-container > input:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.cs-input:focus,
+.cs-input:focus-visible,
+.cs-date-field .react-datepicker__input-container > input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 30%, transparent);
+  outline: none;
+}
+
+/* The date field opens a calendar, so show a pointer rather than a text caret. */
+.cs-date-field .react-datepicker__input-container > input {
+  cursor: pointer;
+  color-scheme: dark;
+}
+
+/* Time field: match the same visible border as the other two controls. */
+.cs-time-field > div {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: #07090d;
+}
+
+.cs-time-field > div:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.cs-time-field > div:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 30%, transparent);
+}
+
+.cs-time-field button[aria-expanded] {
+  border-left-color: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+/* Secondary "save date & time only" action — clearly a button, not body text. */
+.cs-expiry-save {
+  border: 1px solid rgba(184, 134, 11, 0.55);
+  background: rgba(184, 134, 11, 0.14);
+  color: #eccb87;
+  font-weight: 500;
+}
+
+.cs-expiry-save:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: rgba(184, 134, 11, 0.26);
+  color: #f6dda9;
+}
+
+.cs-expiry-save:disabled {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #78808f;
 }

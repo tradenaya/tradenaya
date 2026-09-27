@@ -6,11 +6,11 @@ import { AutomationEngine, type EngineStep } from "./automation-engine";
  * FIX 3 — observability correction.
  *
  * The engine's backward-compatible risk assessment runs with
- * `config.capital` as wallet/equity, no persisted peak, and
- * `maxDrawdownPct = 100`, so its PASS message must not be phrased as the
- * authoritative live drawdown approval. The message is explicitly scoped to
- * position sizing, and the live gate (AnalysisCycleRunner) is the only
- * authority that can approve/reject a trade based on live account risk.
+ * `config.capital` as the wallet balance, so its PASS message must not be
+ * phrased as an authoritative live account-risk approval. The message is
+ * explicitly scoped to position sizing, and the live gate
+ * (AnalysisCycleRunner) is the only authority that can approve/reject a trade
+ * based on live account risk.
  */
 
 // Deterministic 5m candle series (mirrors the strategy suite's fixture so the
@@ -68,7 +68,7 @@ const marketService = {
 };
 
 describe("AutomationEngine — FIX 3 risk observability", () => {
-  it("does NOT present the cosmetic risk PASS as the authoritative live drawdown approval", async () => {
+  it("does NOT present the cosmetic risk PASS as the authoritative live account-risk approval", async () => {
     const engine = new AutomationEngine(marketService);
     const steps: EngineStep[] = [];
     const result = await engine.run(
@@ -95,8 +95,8 @@ describe("AutomationEngine — FIX 3 risk observability", () => {
     expect(messages.some((message) => message.includes("Risk check passed"))).toBe(false);
 
     // The replacement is explicitly scoped to position sizing and defers the
-    // live account gate (drawdown / daily-loss / exposure) to the authoritative
-    // runner that runs AFTER planning.
+    // live account gate (daily-loss / exposure) to the authoritative runner
+    // that runs AFTER planning.
     expect(riskMessages.length).toBeGreaterThan(0);
     expect(riskMessages[0]).toMatch(/^Position sizing check passed/);
     expect(riskMessages[0]).toContain("Live account risk gate");

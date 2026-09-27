@@ -503,11 +503,11 @@ export class CoinSwitchClient {
    * Read the normalized USDT futures wallet (available / total / blocked /
    * position margin / open-order margin / authoritative equity).
    *
-   * Prefer this over `getWalletBalance` anywhere ACCOUNT EQUITY matters (e.g.
-   * drawdown protection). `getWalletBalance` returns the *available* balance,
-   * which is the correct input for margin allocation/preflight but is NOT
-   * equity — available falls whenever margin is locked in a position even when
-   * the account has not lost money.
+   * Prefer this over `getWalletBalance` anywhere ACCOUNT EQUITY matters.
+   * `getWalletBalance` returns the *available* balance, which is the correct
+   * input for margin allocation/preflight but is NOT equity — available falls
+   * whenever margin is locked in a position even when the account has not lost
+   * money.
    */
   async getWalletSnapshot(userId: number): Promise<FuturesWalletSnapshot | null> {
     const data = await this.call("GET", "/futures/wallet_balance", { exchange: "EXCHANGE_2" }, userId);
