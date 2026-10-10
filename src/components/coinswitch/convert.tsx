@@ -13,7 +13,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { getCurrencyState } from "@/lib/currency/store";
+import { ErrorState } from "@/components/ui/error-state";
+import { fetchData } from "@/lib/api-client";
 
 export interface ConvertStatusData {
   inrAvailable: number;
@@ -48,10 +49,7 @@ export function formatUsdt(value: number, decimals = 2): string {
 }
 
 async function requestConvertStatus(): Promise<ConvertStatusData> {
-  const res = await fetch("/api/coinswitch/convert/status", { cache: "no-store" });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || "Failed to load your CoinSwitch balance");
-  return json.data as ConvertStatusData;
+  return fetchData<ConvertStatusData>("/api/coinswitch/convert/status");
 }
 
 /** Latest displayed INR rate, refreshed each time the dialog opens. */
@@ -75,21 +73,21 @@ export function ConvertInrToUsdtDialog({
 }) {
   const [status, setStatus] = useState<ConvertStatusData | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
-  const [statusError, setStatusError] = useState("");
+  const [statusError, setStatusError] = useState<unknown>(null);
   const [amount, setAmount] = useState("");
   const [converting, setConverting] = useState(false);
   const [result, setResult] = useState<ConvertResultData | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setResult(null);
-    setError("");
+    setError(null);
 
     (async () => {
       setStatusLoading(true);
-      setStatusError("");
+      setStatusError(null);
       try {
         const data = await requestConvertStatus();
         if (!cancelled) {
@@ -97,7 +95,7 @@ export function ConvertInrToUsdtDialog({
           if (data.inrRate != null && data.inrRate > 0) inrRateCache.rate = data.inrRate;
         }
       } catch (err: unknown) {
-        if (!cancelled) setStatusError(err instanceof Error ? err.message : "Failed to load your CoinSwitch balance");
+        if (!cancelled) setStatusError(err);
       } finally {
         if (!cancelled) setStatusLoading(false);
       }
@@ -111,8 +109,6 @@ export function ConvertInrToUsdtDialog({
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
-  const rate = status?.inrRate ?? getCurrencyState().inrRate;
-  const estimateUsdt = amountValid && rate != null && rate > 0 ? amountNum / rate : null;
   const overBalance =
     status != null && amountValid && amountNum > status.inrAvailable + 0.0001;
   const canConvert =
@@ -130,19 +126,17 @@ export function ConvertInrToUsdtDialog({
       return;
     }
     setConverting(true);
-    setError("");
+    setError(null);
     try {
-      const res = await fetch("/api/coinswitch/convert", {
+      const data = await fetchData<ConvertResultData>("/api/coinswitch/convert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amountInr: amountNum }),
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Conversion failed — please try again.");
-      setResult(json.data as ConvertResultData);
-      onConverted?.(json.data as ConvertResultData);
+      setResult(data);
+      onConverted?.(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Conversion failed — please try again.");
+      setError(err);
     } finally {
       setConverting(false);
     }
@@ -160,10 +154,7 @@ export function ConvertInrToUsdtDialog({
             <ArrowLeftRight className="h-4 w-4 text-amber-400" />
             Convert INR to USDT
           </DialogTitle>
-          <DialogDescription>
-            Buy USDT at the current market price using the INR sitting in your CoinSwitch wallet.
-            Your bots trade in USDT — converting INR fills your trading balance.
-          </DialogDescription>
+          <DialogDescription className="sr-only">Convert INR from your CoinSwitch wallet to USDT.</DialogDescription>
         </DialogHeader>
 
         {statusLoading ? (
@@ -171,21 +162,13 @@ export function ConvertInrToUsdtDialog({
             <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
             <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
           </div>
-        ) : statusError ? (
-          <p className="rounded-lg bg-red-500/10 px-3 py-2.5 text-sm text-red-400">{statusError}</p>
+        ) : statusError != null ? (
+          <ErrorState error={statusError} title="Couldn't load your CoinSwitch INR balance" />
         ) : (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
-                <div className="text-xs text-muted-foreground">INR in your wallet</div>
-                <div className="font-semibold tabular-nums text-amber-300">{formatInr(maxInr)}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
-                <div className="text-xs text-muted-foreground">USDT in Futures wallet</div>
-                <div className="font-semibold tabular-nums text-emerald-400">
-                  {status?.futuresUsdt ? formatUsdt(status.futuresUsdt.available, 2) : "—"}
-                </div>
-              </div>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-sm">
+              <span className="text-muted-foreground">INR in your wallet</span>
+              <span className="font-semibold tabular-nums text-amber-300">{formatInr(maxInr)}</span>
             </div>
 
             {status?.spotAccess === false && (
@@ -272,24 +255,6 @@ export function ConvertInrToUsdtDialog({
                   )}
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">You'll get approximately</span>
-                  <span className="font-semibold tabular-nums text-foreground">
-                    {estimateUsdt != null ? (
-                      formatUsdt(estimateUsdt, 4)
-                    ) : (
-                      <span className="text-xs text-muted-foreground">live price…</span>
-                    )}
-                  </span>
-                </div>
-
-                {rate != null && (
-                  <p className="text-xs text-muted-foreground">
-                    At market rate {formatInr(rate, 2)} per USDT. Converted USDT lands in your
-                    CoinSwitch exchange wallet.
-                  </p>
-                )}
-
                 {status?.minInr != null && maxInr > 0 && maxInr < status.minInr && (
                   <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
                     <Info size={13} className="mt-0.5 shrink-0 text-amber-400" />
@@ -300,7 +265,7 @@ export function ConvertInrToUsdtDialog({
                   </p>
                 )}
 
-                {error && <p className="rounded-lg bg-red-500/10 px-3 py-2.5 text-sm text-red-400">{error}</p>}
+                {error != null && <ErrorState error={error} title="Conversion failed" />}
 
                 <DialogFooter>
                   <Button variant="ghost" onClick={close} disabled={converting}>
@@ -318,7 +283,7 @@ export function ConvertInrToUsdtDialog({
                     )}
                   >
                     {converting && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {converting ? "Converting…" : "Convert INR to USDT"}
+                    {converting ? "Converting…" : "Convert"}
                   </Button>
                 </DialogFooter>
               </>
@@ -362,9 +327,11 @@ export function ConvertInrToUsdtButton({
 }
 
 /**
- * Small, subtle hint that INR is sitting idle: one muted line with an inline
- * "Convert to USDT" hyperlink. Self-fetches conversion status once on mount and
- * after each convert, and hides itself when there is no INR to convert.
+ * Wallet-card entry point for INR -> USDT conversion: one muted line with an
+ * inline "Convert INR to USDT" hyperlink that opens the conversion dialog. The
+ * link is always shown so the option never disappears; when INR is sitting
+ * idle the line also says how much. Self-fetches conversion status once on
+ * mount and after each convert.
  */
 export function ConvertInrToUsdtBanner({
   onConverted,
@@ -375,16 +342,16 @@ export function ConvertInrToUsdtBanner({
 }) {
   const [status, setStatus] = useState<ConvertStatusData | null>(null);
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   async function refresh() {
     try {
-      setError("");
+      setError(null);
       const data = await requestConvertStatus();
       setStatus(data);
       if (data.inrRate != null && data.inrRate > 0) inrRateCache.rate = data.inrRate;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Could not load balance");
+      setError(err);
     }
   }
 
@@ -392,9 +359,7 @@ export function ConvertInrToUsdtBanner({
     void refresh();
   }, []);
 
-  const inr = status?.inrAvailable ?? 0;
-  if (error || status == null || inr <= 0) return null;
-
+  const inr = error == null && status != null ? status.inrAvailable ?? 0 : 0;
   const rate = inrRateCache.rate ?? status?.inrRate ?? null;
   const inrUsdt = rate != null && rate > 0 ? inr / rate : null;
 
@@ -405,19 +370,23 @@ export function ConvertInrToUsdtBanner({
         className,
       )}
     >
-      <span>
-        You have <span className="font-medium text-foreground">{formatInr(inr)}</span>
-        {inrUsdt != null && (
-          <span className="text-muted-foreground"> (≈ {formatUsdt(inrUsdt)})</span>
-        )}{" "}
-        in INR — it sits idle because bots trade in USDT.
-      </span>
+      {inr > 0 ? (
+        <span>
+          You have <span className="font-medium text-foreground">{formatInr(inr)}</span>
+          {inrUsdt != null && (
+            <span className="text-muted-foreground"> (≈ {formatUsdt(inrUsdt)})</span>
+          )}{" "}
+          in INR — it sits idle because bots trade in USDT.
+        </span>
+      ) : (
+        <span>Bots trade in USDT — add funds by converting INR.</span>
+      )}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline font-medium text-amber-400 underline underline-offset-2 transition-colors hover:text-amber-300"
+        className="inline-flex items-center gap-1 font-medium text-amber-400 underline underline-offset-2 transition-colors hover:text-amber-300"
       >
-        Convert to USDT
+        <ArrowLeftRight className="h-3 w-3" /> Convert INR to USDT
       </button>
       <ConvertInrToUsdtDialog
         open={open}

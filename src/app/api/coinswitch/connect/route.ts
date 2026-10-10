@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { verifyConnection } from "@/app/services/coinswitch.service";
 import { saveKeysForUser } from "@/lib/coinswitch.store";
 import { getCustomerFromRequest } from "@/lib/auth";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +28,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: response });
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/connect");
   }
 }

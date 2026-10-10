@@ -5,7 +5,9 @@ import { Wallet, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { StatsSkeleton, TableSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
 import { ConvertInrToUsdtDialog } from "@/components/coinswitch/convert";
 import {
   Table,
@@ -58,19 +60,18 @@ function pnlClass(value: number): string {
 export default function PortfolioPage() {
   const [holdings, setHoldings] = useState<CoinHolding[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
   const [convertOpen, setConvertOpen] = useState(false);
 
   async function loadPortfolio() {
     try {
-      setError("");
-      const res = await fetch("/api/coinswitch/portfolio", { cache: "no-store" });
-      const json = (await res.json()) as PortfolioResponse & { success?: boolean; message?: string };
-      if (json.success === false) throw new Error(json.message || "Failed to load portfolio");
+      setError(null);
+      setLoading(true);
+      const json = await fetchJson<PortfolioResponse>("/api/coinswitch/portfolio");
       const all = json.data?.data ?? [];
       setHoldings(all.filter((c) => !isFiatCash(c)));
-    } catch (err: any) {
-      setError(err.message || "Failed to load portfolio");
+    } catch (err: unknown) {
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -107,8 +108,15 @@ export default function PortfolioPage() {
         </div>
       </div>
 
-      {error && <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
+      {error != null && <ErrorState error={error} title="Couldn't load your spot portfolio" onRetry={loadPortfolio} />}
 
+      {error != null && holdings.length === 0 ? null : loading && holdings.length === 0 ? (
+        <Card className="bg-card">
+          <CardContent>
+            <StatsSkeleton count={4} />
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="bg-card">
           <CardContent className="space-y-1">
@@ -137,6 +145,7 @@ export default function PortfolioPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       <Card className="bg-card">
         <CardHeader className="border-b">
@@ -146,8 +155,10 @@ export default function PortfolioPage() {
           <CardDescription>{holdings.length} assets</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          {loading ? (
-            <Skeleton className="h-72 w-full rounded-lg" />
+          {error != null && holdings.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Holdings are unavailable until the portfolio loads — see the error above.</p>
+          ) : loading && holdings.length === 0 ? (
+            <TableSkeleton rows={6} columns={6} />
           ) : holdings.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-12">
               <Wallet className="h-8 w-8 text-muted-foreground" />

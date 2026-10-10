@@ -14,6 +14,13 @@ import { BacktestError } from "./errors";
  * look-ahead bias: the strategy code can never observe future candles, highs,
  * lows, volume or indicators because they do not exist in the slice yet.
  */
+/**
+ * Candles the strategy sees per evaluation — the same window the live market
+ * data service fetches (rest-client default limit 300), so indicator warm-up
+ * and higher-timeframe resampling behave exactly as in live trading.
+ */
+export const LIVE_CANDLE_WINDOW = 300;
+
 export class HistoricalMarketDataAdapter implements MarketDataService {
   private candles: MarketCandle[] = [];
   /** Exclusive upper bound of the visible slice. */
@@ -29,7 +36,7 @@ export class HistoricalMarketDataAdapter implements MarketDataService {
 
   async getSnapshot(symbol: string, timeframe: string): Promise<MarketSnapshot> {
     const normalized = normalizeSymbol(symbol);
-    const slice = this.candles.slice(0, this.sliceEnd);
+    const slice = this.candles.slice(Math.max(0, this.sliceEnd - LIVE_CANDLE_WINDOW), this.sliceEnd);
     const last = slice[slice.length - 1];
     if (!last) {
       throw new BacktestError(

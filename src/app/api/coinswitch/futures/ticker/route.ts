@@ -1,13 +1,14 @@
 import { NextResponse, NextRequest } from "next/server";
 import { coinSwitchRequest } from "@/lib/coinswitch";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 
 export async function GET(req: NextRequest) {
 
   try {
 
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any, { allowServerKeys: true });
 
     const response = await coinSwitchRequest(
       "/futures/all-pairs/ticker",
@@ -29,21 +30,7 @@ export async function GET(req: NextRequest) {
 
   } catch(error:any){
 
-    console.log(
-      "FUTURES TICKER ERROR",
-      error
-    );
-
-
-    return NextResponse.json(
-      {
-        success:false,
-        message:error.message
-      },
-      {
-        status:500
-      }
-    );
+    return errorResponse(error, 500, "Failed to load futures prices", "/api/coinswitch/futures/ticker");
 
   }
 

@@ -4,7 +4,8 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -29,7 +30,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 }
 
 export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading, refresh } = useAsyncData<BacktestSummary[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<BacktestSummary[]>(
     () => apiGet("/api/analytics/backtests", { limit: 50 }),
     [filters.botId],
     { pollMs: 10_000 },
@@ -39,17 +40,20 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
   const [detailId, setDetailId] = useState<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<unknown>(null)
 
   const backtests = data ?? []
 
   const remove = async (id: number) => {
     if (!window.confirm(`Delete backtest #${id}?`)) return
     setDeletingId(id)
+    setDeleteError(null)
     try {
       await apiSend(`/api/analytics/backtests/${id}`, { method: "DELETE" })
       refresh()
     } catch (e) {
       console.error("Failed to delete backtest", e)
+      setDeleteError(e)
     } finally {
       setDeletingId(null)
     }
@@ -69,8 +73,13 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
         </div>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-56 w-full rounded-lg" />
+        {deleteError != null && (
+          <ErrorState error={deleteError} title="Couldn't delete the backtest" compact className="mb-3" />
+        )}
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load backtests" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={5} columns={6} />
         ) : backtests.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8">
             <p className="text-sm text-muted-foreground">No backtests yet.</p>

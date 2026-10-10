@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, getAnalyticsService, ok, parseFilters, requireUserId } from "../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const userId = requireUserId(req);
@@ -9,6 +10,6 @@ export async function GET(req: NextRequest) {
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/equity]", error);
-    return fail(500, error?.message ?? "Failed to load equity curve");
+    return errorResponse(error, 500, "Failed to load equity curve", "/api/analytics/equity");
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import crypto from "crypto";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse, HttpError } from "@/lib/api-error";
 
 const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
@@ -73,6 +74,10 @@ export async function GET(req: NextRequest){
  const symbol =
    searchParams.get("symbol");
 
+ if (!symbol) {
+   throw new HttpError(400, "The 'symbol' query parameter is required, e.g. /api/coinswitch/futures/kline?symbol=BTCUSDT&interval=5", "MISSING_SYMBOL");
+ }
+
 
  const interval =
    searchParams.get("interval") || "5";
@@ -83,7 +88,7 @@ export async function GET(req: NextRequest){
  new URLSearchParams({
 
    exchange:"EXCHANGE_2",
-   symbol:symbol!.toLowerCase(),
+   symbol:symbol.toLowerCase(),
    interval,
    limit:"100"
 
@@ -106,7 +111,7 @@ export async function GET(req: NextRequest){
 
 
 
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any, { allowServerKeys: true });
     const apiSecret = keys?.apiSecret || process.env.COINSWITCH_API_SECRET!;
     const apiKey = keys?.apiKey || process.env.COINSWITCH_API_KEY!;
 
@@ -152,18 +157,7 @@ export async function GET(req: NextRequest){
  }
  catch(error:any){
 
-  console.log(
-    "KLINE ERROR",
-    error
-  );
-
-
-  return NextResponse.json({
-    success:false,
-    message:error.message
-  },{
-    status:500
-  });
+  return errorResponse(error, 500, "Failed to load candles", "/api/coinswitch/futures/kline");
 
 
  }

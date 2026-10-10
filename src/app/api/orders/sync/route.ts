@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCustomerFromRequest } from "@/lib/auth";
 import { orderHistoryService } from "@/automation/order-history/service";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(req: NextRequest) {
   const customer = getCustomerFromRequest(req);
@@ -14,8 +15,6 @@ export async function POST(req: NextRequest) {
     );
     return Response.json({ success: true, data });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to sync order history";
-    console.error("[orders/sync]", error);
-    return Response.json({ success: false, message }, { status: 500 });
+    return errorResponse(error, 500, "Failed to sync order history", "/api/orders/sync");
   }
 }

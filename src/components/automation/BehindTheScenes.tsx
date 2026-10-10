@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { ListSkeleton } from "@/components/ui/skeletons";
+import { fetchData } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
 import { displaySymbol, sideLabel, botName } from "./bot-config";
@@ -188,32 +190,22 @@ export function BehindTheScenes() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [steps, setSteps] = useState<LiveStep[]>([]);
   const [streamUp, setStreamUp] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      try {
-        const [botsRes, actRes] = await Promise.all([
-          fetch("/api/bots", { cache: "no-store" }),
-          fetch("/api/analytics/activity", { cache: "no-store" }),
-        ]);
-        const botsJson = await botsRes.json();
-        const actJson = await actRes.json();
-        if (cancelled) return;
+      const [botsRes, actRes] = await Promise.allSettled([
+        fetchData<BotRecord[]>("/api/bots"),
+        fetchData<{ items?: ActivityEntry[] }>("/api/analytics/activity"),
+      ]);
+      if (cancelled) return;
 
-        if (botsJson.success) {
-          setBots(Array.isArray(botsJson.data) ? botsJson.data : []);
-        }
-        if (actJson.success) {
-          setActivity(Array.isArray(actJson.data?.items) ? actJson.data.items : []);
-        }
-        setError("");
-      } catch (err: unknown) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load live activity");
-      }
+      if (botsRes.status === "fulfilled") setBots(Array.isArray(botsRes.value) ? botsRes.value : []);
+      if (actRes.status === "fulfilled") setActivity(Array.isArray(actRes.value?.items) ? actRes.value.items : []);
+      setError(botsRes.status === "rejected" ? botsRes.reason : actRes.status === "rejected" ? actRes.reason : null);
     }
 
     load();
@@ -264,11 +256,15 @@ export function BehindTheScenes() {
       </CardHeader>
 
       <CardContent className="space-y-3 pt-4">
-        {error && <div className="rounded-lg bg-red-500/10 p-2 text-xs text-red-400">{error}</div>}
+        {error != null && bots !== null && (
+          <ErrorState error={error} title="Couldn't refresh live activity — showing the last loaded data" compact />
+        )}
 
         {/* Compact, single-line-per-bot status — no separate empty section when there's nothing live */}
-        {bots === null ? (
-          <Skeleton className="h-14 w-full rounded-lg" />
+        {bots === null && error != null ? (
+          <ErrorState error={error} title="Couldn't load live bot activity" />
+        ) : bots === null ? (
+          <ListSkeleton rows={2} />
         ) : liveBots.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border py-4 text-center text-sm text-muted-foreground">
             {bots.length === 0

@@ -13,6 +13,9 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { futuresSocket, Candle } from "@/lib/coinswitch/futuresSocket";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { fetchData } from "@/lib/api-client";
 
 // Available candle intervals, in minutes, as supported by the KLines API
 const INTERVALS = [
@@ -31,9 +34,18 @@ export default function TradingChart({ symbol }: { symbol: string }) {
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
   const [interval, setInterval] = useState("5");
+  const [candleState, setCandleState] = useState<"loading" | "ready" | "error">("loading");
+  const [candleError, setCandleError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!chartContainer.current) return;
+    let disposed = false;
+    queueMicrotask(() => {
+      if (disposed) return;
+      setCandleState("loading");
+      setCandleError(null);
+    });
 
     const chart = createChart(chartContainer.current, {
       layout: {
@@ -69,15 +81,10 @@ export default function TradingChart({ symbol }: { symbol: string }) {
 
     async function loadCandles() {
       try {
-        const res = await fetch(
-          `/api/coinswitch/futures/kline?symbol=${symbol}&interval=${interval}`,
-          { cache: "no-store" }
-        );
-        const json = await res.json();
+        const data = await fetchData<Record<string, unknown>[]>(`/api/coinswitch/futures/kline?symbol=${symbol}&interval=${interval}`);
+        if (disposed) return;
 
-        if (!json.success) return;
-
-        const candles: CandlestickData<UTCTimestamp>[] = json.data
+        const candles: CandlestickData<UTCTimestamp>[] = (Array.isArray(data) ? data : [])
           .map((candle: any) => ({
             time: (Number(candle.start_time) / 1000) as UTCTimestamp,
             open: Number(candle.o),
@@ -102,7 +109,11 @@ export default function TradingChart({ symbol }: { symbol: string }) {
         // No manual createPriceLine here anymore — the series' own
         // built-in price line (title: "LIVE" above) already shows this,
         // and it will actually move on every WebSocket update.
+        setCandleState("ready");
       } catch (error) {
+        if (disposed) return;
+        setCandleError(error);
+        setCandleState("error");
       }
     }
 
@@ -128,13 +139,14 @@ export default function TradingChart({ symbol }: { symbol: string }) {
     });
 
     return () => {
+      disposed = true;
       // stop feeding updates to this (about-to-be-destroyed) series
       futuresSocket.disconnect();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, reloadKey]);
 
   return (
     <div className="w-full">
@@ -154,10 +166,29 @@ export default function TradingChart({ symbol }: { symbol: string }) {
         ))}
       </div>
 
-      <div
-        ref={chartContainer}
-        className="w-full h-[280px] sm:h-[360px] lg:h-[450px] rounded-xl overflow-hidden"
-      />
+      <div className="relative">
+        <div
+          ref={chartContainer}
+          className="w-full h-[280px] sm:h-[360px] lg:h-[450px] rounded-xl overflow-hidden"
+        />
+        {candleState === "loading" && (
+          <div className="absolute inset-0 flex items-end gap-1.5 rounded-xl bg-[#09090b] p-6" aria-busy="true" aria-label="Loading chart">
+            {[38, 55, 47, 62, 58, 70, 52, 66, 74, 61, 80, 69, 76, 64, 72].map((h, i) => (
+              <Skeleton key={i} className="flex-1 bg-zinc-800" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        )}
+        {candleState === "error" && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#09090b]/95 p-4">
+            <ErrorState
+              error={candleError}
+              title={`Couldn't load ${symbol} candles`}
+              onRetry={() => setReloadKey((k) => k + 1)}
+              className="w-full max-w-lg"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

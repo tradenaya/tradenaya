@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getKeyMetaForUser, setExpiryForUser } from "@/lib/coinswitch.store";
 import { getCustomerFromRequest } from "@/lib/auth";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,8 +33,8 @@ export async function GET(request: NextRequest) {
       validUntil: validUntil && !Number.isNaN(validUntil.getTime()) ? validUntil.toISOString() : null,
       daysLeft,
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Failed to load key status" }, { status: 500 });
+  } catch (error) {
+    return errorResponse(error, 500, "Failed to load key status", "/api/coinswitch/keys/status");
   }
 }
 
@@ -56,7 +57,7 @@ export async function PATCH(request: NextRequest) {
 
     await setExpiryForUser(customer.customerId, validUntil);
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, message: "Failed to save key expiry" }, { status: 500 });
+  } catch (error) {
+    return errorResponse(error, 500, "Failed to save key expiry", "/api/coinswitch/keys/status");
   }
 }

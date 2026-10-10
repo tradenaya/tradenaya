@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketCandle } from "@/automation/types";
-import { resampleCandles, resampleByLabel } from "./candle-resampler";
+import { closedCandles, resampleCandles, resampleByLabel } from "./candle-resampler";
 
 const M5 = 5 * 60_000;
 const BUCKET = 15 * 60_000;
@@ -10,6 +10,24 @@ const BASE = Math.floor(1_700_000_000_000 / BUCKET) * BUCKET;
 function candle(openTime: number, open = 100, high = 101, low = 99, close = 100.5, volume = 1000): MarketCandle {
   return { timestamp: openTime, open, high, low, close, volume, timeframe: "5" };
 }
+
+describe("closedCandles", () => {
+  const candles = [candle(BASE), candle(BASE + M5), candle(BASE + 2 * M5)];
+
+  it("drops the trailing candle while it is still forming", () => {
+    const now = BASE + 2 * M5 + 60_000; // 1 minute into the third candle
+    expect(closedCandles(candles, 5, now).map((c) => c.timestamp)).toEqual([BASE, BASE + M5]);
+  });
+
+  it("keeps every candle once the last one has closed", () => {
+    const now = BASE + 3 * M5;
+    expect(closedCandles(candles, 5, now)).toHaveLength(3);
+  });
+
+  it("leaves candles untouched when the interval is unknown", () => {
+    expect(closedCandles(candles, null, BASE)).toHaveLength(3);
+  });
+});
 
 describe("candle-resampler", () => {
   it("buckets candles onto the target grid and aggregates OHLCV", () => {

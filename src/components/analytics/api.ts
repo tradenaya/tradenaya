@@ -1,5 +1,7 @@
 "use client"
 
+import { fetchData } from "@/lib/api-client"
+
 export interface AnalyticsFilterState {
   botId: number | null
   symbol: string | null
@@ -39,24 +41,16 @@ export function toQuery(filters: AnalyticsFilterState): Record<string, string> {
   return query
 }
 
+/** GET an analytics endpoint; throws ApiError (with the real cause) on failure. */
 export async function apiGet<T>(path: string, params?: Record<string, string | number | null | undefined>): Promise<T> {
   const url = new URL(path, window.location.origin)
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value != null && value !== "") url.searchParams.set(key, String(value))
   })
-  const res = await fetch(url.toString(), { cache: "no-store" })
-  const body = await res.json()
-  if (!res.ok || !body?.success) {
-    throw new Error(body?.message ?? `Request to ${path} failed`)
-  }
-  return body.data as T
+  return fetchData<T>(url.pathname + url.search)
 }
 
+/** POST/PUT/DELETE an endpoint; throws ApiError (with the real cause) on failure. */
 export async function apiSend<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(path, { cache: "no-store", ...init })
-  const body = await res.json()
-  if (!res.ok || !body?.success) {
-    throw new Error(body?.message ?? `Request to ${path} failed`)
-  }
-  return body.data as T
+  return fetchData<T>(path, init)
 }

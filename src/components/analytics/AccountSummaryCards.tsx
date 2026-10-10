@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
 import type { AccountSummary } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -30,10 +31,14 @@ function StatCard({
 }
 
 export function AccountSummaryCards({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<AccountSummary>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<AccountSummary>(
     () => apiGet("/api/analytics/summary", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
+
+  if (errorInfo && !data) {
+    return <ErrorState error={errorInfo} title="Couldn't load the account summary" onRetry={refresh} />
+  }
 
   if (loading && !data) {
     return (

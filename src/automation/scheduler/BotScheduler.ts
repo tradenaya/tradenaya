@@ -5,6 +5,7 @@ import { AutomationEngine } from "@/automation/engine/automation-engine";
 import { serverMarketDataService } from "@/automation/market/service";
 import { AutoBestSelector } from "@/automation/coinauto/auto-best-selector";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
+import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
 import { BotLifecycleService, type BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { AutomationConfig } from "@/automation/types";
 import { SchedulerStore } from "./SchedulerStore";
@@ -394,9 +395,11 @@ export class BotScheduler {
       );
     }
 
+    // Percent mode is capped to the safe maximum (keeps margin headroom) rather
+    // than rejected, so choosing 100% simply allocates the highest safe share.
     const allocated =
       config.capitalMode === "percent"
-        ? balance * ((Number(config.walletPercent) || 0) / 100)
+        ? effectiveAllocation(Number(config.walletPercent) || 0, balance).amount
         : Number(config.capital) || 0;
 
     if (!(allocated > 0)) {
@@ -418,17 +421,16 @@ export class BotScheduler {
       );
     }
 
-    // High-allocation guard: the order's margin (notional / leverage) scales
-    // with the allocated capital, so at ~100% allocation it consumes the entire
-    // available balance with zero headroom. The exchange then rejects with a
-    // cryptic "Insufficient balance" over a few cents of fees/rounding. Block
-    // up front so the user is told the safe allocation instead of seeing a
-    // confusing runtime failure.
+    // High-allocation guard for a FIXED amount: the order's margin (notional /
+    // leverage) scales with the allocated capital, so near the whole balance it
+    // leaves zero headroom and the exchange rejects with a cryptic
+    // "Insufficient balance". Percent mode never reaches here — it is capped to
+    // the safe maximum above.
     const headroom = MARGIN_HEADROOM;
-    if (allocated > balance * (1 - headroom) + MARGIN_FEE_BUFFER + EXCESS_TOLERANCE) {
+    if (config.capitalMode !== "percent" && allocated > balance * (1 - headroom) + MARGIN_FEE_BUFFER + EXCESS_TOLERANCE) {
       const safePct = maxSafeAllocationPct(balance, headroom, MARGIN_FEE_BUFFER);
       throw new Error(
-        `Leaving no headroom at ${config.capitalMode === "percent" ? `${config.walletPercent}%` : `$${allocated.toFixed(2)}`} allocation. ` +
+        `Leaving no headroom at $${allocated.toFixed(2)} allocation. ` +
         `The order margin would consume nearly all of your ${balance.toFixed(2)} USDT free balance, which the exchange rejects (` +
         `"Insufficient balance") once fees/rounding push it over. Reduce the allocation to ~${safePct.toFixed(0)}% of the available balance ` +
         `(or lower leverage) so the order does not use up the whole free balance.`,

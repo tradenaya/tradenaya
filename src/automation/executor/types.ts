@@ -35,6 +35,8 @@ export interface OrderExecutorInput {
   leverage: number;
   /** Allocated capital in USDT — lets the executor raise a risk-capped quantity up to the exchange minimum when affordable. */
   allocatedCapital?: number;
+  /** Max loss at SL allowed by the bot's Max Risk setting (USDT). Raising to the exchange minimum may never exceed it. */
+  maxRiskAmount?: number;
 }
 
 export interface OrderExecutorOptions {

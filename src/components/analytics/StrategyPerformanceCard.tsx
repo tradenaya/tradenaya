@@ -1,7 +1,8 @@
 "use client"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -16,7 +17,7 @@ import { useAsyncData } from "./use-data"
 import { formatPercent, pnlText, signClass } from "./format"
 
 export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<StrategyPerformance[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<StrategyPerformance[]>(
     () => apiGet("/api/analytics/strategies", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -30,8 +31,10 @@ export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterS
         <CardDescription>PnL and drawdown by strategy</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-40 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load strategy performance" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={4} columns={5} />
         ) : strategies.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">No data</p>
         ) : (

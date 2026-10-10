@@ -42,16 +42,18 @@ export interface EntryValidityResult {
   reason: string | null;
   hard: string[];
   soft: string[];
+  /** How far (price units) the market may run away from the limit before the entry is cancelled; null when not computed. */
+  driftBand?: number | null;
 }
 
 export const DEFAULT_VALIDITY_OPTIONS = {
   // A resting entry is allowed to drift this far (×ATR) past its limit before
-  // being treated as a broken entry zone. 2.5× lets the bot survive normal
-  // wiggles and wait for a real pullback instead of cancelling on the first
-  // small adverse move in a trending market.
-  driftAtr: 2.5,
-  /** Floor band as a fraction of limit price (e.g. 0.005 = 0.5%). Prevents cancelling on tiny wiggles in dead/low-vol markets. */
-  minDriftPct: 0.005,
+  // being treated as a missed setup. The limit sits ~0.6 ATR inside the market,
+  // so 1.5× means price ran ~1 ATR further away without the pullback the entry
+  // needs — free the bot to re-scan instead of waiting on a stale order.
+  driftAtr: 1.5,
+  /** Floor band as a fraction of limit price (e.g. 0.003 = 0.3%). Prevents cancelling on tiny wiggles in dead/low-vol markets. */
+  minDriftPct: 0.003,
   /** ADX threshold above which the trend is considered "strong". */
   strongTrendAdx: 25,
   /** Extra patience multiplier applied to the drift band in a strong trend aligned with the entry side. */
@@ -163,5 +165,5 @@ export function evaluateEntryValidity(ctx: EntryValidityContext): EntryValidityR
   const reason = hard.length > 0 || soft.length >= 2
     ? [...hard, ...soft].join("; ")
     : null;
-  return { keep, reason, hard, soft };
+  return { keep, reason, hard, soft, driftBand: band > 0 ? band : null };
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { signTradenayaToken } from "@/lib/auth";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,6 +69,6 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Admin signin error", error);
-    return NextResponse.json({ message: "Login failed" }, { status: 500 });
+    return errorResponse(error, 500, "Login failed", "/api/admin/signin");
   }
 }

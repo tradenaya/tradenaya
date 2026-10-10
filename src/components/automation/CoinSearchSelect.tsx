@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatPrice, formatSignedPercent } from "@/components/analytics/format";
+import { ErrorState } from "@/components/ui/error-state";
+import { fetchData } from "@/lib/api-client";
 
 interface CoinOption {
   symbol: string;
@@ -39,7 +41,7 @@ function compactNumber(value: number): string {
 
 export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelectProps) {
   const [coins, setCoins] = useState<CoinOption[] | null>(null);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
   const [debouncedQuery, setDebouncedQuery] = useState(query);
@@ -57,12 +59,10 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/coinswitch/futures/ticker", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<Record<string, TickerEntry>>("/api/coinswitch/futures/ticker")
+      .then((data) => {
         if (cancelled) return;
-        if (!json.success) throw new Error(json.message || "Failed to load coins");
-        const list = Object.entries((json.data ?? {}) as Record<string, TickerEntry>).map(([symbol, v]) => ({
+        const list = Object.entries((data ?? {}) as Record<string, TickerEntry>).map(([symbol, v]) => ({
           symbol: String(symbol).toUpperCase(),
           lastPrice: Number(v?.last_price) || null,
           change24h: Number(v?.price_24h_pcnt) || null,
@@ -71,7 +71,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
         setCoins(list);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load coins");
+        if (!cancelled) setLoadError(err);
       });
     return () => {
       cancelled = true;
@@ -199,7 +199,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
 
       {open && matches.length > 0 && (
         <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-popover p-1 shadow-xl">
-          {loadError && <div className="px-2 py-1.5 text-xs text-red-400">{loadError}</div>}
+          {loadError != null && <ErrorState error={loadError} title="Couldn't load the coin list" compact className="m-1" />}
           {matches.map((coin, index) => {
             const selected = coin.symbol.toUpperCase() === value.toUpperCase();
             return (
@@ -247,7 +247,7 @@ export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelect
 
       {open && !matches.length && (
         <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover p-3 text-sm text-muted-foreground shadow-xl">
-          {coins === null && !loadError ? (
+          {coins === null && loadError == null ? (
             <span className="flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading coins…
             </span>

@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ErrorState } from "@/components/ui/error-state";
+import { errorMessage, fetchJson } from "@/lib/api-client";
 import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { fmtMoney } from "@/components/automation/bot-config";
 import { AutoBadge } from "@/components/automation/AutoBadge";
@@ -33,7 +35,7 @@ const runningStates = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_
 
 export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
   const [bots, setBots] = useState<BotRecord[] | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [confirmTurnOff, setConfirmTurnOff] = useState(false);
@@ -42,14 +44,12 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
 
   async function loadBots() {
     try {
-      const res = await fetch("/api/bots", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Failed to load automation");
+      const json = await fetchJson<{ data?: BotRecord[]; schedulerActive?: boolean }>("/api/bots");
       setBots(Array.isArray(json.data) ? json.data : []);
       setSchedulerActive(json.schedulerActive ?? null);
-      setError("");
+      setError(null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load automation");
+      setError(err);
     }
   }
 
@@ -57,17 +57,15 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch("/api/bots", { cache: "no-store" });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.message || "Failed to load automation");
+        const json = await fetchJson<{ data?: BotRecord[]; schedulerActive?: boolean }>("/api/bots");
         if (!cancelled) {
           setBots(Array.isArray(json.data) ? json.data : []);
           setSchedulerActive(json.schedulerActive ?? null);
-          setError("");
+          setError(null);
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load automation");
+          setError(err);
         }
       }
     }
@@ -85,23 +83,19 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
 
   async function startAll(ids: number[]) {
     for (const id of ids) {
-      const res = await fetch(`/api/bots/${id}/start`, { method: "POST" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || `Failed to start bot ${id}`);
+      await fetchJson(`/api/bots/${id}/start`, { method: "POST" });
     }
   }
 
   async function stopAll(ids: number[]) {
     for (const id of ids) {
-      const res = await fetch(`/api/bots/${id}/stop`, { method: "POST" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || `Failed to stop bot ${id}`);
+      await fetchJson(`/api/bots/${id}/stop`, { method: "POST" });
     }
   }
 
   async function turnOn() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       if (botList.length === 0) {
         setSettingsOpen(true);
@@ -116,8 +110,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
         await loadBots();
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to start automated trading";
-      setError(message);
+      const message = errorMessage(err, "Failed to start automated trading");
+      setError(err);
       toast.error(message);
     } finally {
       setBusy(false);
@@ -126,7 +120,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
 
   async function turnOff() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const running = botList
         .filter((b) => runningStates.includes(b.desiredStatus ?? b.status))
@@ -137,8 +131,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
       }
       await loadBots();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to stop automated trading";
-      setError(message);
+      const message = errorMessage(err, "Failed to stop automated trading");
+      setError(err);
       toast.error(message);
     } finally {
       setBusy(false);
@@ -159,12 +153,14 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
    */
   async function syncFromExchange() {
     setSyncing(true);
-    setError("");
+    setError(null);
     try {
-      const res = await fetch("/api/bots/sync", { method: "POST", cache: "no-store" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Sync failed");
-      const s = json.data ?? {};
+      const json = await fetchJson<{ data?: { confirmedClosed?: number; keptOpen?: number; failed?: number; positionsChecked?: number } }>(
+        "/api/bots/sync",
+        { method: "POST" },
+      );
+      const raw = json.data ?? {};
+      const s = { confirmedClosed: raw.confirmedClosed ?? 0, keptOpen: raw.keptOpen ?? 0, failed: raw.failed ?? 0, positionsChecked: raw.positionsChecked ?? 0 };
       const parts: string[] = [];
       if (s.confirmedClosed > 0) parts.push(`${s.confirmedClosed} closed`);
       if (s.keptOpen > 0) parts.push(`${s.keptOpen} open`);
@@ -174,8 +170,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
       await loadBots();
       onCreated?.();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to sync with exchange";
-      setError(message);
+      const message = errorMessage(err, "Failed to sync with exchange");
+      setError(err);
       toast.error(message);
     } finally {
       setSyncing(false);
@@ -183,6 +179,10 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
   }
 
   const runningCount = botList.filter((b) => runningStates.includes(b.desiredStatus ?? b.status)).length;
+
+  if (bots === null && error != null) {
+    return <ErrorState error={error} title="Couldn't load automation status" onRetry={() => void loadBots()} />;
+  }
 
   if (bots === null) {
     return (
@@ -256,8 +256,10 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
         </div>
       </CardContent>
 
-      {error && (
-        <div className="border-t border-border px-4 sm:px-6 py-3 text-sm text-red-400">{error}</div>
+      {error != null && (
+        <div className="border-t border-border px-4 sm:px-6 py-3">
+          <ErrorState error={error} title="Automation request failed" compact />
+        </div>
       )}
 
       {botList.length > 0 && (

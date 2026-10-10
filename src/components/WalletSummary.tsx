@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { StatsSkeleton } from "@/components/ui/skeletons";
+import { fetchData } from "@/lib/api-client";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 import { ConvertInrToUsdtBanner } from "@/components/coinswitch/convert";
@@ -18,30 +20,25 @@ interface WalletBalances {
 
 export default function WalletSummary() {
   const [balances, setBalances] = useState<WalletBalances | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const cancelled = useRef(false);
   useDisplayCurrency();
 
   async function fetchBalance() {
     try {
-      const res = await fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" });
-      const json = await res.json();
-
+      const data = await fetchData<{ base_asset_balances?: { base_asset: string; balances: WalletBalances }[] }>(
+        "/api/coinswitch/futures/wallet-balance",
+      );
       if (cancelled.current) return;
 
-      if (!json.success) {
-        setError(json.message ?? "failed to load balance");
-        return;
-      }
-
-      const usdt = json.data.base_asset_balances?.find(
-        (b: any) => b.base_asset === "USDT"
-      );
-
+      const usdt = data?.base_asset_balances?.find((b) => b.base_asset === "USDT");
       setBalances(usdt ? usdt.balances : null);
       setError(null);
-    } catch (err: any) {
-      if (!cancelled.current) setError(err.message);
+    } catch (err) {
+      if (!cancelled.current) setError(err);
+    } finally {
+      if (!cancelled.current) setLoaded(true);
     }
   }
 
@@ -56,11 +53,22 @@ export default function WalletSummary() {
     };
   }, []);
 
-  if (error) {
+  if (error != null && !balances) {
     return (
       <Card className="mb-5 bg-card">
-        <CardContent className="py-4 text-sm text-red-400">
-          Failed to load wallet balance: {error}
+        <CardContent className="py-4">
+          <ErrorState error={error} title="Couldn't load your wallet balance" onRetry={() => void fetchBalance()} />
+          <ConvertInrToUsdtBanner className="mt-3" onConverted={() => void fetchBalance()} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!loaded) {
+    return (
+      <Card className="mb-5 bg-card">
+        <CardContent className="py-4">
+          <StatsSkeleton count={5} className="md:grid-cols-5" />
         </CardContent>
       </Card>
     );
@@ -69,8 +77,9 @@ export default function WalletSummary() {
   if (!balances) {
     return (
       <Card className="mb-5 bg-card">
-        <CardContent className="py-4">
-          <Skeleton className="h-8 w-full rounded-md" />
+        <CardContent className="space-y-3 py-4 text-sm text-muted-foreground">
+          <p>No USDT balance found in your CoinSwitch futures wallet.</p>
+          <ConvertInrToUsdtBanner onConverted={() => void fetchBalance()} />
         </CardContent>
       </Card>
     );

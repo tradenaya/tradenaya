@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
 import {
   Dialog,
   DialogContent,
@@ -33,23 +34,30 @@ export function TradeDetailDialog({
   tradeId: number | null
 }) {
   const [data, setData] = useState<TradeDetail | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
   const loading = data === null && error === null
 
   useEffect(() => {
     if (!open || tradeId == null) return
     let cancelled = false
+    // Clear the previous trade so a different trade never flashes stale data.
+    queueMicrotask(() => {
+      if (cancelled) return
+      setData(null)
+      setError(null)
+    })
     apiGet<TradeDetail>(`/api/analytics/trades/${tradeId}`)
       .then((detail) => {
         if (!cancelled) setData(detail)
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load trade")
+        if (!cancelled) setError(e)
       })
     return () => {
       cancelled = true
     }
-  }, [open, tradeId])
+  }, [open, tradeId, attempt])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,7 +77,7 @@ export function TradeDetailDialog({
           </div>
         )}
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error != null && <ErrorState error={error} title="Couldn't load trade details" onRetry={() => setAttempt((a) => a + 1)} />}
 
         {data && (
           <div className="space-y-3">

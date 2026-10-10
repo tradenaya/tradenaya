@@ -75,7 +75,10 @@ export interface BacktestConfig {
   maxStopDistancePct?: number;
   maxVolatilityPct?: number;
   minConfidence?: number;
+  /** Unfilled entry lifetime; when omitted the live default applies (one candle, min 30 min). */
   orderExpiryMinutes?: number;
+  /** Same as the live bot option: only take entries with strong momentum (RSI >= 80 / <= 20). */
+  momentumEntriesOnly?: boolean;
 
   /** Maximum concurrent simulated positions (maps to the risk exposure check). */
   maxConcurrentPositions?: number;
@@ -288,6 +291,7 @@ export function toAutomationConfig(config: BacktestConfig): AutomationConfig {
     maxVolatilityPct: config.maxVolatilityPct,
     minConfidence: config.minConfidence,
     orderExpiryMinutes: config.orderExpiryMinutes,
+    momentumEntriesOnly: config.momentumEntriesOnly === true,
   };
 }
 
@@ -312,6 +316,7 @@ export function fingerprintConfig(config: BacktestConfig): string {
     maxVolatilityPct: config.maxVolatilityPct ?? null,
     minConfidence: config.minConfidence ?? null,
     orderExpiryMinutes: config.orderExpiryMinutes ?? null,
+    momentumEntriesOnly: config.momentumEntriesOnly === true,
     maxConcurrentPositions: config.maxConcurrentPositions ?? null,
     feeRateBps: config.feeRateBps ?? null,
     slippageBps: config.slippageBps ?? null,

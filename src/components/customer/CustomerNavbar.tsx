@@ -3,6 +3,7 @@
 import { Menu, User, LogOut, Plug, KeyRound, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { customerLogout } from "@/store/slices/customerAuthSlice";
 import { clearTenant } from "@/store/slices/tenantSlice";
@@ -59,7 +60,10 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         <button onClick={onMenuClick} className="cursor-pointer">
           <Menu size={24} />
         </button>
-        <h1 className="text-lg font-semibold">{tenant.tenantName || "Tradenaya"}</h1>
+        <div className="flex items-center gap-2.5">
+          <TradenayaLogo className="h-auto w-8 shrink-0" />
+          <h1 className="text-lg font-semibold">{tenant.tenantName || "Tradenaya"}</h1>
+        </div>
       </div>
 
       {!mounted ? (

@@ -5,7 +5,10 @@ import { Layers, Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { TableSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
+import { uniquePositions } from "@/components/positions/unique-positions";
 import {
   Table,
   TableBody,
@@ -107,55 +110,42 @@ export default function AllPositionsPage() {
   const [closingId, setClosingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Position | null>(null);
 
-  async function fetchAll() {
-    const [posRes, ordRes] = await Promise.all([
-      fetch("/api/coinswitch/futures/all-positions", { cache: "no-store" }),
-      fetch("/api/coinswitch/futures/all-open-orders", { cache: "no-store" }),
+  const [positionsError, setPositionsError] = useState<unknown>(null);
+  const [ordersError, setOrdersError] = useState<unknown>(null);
+
+  /** Load positions and orders independently so one failing endpoint never hides the other. */
+  async function fetchAll(isCancelled: () => boolean = () => false) {
+    const [posRes, ordRes] = await Promise.allSettled([
+      fetchJson<{ data?: unknown; raw?: { data?: unknown } }>("/api/coinswitch/futures/all-positions"),
+      fetchJson<{ data?: unknown }>("/api/coinswitch/futures/all-open-orders"),
     ]);
+    if (isCancelled()) return;
 
-    const posJson = await posRes.json();
-    const ordJson = await ordRes.json();
+    if (posRes.status === "fulfilled") {
+      const json = posRes.value;
+      setPositions(uniquePositions(Array.isArray(json.data) ? (json.data as Position[]) : Array.isArray(json.raw?.data) ? (json.raw.data as Position[]) : []));
+      setPositionsError(null);
+    } else {
+      setPositionsError(posRes.reason);
+    }
 
-    const normalizedPositions = Array.isArray(posJson.data)
-      ? posJson.data
-      : Array.isArray(posJson?.raw?.data)
-        ? posJson.raw.data
-        : [];
-
-    const normalizedOrders = Array.isArray(ordJson.data)
-      ? ordJson.data
-      : Array.isArray(ordJson?.data?.orders)
-        ? ordJson.data.orders
-        : [];
-
-    return { posJson, ordJson, normalizedPositions, normalizedOrders };
+    if (ordRes.status === "fulfilled") {
+      const data = ordRes.value.data as { orders?: OpenOrder[] } | OpenOrder[] | undefined;
+      setOrders(Array.isArray(data) ? data : Array.isArray(data?.orders) ? data.orders : []);
+      setOrdersError(null);
+    } else {
+      setOrdersError(ordRes.reason);
+    }
+    setLoading(false);
   }
 
   async function loadAll() {
-    try {
-      const { posJson, ordJson, normalizedPositions, normalizedOrders } = await fetchAll();
-      if (posJson.success) setPositions(normalizedPositions);
-      if (ordJson.success) setOrders(normalizedOrders);
-    } catch (err) {
-    } finally {
-      setLoading(false);
-    }
+    await fetchAll();
   }
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const { posJson, ordJson, normalizedPositions, normalizedOrders } = await fetchAll();
-        if (!cancelled) {
-          if (posJson.success) setPositions(normalizedPositions);
-          if (ordJson.success) setOrders(normalizedOrders);
-        }
-      } catch (err) {
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+    const load = () => void fetchAll(() => cancelled);
     load();
     const interval = setInterval(load, 8000);
     return () => {
@@ -167,13 +157,11 @@ export default function AllPositionsPage() {
   async function cancelOrder(orderId: string) {
     setCancelingId(orderId);
     try {
-      const res = await fetch("/api/coinswitch/futures/cancel-order", {
+      await fetchJson("/api/coinswitch/futures/cancel-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order_id: orderId }),
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "cancel failed");
       toast.success("Order cancelled");
       await loadAll();
     } catch (err: unknown) {
@@ -198,13 +186,11 @@ export default function AllPositionsPage() {
         order_context: "close_position",
       };
 
-      const res = await fetch("/api/coinswitch/futures/order", {
+      await fetchJson("/api/coinswitch/futures/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "close failed");
       toast.success("Position closing…");
       await loadAll();
     } catch (err: unknown) {
@@ -229,8 +215,13 @@ export default function AllPositionsPage() {
           <CardDescription>{positions.length} active position{positions.length === 1 ? "" : "s"}</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          {loading ? (
-            <Skeleton className="h-40 w-full rounded-lg" />
+          {positionsError != null && positions.length > 0 && (
+            <ErrorState error={positionsError} title="Couldn't refresh positions — showing the last loaded data" compact className="mb-3" onRetry={loadAll} />
+          )}
+          {positionsError != null && positions.length === 0 ? (
+            <ErrorState error={positionsError} title="Couldn't load open positions" onRetry={loadAll} />
+          ) : loading ? (
+            <TableSkeleton rows={4} columns={9} />
           ) : positions.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No open positions.</p>
           ) : (
@@ -337,8 +328,13 @@ export default function AllPositionsPage() {
           <CardDescription>{orders.length} open order{orders.length === 1 ? "" : "s"}</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          {loading ? (
-            <Skeleton className="h-40 w-full rounded-lg" />
+          {ordersError != null && orders.length > 0 && (
+            <ErrorState error={ordersError} title="Couldn't refresh orders — showing the last loaded data" compact className="mb-3" onRetry={loadAll} />
+          )}
+          {ordersError != null && orders.length === 0 ? (
+            <ErrorState error={ordersError} title="Couldn't load open orders" onRetry={loadAll} />
+          ) : loading ? (
+            <TableSkeleton rows={4} columns={10} />
           ) : orders.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No open orders.</p>
           ) : (

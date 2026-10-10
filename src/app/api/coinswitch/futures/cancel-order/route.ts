@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,7 +12,7 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = { exchange: "EXCHANGE_2", order_id };
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("DELETE", "/futures/order", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
@@ -33,6 +34,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("CANCEL ORDER ERROR", error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/cancel-order");
   }
 }

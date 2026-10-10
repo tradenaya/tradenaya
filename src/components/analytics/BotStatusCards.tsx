@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
 import type { ActiveOrderAnalytics, BotSummary, OpenPositionAnalytics } from "@/automation/analytics/types"
 import { apiGet, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -36,6 +37,10 @@ export function BotStatusCards({ filters }: { filters: AnalyticsFilterState }) {
   const enabled = botList.filter((b) => b.enabled).length
   const recovering = botList.filter((b) => b.recoveryState === "RECOVERING").length
   const errored = botList.filter((b) => b.status === "ERROR").length
+
+  if (bots.errorInfo && !bots.data) {
+    return <ErrorState error={bots.errorInfo} title="Couldn't load bot status" onRetry={bots.refresh} />
+  }
 
   if (bots.loading && !bots.data) {
     return (

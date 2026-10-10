@@ -7,7 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { TableSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
@@ -57,27 +59,18 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
   const [protectiveInputs, setProtectiveInputs] = useState<Record<string, { sl: string; tp: string }>>({});
   const [placingProtectiveId, setPlacingProtectiveId] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<unknown>(null);
+
   const fetchPositions = async () => {
-    try {
-      const [posRes, orderRes] = await Promise.all([
-        fetch(`/api/coinswitch/futures/positions?symbol=${symbol}`, { cache: "no-store" }),
-        fetch(`/api/coinswitch/futures/open-orders?symbol=${symbol}`, { cache: "no-store" }),
-      ]);
-
-      const posJson = await posRes.json();
-      const orderJson = await orderRes.json();
-
-      if (posJson.success) {
-        setPositions(posJson.data ?? []);
-      }
-      if (orderJson.success) {
-        setOrders(orderJson.data ?? []);
-      }
-    } catch {
-      // stay silent on transient poll failures — next tick will retry
-    } finally {
-      setLoading(false);
-    }
+    const [posRes, orderRes] = await Promise.allSettled([
+      fetchJson<{ data?: Position[] }>(`/api/coinswitch/futures/positions?symbol=${symbol}`),
+      fetchJson<{ data?: OpenOrder[] }>(`/api/coinswitch/futures/open-orders?symbol=${symbol}`),
+    ]);
+    if (posRes.status === "fulfilled") setPositions(posRes.value.data ?? []);
+    if (orderRes.status === "fulfilled") setOrders(orderRes.value.data ?? []);
+    // Positions drive this panel; an orders failure only matters for SL/TP replacement.
+    setLoadError(posRes.status === "rejected" ? posRes.reason : orderRes.status === "rejected" ? orderRes.reason : null);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -118,14 +111,11 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
         order_context: "close_position",
       };
 
-      const res = await fetch("/api/coinswitch/futures/order", {
+      await fetchJson("/api/coinswitch/futures/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Close failed");
       toast.success("Position closing");
       await fetchPositions();
     } catch (err: any) {
@@ -162,14 +152,11 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
         existing_order_id: existing?.order_id ?? undefined,
       };
 
-      const res = await fetch("/api/coinswitch/futures/order", {
+      await fetchJson("/api/coinswitch/futures/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Protective order failed");
       toast.success(kind === "sl" ? "Stop-loss set" : "Take-profit set");
       await fetchPositions();
     } catch (err: any) {
@@ -180,7 +167,24 @@ export default function PositionsPanel({ symbol }: { symbol: string }) {
   }
 
   if (loading) {
-    return <Skeleton className="mt-5 h-40 w-full rounded-lg" />;
+    return (
+      <Card className="mt-5 bg-card">
+        <CardContent className="pt-4">
+          <TableSkeleton rows={2} columns={6} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadError != null && positions.length === 0) {
+    return (
+      <ErrorState
+        error={loadError}
+        title={`Couldn't load your ${symbol.replace(/USDT$/, "")} positions`}
+        onRetry={() => void fetchPositions()}
+        className="mt-5"
+      />
+    );
   }
 
   if (positions.length === 0) {

@@ -4,6 +4,7 @@ import { ok, fail, requireUserId } from "@/app/api/bots/_helpers";
 import { AutoBestSelector } from "@/automation/coinauto/auto-best-selector";
 import { coinswitchClient } from "@/automation/executor/client";
 import { serverMarketDataService } from "@/automation/market/service";
+import { errorResponse } from "@/lib/api-error";
 
 const DEFAULT_AUTO_SELECTION_TIMEOUT_MS = 90_000;
 
@@ -68,6 +69,7 @@ export async function GET(req: NextRequest) {
       maxRiskPerTrade: Number(base.maxRiskPerTrade) || 1,
       dailyLossLimit: Number(base.dailyLossLimit) || 5,
       enableTrailingStop: Boolean(base.enableTrailingStop),
+      momentumEntriesOnly: base.momentumEntriesOnly === true,
       trailingDistancePercent:
         base.trailingDistancePercent != null
           ? Number(base.trailingDistancePercent)
@@ -178,13 +180,7 @@ export async function GET(req: NextRequest) {
     console.log(`[AUTO_API ${requestId}] RESPONSE_SENT`);
     return response;
   } catch (error: unknown) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to preview auto-selection";
-
     console.error(`[AUTO_API ${requestId}] ERROR`, error);
-
-    return fail(500, message);
+    return errorResponse(error, 500, "Failed to preview auto-selection", "/api/bots/auto-selection");
   }
 }

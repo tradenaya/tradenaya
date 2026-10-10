@@ -7,6 +7,11 @@ import { CoinSearchSelect } from "@/components/automation/CoinSearchSelect";
 import { formatPrice } from "@/components/analytics/format";
 import { computeTradePreview, type TradePreview } from "@/components/automation/trade-preview";
 import { TradePreviewPanel } from "@/components/automation/TradePreviewPanel";
+import { WalletAllocationNote } from "@/components/automation/WalletAllocationNote";
+import { ErrorState } from "@/components/ui/error-state";
+import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
+import { defaultEntryExpiryMinutes } from "@/automation/planner/entry-expiry";
+import { effectiveAllocation, MARGIN_FEE_BUFFER, MARGIN_HEADROOM } from "@/automation/risk/allocation-headroom";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
@@ -78,16 +83,18 @@ const DEFAULT_SETTINGS = {
   leverageMode: "auto" as "auto" | "manual",
   leveragePercent: "50",
   capital: "100",
-  maxRiskPerTrade: "20",
+  // 5% keeps a normal losing streak survivable (7 losses ≈ -30%, vs -79% at 20%).
+  maxRiskPerTrade: "5",
   dailyLossLimit: "30",
   orderExpiryMinutes: "",
   minConfidence: "",
-  driftAtr: "2.5",
+  driftAtr: "1.5",
   regimeTolerancePct: "0.3",
   maxCandles: "24",
   hardCapCandles: "48",
   enableTrailingStop: false,
   trailingDistancePercent: "",
+  momentumEntriesOnly: true,
 };
 
 interface AutoSelectionPreview {
@@ -121,10 +128,11 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
   useDisplayCurrency();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   const [wallet, setWallet] = useState<number | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState<unknown>(null);
   const [instrument, setInstrument] = useState<InstrumentInfo | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [capitalMode, setCapitalMode] = useState<"fixed" | "percent">("fixed");
@@ -132,12 +140,12 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
 
   const [analyzingCoins, setAnalyzingCoins] = useState(false);
   const [coinAnalysis, setCoinAnalysis] = useState<CoinAnalysis[] | null>(null);
-  const [analysisError, setAnalysisError] = useState("");
+  const [analysisError, setAnalysisError] = useState<unknown>(null);
 
   // ---- Auto-select best coin ----
   const [autoPreview, setAutoPreview] = useState<AutoSelectionPreview | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
-  const [autoError, setAutoError] = useState("");
+  const [autoError, setAutoError] = useState<unknown>(null);
 
   const autoPreviewUrl = useMemo(() => {
     if (!settings.autoSelect) return "";
@@ -159,7 +167,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         dailyLossLimit: Number(settings.dailyLossLimit) || 5,
         enableTrailingStop: settings.enableTrailingStop,
         trailingDistancePercent: settings.enableTrailingStop && settings.trailingDistancePercent ? Number(settings.trailingDistancePercent) : null,
-        driftAtr: Number(settings.driftAtr) || 2.5,
+        momentumEntriesOnly: settings.momentumEntriesOnly,
+        driftAtr: Number(settings.driftAtr) || 1.5,
         regimeTolerancePct: Number(settings.regimeTolerancePct) || 0.3,
         maxCandles: Number(settings.maxCandles) || 24,
         hardCapCandles: Number(settings.hardCapCandles) || 48,
@@ -168,7 +177,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       }),
     });
     return `/api/bots/auto-selection?${params.toString()}`;
-  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade, settings.leverage, settings.dailyLossLimit, settings.enableTrailingStop, settings.trailingDistancePercent, settings.driftAtr, settings.regimeTolerancePct, settings.maxCandles, settings.hardCapCandles, settings.orderExpiryMinutes, settings.minConfidence, capitalMode, walletPercent]);
+  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade, settings.leverage, settings.dailyLossLimit, settings.enableTrailingStop, settings.trailingDistancePercent, settings.momentumEntriesOnly, settings.driftAtr, settings.regimeTolerancePct, settings.maxCandles, settings.hardCapCandles, settings.orderExpiryMinutes, settings.minConfidence, capitalMode, walletPercent]);
 
   useEffect(() => {
     if (!settings.autoSelect || !open) return;
@@ -177,18 +186,16 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     queueMicrotask(() => {
       if (cancelled) return;
       setAutoLoading(true);
-      setAutoError("");
+      setAutoError(null);
     });
-    fetch(autoPreviewUrl, { cache: "no-store", signal: controller.signal })
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<{ best?: AutoSelectionPreview | null }>(autoPreviewUrl, { signal: controller.signal })
+      .then((data) => {
         if (cancelled) return;
-        if (json.success) setAutoPreview(json.data?.best ?? null);
-        else setAutoError(json.message || "Failed to preview auto-selection");
+        setAutoPreview(data?.best ?? null);
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return;
-        if (!cancelled) setAutoError("Failed to preview auto-selection");
+        if (controller.signal.aborted) return;
+        if (!cancelled) setAutoError(err);
       })
       .finally(() => {
         if (!cancelled) setAutoLoading(false);
@@ -203,20 +210,20 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     if (!open) return;
     let cancelled = false;
 
-    fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<{ base_asset_balances?: { base_asset: string; balances?: { total_available_balance?: string } }[] }>(
+      "/api/coinswitch/futures/wallet-balance",
+    )
+      .then((data) => {
         if (cancelled) return;
-        if (json.success) {
-          const usdt = json.data?.base_asset_balances?.find(
-            (b: { base_asset: string }) => String(b.base_asset).toUpperCase() === "USDT",
-          );
-          const bal = Number(usdt?.balances?.total_available_balance);
-          setWallet(Number.isFinite(bal) ? bal : null);
-        }
+        const usdt = data?.base_asset_balances?.find((b) => String(b.base_asset).toUpperCase() === "USDT");
+        const bal = Number(usdt?.balances?.total_available_balance);
+        setWallet(Number.isFinite(bal) ? bal : null);
+        setWalletError(null);
       })
-      .catch(() => {
-        if (!cancelled) setWallet(null);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setWallet(null);
+        setWalletError(err);
       })
       .finally(() => {
         if (!cancelled) setWalletLoading(false);
@@ -266,7 +273,12 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       walletBalance: wallet,
       capitalMode,
       capital: Number(settings.capital) || 0,
-      walletPercent: capitalMode === "percent" ? Number(walletPercent) : null,
+      walletPercent:
+        capitalMode === "percent"
+          ? wallet != null
+            ? effectiveAllocation(Number(walletPercent), wallet).effectivePct
+            : Number(walletPercent)
+          : null,
       leverage: Number(settings.leverage) || 1,
       maxRiskPerTradePct: Number(settings.maxRiskPerTrade) || 0,
       currentPrice: price,
@@ -297,20 +309,15 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       else if (pct > 100) errs.walletPercent = "Cannot exceed 100%.";
     }
 
-    if (wallet != null && wallet > 0) {
-      const allocatedAmt =
-        capitalMode === "fixed"
-          ? num(settings.capital)
-          : wallet * ((num(walletPercent) ?? 0) / 100);
+    // Percent mode is capped to the safe maximum automatically (see the note
+    // under the field); only a fixed amount above it is an error.
+    if (wallet != null && wallet > 0 && capitalMode === "fixed") {
+      const allocatedAmt = num(settings.capital);
       if (allocatedAmt != null && allocatedAmt > 0) {
-        const headroom = 0.02;
-        const feeBuffer = 0.01;
-        const safeMax = wallet * (1 - headroom) - feeBuffer;
+        const safeMax = wallet * (1 - MARGIN_HEADROOM) - MARGIN_FEE_BUFFER;
         if (allocatedAmt > safeMax + 1e-9) {
           const safePct = Math.max(0, (safeMax / wallet) * 100);
-          const msg = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
-          if (capitalMode === "fixed") errs.capital = msg;
-          else errs.walletPercent = msg;
+          errs.capital = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
         }
       }
     }
@@ -370,18 +377,15 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
 
   async function analyzeCoins() {
     setAnalyzingCoins(true);
-    setAnalysisError("");
+    setAnalysisError(null);
     setCoinAnalysis(null);
     try {
-      const res = await fetch(
+      const data = await fetchData<CoinAnalysis[]>(
         `/api/bots/analyze-coins?timeframe=${encodeURIComponent(settings.timeframe)}&limit=25`,
-        { cache: "no-store" },
       );
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Failed to analyze coins");
-      setCoinAnalysis(Array.isArray(json.data) ? json.data : []);
+      setCoinAnalysis(Array.isArray(data) ? data : []);
     } catch (err: unknown) {
-      setAnalysisError(err instanceof Error ? err.message : "Failed to analyze coins");
+      setAnalysisError(err);
     } finally {
       setAnalyzingCoins(false);
     }
@@ -392,7 +396,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       if (wallet == null) return null;
       const pct = Number(walletPercent);
       if (!Number.isFinite(pct)) return null;
-      return wallet * (pct / 100);
+      return effectiveAllocation(pct, wallet).amount;
     }
     const amount = Number(settings.capital);
     return Number.isFinite(amount) ? amount : null;
@@ -517,25 +521,24 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       dailyLossLimit: Number(settings.dailyLossLimit) || 5,
       enableTrailingStop: settings.enableTrailingStop,
       trailingDistancePercent: settings.enableTrailingStop && settings.trailingDistancePercent ? Number(settings.trailingDistancePercent) : undefined,
-      driftAtr: Number(settings.driftAtr) || 2.5,
+      momentumEntriesOnly: settings.momentumEntriesOnly,
+      driftAtr: Number(settings.driftAtr) || 1.5,
       regimeTolerancePct: Number(settings.regimeTolerancePct) || 0.3,
       maxCandles: Number(settings.maxCandles) || 24,
       hardCapCandles: Number(settings.hardCapCandles) || 48,
     };
     if (settings.orderExpiryMinutes) body.orderExpiryMinutes = Number(settings.orderExpiryMinutes);
     if (settings.minConfidence) body.minConfidence = Number(settings.minConfidence);
-    const res = await fetch("/api/bots", {
+    await fetchJson("/api/bots", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message || "Failed to start automated trading");
   }
 
   async function submitSettings() {
     setSubmitting(true);
-    setError("");
+    setError(null);
     try {
       const validation = validate();
       if (validation) {
@@ -547,8 +550,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       onOpenChange(false);
       onCreated?.();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to start automated trading";
-      setError(message);
+      const message = errorMessage(err, "Failed to start automated trading");
+      setError(err);
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -563,7 +566,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         if (open) {
           setWallet(null);
           setWalletLoading(true);
-          setError("");
+          setError(null);
         }
       }}
     >
@@ -609,6 +612,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 <span className="text-sm text-red-400">Unavailable</span>
               )}
             </div>
+            {!walletLoading && walletError != null && (
+              <ErrorState error={walletError} title="Couldn't load your futures balance" compact className="mt-2" />
+            )}
             {wallet != null && capitalMode === "percent" && effectiveCapital() != null && (
               <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Allocated for trading</span>
@@ -710,8 +716,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                     <span className="text-muted-foreground">•</span>
                   )}
                 </div>
-                {autoError ? (
-                  <p className="text-red-400">{autoError}</p>
+                {autoError != null ? (
+                  <ErrorState error={autoError} title="Couldn't preview auto-selection" compact />
                 ) : autoLoading && !autoPreview ? (
                   <p className="text-muted-foreground">Analyzing market opportunities…</p>
                 ) : autoPreview ? (
@@ -776,8 +782,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               </Button>
             </div>
 
-            {analysisError && (
-              <p className="mt-1.5 text-xs text-red-400">{analysisError}</p>
+            {analysisError != null && (
+              <ErrorState error={analysisError} title="Couldn't analyze coins" compact className="mt-1.5" />
             )}
 
             {coinAnalysis && (
@@ -957,11 +963,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 placeholder="10"
               />
               {fieldErrors.walletPercent && <FieldError>{fieldErrors.walletPercent}</FieldError>}
-              {wallet != null && effectiveCapital() != null && (
-                <p className="text-xs text-muted-foreground">
-                  ≈ {fmtWallet(effectiveCapital()!)}
-                </p>
-              )}
+              <WalletAllocationNote requestedPct={Number(walletPercent)} wallet={wallet} format={fmtWallet} />
               {notActiveIssue && <p className="text-xs text-red-400">{notActiveIssue}</p>}
               {minOrderIssue && <p className="text-xs text-red-400">{minOrderIssue}</p>}
             </div>
@@ -1012,9 +1014,12 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               min={1}
               value={settings.orderExpiryMinutes ?? ""}
               onChange={(e) => setSettings((s) => ({ ...s, orderExpiryMinutes: e.target.value }))}
-              placeholder="Optional"
+              placeholder={`Auto: ${defaultEntryExpiryMinutes(settings.timeframe)}`}
             />
             {fieldErrors.orderExpiry && <FieldError>{fieldErrors.orderExpiry}</FieldError>}
+            <p className="text-[11px] text-muted-foreground">
+              Empty = auto: an unfilled entry is cancelled after one {settings.timeframe} candle (min 30 min).
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -1086,6 +1091,25 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
           </div>
 
           <div className="md:col-span-2">
+            <div className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id="auto-momentum"
+                  type="checkbox"
+                  checked={settings.momentumEntriesOnly}
+                  onChange={(e) => setSettings((s) => ({ ...s, momentumEntriesOnly: e.target.checked }))}
+                  className="h-4 w-4 rounded border-border accent-emerald-500"
+                />
+                <Label htmlFor="auto-momentum" className="mb-0">Strong-momentum entries only</Label>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Only trades when momentum is already strong in the trade&apos;s direction (RSI ≥ 80 for longs, ≤ 20 for
+                shorts). Far fewer trades — the only filter that was profitable in backtests.
+              </p>
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
                 <input
@@ -1125,7 +1149,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             </div>
           </div>
 
-          {error && <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400 md:col-span-2">{error}</div>}
+          {error != null && <ErrorState error={error} title="Couldn't start automated trading" className="md:col-span-2" />}
         </div>
 
         <DialogFooter>

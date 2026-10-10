@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,6 +31,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "User registered successfully" }, { status: 201 });
   } catch (error) {
     console.error("Signup error", error);
-    return NextResponse.json({ message: "Registration failed" }, { status: 500 });
+    return errorResponse(error, 500, "Registration failed", "/api/auth/signup");
   }
 }

@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
+import { ErrorState } from "@/components/ui/error-state"
 
 const labelClass = "text-xs font-medium text-muted-foreground"
 
@@ -26,8 +27,12 @@ interface FilterBarProps {
 }
 
 export function FilterBar({ filters, onChange, onRefresh, showGranularity = false }: FilterBarProps) {
-  const { data: bots } = useAsyncData<BotSummary[]>(() => apiGet("/api/analytics/bots"), [])
-  const { data: symbols } = useAsyncData<SymbolPerformance[]>(() => apiGet("/api/analytics/symbols"), [])
+  const { data: bots, errorInfo: botsError, refresh: refreshBots } = useAsyncData<BotSummary[]>(() => apiGet("/api/analytics/bots"), [])
+  const { data: symbols, errorInfo: symbolsError, refresh: refreshSymbols } = useAsyncData<SymbolPerformance[]>(
+    () => apiGet("/api/analytics/symbols"),
+    [],
+  )
+  const filterError = botsError ?? symbolsError
 
   const botOptions = useMemo(() => bots ?? [], [bots])
   const symbolOptions = useMemo(() => symbols ?? [], [symbols])
@@ -162,6 +167,19 @@ export function FilterBar({ filters, onChange, onRefresh, showGranularity = fals
         <RefreshCw size={14} />
         Refresh
       </Button>
+
+      {filterError != null && (
+        <ErrorState
+          error={filterError}
+          title={botsError != null ? "Couldn't load the bot filter list" : "Couldn't load the symbol filter list"}
+          compact
+          className="w-full"
+          onRetry={() => {
+            refreshBots()
+            refreshSymbols()
+          }}
+        />
+      )}
     </div>
   )
 }

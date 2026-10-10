@@ -2,7 +2,8 @@
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { ChartSkeleton } from "@/components/ui/skeletons"
 import type { ExitAnalytics } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -19,7 +20,7 @@ const COLORS: Record<string, string> = {
 }
 
 export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<ExitAnalytics>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<ExitAnalytics>(
     () => apiGet("/api/analytics/exits", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -37,8 +38,10 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
         <CardDescription>How closed trades were exited</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-56 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load exit reasons" onRetry={refresh} />
+        ) : loading && !data ? (
+          <ChartSkeleton height={224} />
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

@@ -65,6 +65,17 @@ export function resampleCandles(candles: MarketCandle[], targetMinutes: number, 
 }
 
 /**
+ * Drop a trailing candle that has not closed yet at `now`. Live feeds append
+ * the in-progress candle; deciding on it lets a signal appear and vanish within
+ * the same candle, so trade decisions only ever see fully closed candles.
+ */
+export function closedCandles(candles: MarketCandle[], intervalMinutes: number | null, now: number = Date.now()): MarketCandle[] {
+  if (candles.length === 0 || intervalMinutes == null || intervalMinutes <= 0) return candles;
+  const last = candles[candles.length - 1];
+  return last.timestamp + intervalMinutes * 60_000 > now ? candles.slice(0, -1) : candles;
+}
+
+/**
  * Resample using timeframe labels ("5m", "1h"). Returns null when the target
  * is not a clean integer multiple of the source interval.
  */

@@ -8,8 +8,10 @@ import type { RiskManagerInput } from "@/automation/risk/types";
 import type { TradePlan } from "@/automation/planner/types";
 import { normalizeInterval, normalizeSymbol } from "@/automation/market/normalizer";
 import type { MarketDataService } from "@/automation/market/market-data-service";
+import { defaultEntryExpiryMinutes } from "@/automation/planner/entry-expiry";
+import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
 import { BacktestError, BacktestCancelledError } from "./errors";
-import { HistoricalMarketDataAdapter } from "./market-adapter";
+import { HistoricalMarketDataAdapter, LIVE_CANDLE_WINDOW } from "./market-adapter";
 import type { HistoricalMarketDataProvider } from "./data-provider";
 import { validateCandleQuality } from "./data-provider";
 import { BacktestExecutionEngine } from "./execution-engine";
@@ -71,12 +73,30 @@ export class BacktestingEngine {
   async run(config: BacktestConfig): Promise<BacktestResult> {
     this.validateConfig(config);
 
-    const candles = await this.provider.getCandles({
-      symbol: config.symbol,
-      timeframe: config.timeframe,
-      startTime: config.startTime,
-      endTime: config.endTime,
-    });
+    const intervalMs = this.intervalMs(config.timeframe);
+    // Load LIVE_CANDLE_WINDOW extra candles before the requested start purely as
+    // indicator warm-up, so the first simulated decision sees the same history a
+    // live bot would have — trading itself still starts at config.startTime.
+    const warmupStart = config.warmupCandles != null ? config.startTime : config.startTime - LIVE_CANDLE_WINDOW * intervalMs;
+    let candles: MarketCandle[];
+    try {
+      candles = await this.provider.getCandles({
+        symbol: config.symbol,
+        timeframe: config.timeframe,
+        startTime: warmupStart,
+        endTime: config.endTime,
+      });
+    } catch (error) {
+      // A coin listed shortly before the start has no warm-up history; fall back
+      // to the requested window so the backtest still runs.
+      if (!(error instanceof BacktestError) || error.code !== "DATA_UNAVAILABLE" || warmupStart === config.startTime) throw error;
+      candles = await this.provider.getCandles({
+        symbol: config.symbol,
+        timeframe: config.timeframe,
+        startTime: config.startTime,
+        endTime: config.endTime,
+      });
+    }
 
     if (candles.length === 0) {
       throw new BacktestError(
@@ -85,13 +105,16 @@ export class BacktestingEngine {
       );
     }
 
-    const intervalMs = this.intervalMs(config.timeframe);
     const dataQuality = validateCandleQuality(candles, { intervalMs });
 
     const feeRateBps = config.feeRateBps ?? DEFAULT_FEE_RATE_BPS;
     const slippageBps = config.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
     const executionPolicy = config.executionPolicy ?? DEFAULT_BACKTEST_POLICY;
-    const warmup = Math.min(config.warmupCandles ?? DEFAULT_WARMUP_CANDLES, candles.length - 1);
+    const firstInWindow = candles.findIndex((c) => c.timestamp >= config.startTime);
+    const warmup =
+      config.warmupCandles != null
+        ? Math.min(config.warmupCandles, candles.length - 1)
+        : Math.max(Math.min(DEFAULT_WARMUP_CANDLES, candles.length - 1), firstInWindow < 0 ? candles.length - 1 : firstInWindow);
 
     const adapter = new HistoricalMarketDataAdapter();
     const engine =
@@ -221,7 +244,11 @@ export class BacktestingEngine {
     if (!risk.approved || !(risk.positionSize > 0)) return;
 
     const createdAt = candle.timestamp;
-    const expiryMinutes = config.orderExpiryMinutes && config.orderExpiryMinutes > 0 ? config.orderExpiryMinutes : 120;
+    // Same lifetime rule as live (one candle of the timeframe, min 30 min),
+    // counted from when the live bot would place the order: the signal candle's close.
+    const expiryMinutes =
+      config.orderExpiryMinutes && config.orderExpiryMinutes > 0 ? config.orderExpiryMinutes : defaultEntryExpiryMinutes(config.timeframe);
+    const placedAt = candle.timestamp + this.intervalMs(config.timeframe);
 
     sim.placeOrder({
       symbol: plan.symbol ?? config.symbol,
@@ -233,7 +260,7 @@ export class BacktestingEngine {
       leverage: config.leverage,
       margin: risk.capitalUsed,
       createdAt,
-      expiresAt: createdAt + expiryMinutes * 60_000,
+      expiresAt: placedAt + expiryMinutes * 60_000,
       reason: plan.reason,
       trailingEnabled: config.enableTrailingStop,
       trailingDistancePct: config.trailingDistancePercent ?? 1,
@@ -255,7 +282,8 @@ export class BacktestingEngine {
         maxSimultaneousBots: 5,
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
-        minRiskRewardRatio: config.minRiskRewardRatio ?? 2,
+        // Same floor the live risk gate resolves (bot setting, else the documented 1.5).
+        minRiskRewardRatio: resolveMinRiskReward(config).value,
       },
       wallet: { balance: wallet.balance },
       capital: {

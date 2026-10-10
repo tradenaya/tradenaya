@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, Search, TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { TableSkeleton } from "@/components/ui/skeletons";
+import { fetchData } from "@/lib/api-client";
 import {
   Table,
   TableBody,
@@ -52,14 +54,13 @@ export default function MarketPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   async function fetchMarket(): Promise<Coin[]> {
-    const res = await fetch("/api/coinswitch/futures/ticker", { cache: "no-store" });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message || "Failed to fetch market");
+    const data = await fetchData<Record<string, TickerEntry>>("/api/coinswitch/futures/ticker");
 
-    return Object.entries((json.data ?? {}) as Record<string, TickerEntry>).map(([symbol, v]) => ({
+    return Object.entries((data ?? {}) as Record<string, TickerEntry>).map(([symbol, v]) => ({
       symbol: String(symbol).toUpperCase(),
       lastPrice: toNumber(v?.last_price),
       change24h: toNumber(v?.price_24h_pcnt),
@@ -72,8 +73,9 @@ export default function MarketPage() {
     async function load() {
       try {
         setCoins(await fetchMarket());
+        setError(null);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load market data");
+        setError(err);
       } finally {
         setLoading(false);
       }
@@ -81,7 +83,7 @@ export default function MarketPage() {
     load();
     const interval = setInterval(load, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [reloadKey]);
 
   // Persist search across every API refresh: derive the visible list from the
   // latest `coins` + the live `search` query instead of resetting on each poll.
@@ -128,10 +130,14 @@ export default function MarketPage() {
         </CardHeader>
 
         <CardContent className="pt-4">
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error != null && coins != null && (
+            <ErrorState error={error} title="Couldn't refresh prices — showing the last loaded data" compact className="mb-3" />
+          )}
 
-          {loading ? (
-            <Skeleton className="h-96 w-full rounded-lg" />
+          {error != null && coins == null ? (
+            <ErrorState error={error} title="Couldn't load market data" onRetry={() => setReloadKey((k) => k + 1)} />
+          ) : loading ? (
+            <TableSkeleton rows={10} columns={5} />
           ) : filtered.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">
               {search ? `No contracts match "${search}".` : "No market data available right now."}

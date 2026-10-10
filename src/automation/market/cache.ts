@@ -66,7 +66,7 @@ export class MarketDataCache {
   // ---- candles ----
 
   /** Replace the cached candles for a symbol/interval (authoritative REST history). */
-  setCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 200): void {
+  setCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 300): void {
     if (!Array.isArray(candles) || candles.length === 0) return;
     let entry = this.data.get(symbol);
     if (!entry) {
@@ -79,7 +79,7 @@ export class MarketDataCache {
   }
 
   /** Merge live candles into the cached history for a symbol/interval. */
-  upsertCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 200): void {
+  upsertCandles(symbol: string, interval: string, candles: MarketCandle[], maxPerInterval = 300): void {
     if (!Array.isArray(candles) || candles.length === 0) return;
     let entry = this.data.get(symbol);
     if (!entry) {

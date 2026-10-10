@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, getAnalyticsService, ok, parseFilters, parsePagedQuery, requireUserId } from "../analytics/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const userId = requireUserId(req);
@@ -94,6 +95,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("[position-history]", error);
-    return fail(500, error?.message ?? "Failed to load position history");
+    return errorResponse(error, 500, "Failed to load position history", "/api/position-history");
   }
 }

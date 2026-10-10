@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
@@ -92,15 +93,7 @@ export default function CustomerSidebar({ open, onClose, tenantName }: Props) {
           style={{ borderColor: "rgba(201,154,88,0.12)" }}
         >
           <Link href="/dashboard" onClick={onClose} className="flex items-center gap-3">
-            <span
-              className="h-9 w-9 rounded-lg flex items-center justify-center font-bold text-lg"
-              style={{
-                background: "linear-gradient(135deg, #c99a58, #a47209)",
-                color: "#070605",
-              }}
-            >
-              T
-            </span>
+            <TradenayaLogo className="h-auto w-9 shrink-0" />
             <span
               className="text-xl font-bold"
               style={{

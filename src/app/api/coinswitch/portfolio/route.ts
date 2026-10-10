@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import crypto from "crypto";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 const BASE_URL = process.env.COINSWITCH_BASE_URL!;
 
@@ -65,9 +66,10 @@ export async function GET(req: NextRequest) {
     const epoch =
       Date.now().toString();
 
-    const keys = await getKeysFromRequest(req as any);
-    const apiSecret = keys?.apiSecret || process.env.COINSWITCH_API_SECRET!;
-    const apiKey = keys?.apiKey || process.env.COINSWITCH_API_KEY!;
+    // Personal data: never fall back to the server's own CoinSwitch keys.
+    const keys = await requireKeysFromRequest(req as any);
+    const apiSecret = keys.apiSecret;
+    const apiKey = keys.apiKey;
 
     const signature = createSignature("GET", signPath, apiSecret, epoch);
 
@@ -118,18 +120,8 @@ export async function GET(req: NextRequest) {
       data,
     });
 
-  } catch (error: any) {
-
-    return NextResponse.json(
-      {
-        success: false,
-        message: error.message,
-      },
-      {
-        status: 500,
-      }
-    );
-
+  } catch (error) {
+    return errorResponse(error, 500, "Failed to load portfolio", "/api/coinswitch/portfolio");
   }
 
 }

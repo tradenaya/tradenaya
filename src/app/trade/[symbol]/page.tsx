@@ -2,8 +2,11 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronDown, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { fetchJson } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import TradingChart from "@/components/TradingChart";
@@ -135,46 +138,64 @@ function useSymbolData(symbol: string) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<OpenOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [positionsError, setPositionsError] = useState<unknown>(null);
+  const [ordersError, setOrdersError] = useState<unknown>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      try {
-        const [posRes, ordRes] = await Promise.all([
-          fetch(`/api/coinswitch/futures/positions?symbol=${symbol}`, { cache: "no-store" }),
-          fetch(`/api/coinswitch/futures/open-orders?symbol=${symbol}`, { cache: "no-store" }),
-        ]);
-        const posJson = await posRes.json();
-        const ordJson = await ordRes.json();
-        if (!cancelled) {
-          if (posJson.success) setPositions(posJson.data ?? []);
-          if (ordJson.success)
-            setOrders(Array.isArray(ordJson.data) ? ordJson.data : Array.isArray(ordJson.data?.orders) ? ordJson.data.orders : []);
-        }
-      } catch {
-        // ignore transient failures
-      } finally {
-        if (!cancelled) setLoading(false);
+      const [posRes, ordRes] = await Promise.allSettled([
+        fetchJson<{ data?: Position[] }>(`/api/coinswitch/futures/positions?symbol=${symbol}`),
+        fetchJson<{ data?: unknown }>(`/api/coinswitch/futures/open-orders?symbol=${symbol}`),
+      ]);
+      if (cancelled) return;
+      if (posRes.status === "fulfilled") {
+        setPositions(posRes.value.data ?? []);
+        setPositionsError(null);
+      } else {
+        setPositionsError(posRes.reason);
       }
+      if (ordRes.status === "fulfilled") {
+        const data = ordRes.value.data as { orders?: OpenOrder[] } | OpenOrder[] | undefined;
+        setOrders(Array.isArray(data) ? data : Array.isArray(data?.orders) ? data.orders : []);
+        setOrdersError(null);
+      } else {
+        setOrdersError(ordRes.reason);
+      }
+      setLoading(false);
     };
-    load();
-    const interval = setInterval(load, 5000);
+    void load();
+    const interval = setInterval(() => void load(), 5000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, [symbol]);
 
-  return { positions, orders, loading };
+  return { positions, orders, loading, positionsError, ordersError };
+}
+
+function CompactCardSkeleton() {
+  return (
+    <Card className="bg-card">
+      <CardContent className="space-y-2 p-4">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-2/3" />
+      </CardContent>
+    </Card>
+  );
 }
 
 function CompactPositionCard({ symbol }: { symbol: string }) {
-  const { positions, loading } = useSymbolData(symbol);
+  const { positions, loading, positionsError } = useSymbolData(symbol);
   const pos = positions[0];
   useDisplayCurrency();
 
-  if (loading) {
-    return <Card className="bg-card"><CardContent className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="animate-spin" /></CardContent></Card>;
+  if (loading) return <CompactCardSkeleton />;
+  if (positionsError != null && positions.length === 0) {
+    return <ErrorState error={positionsError} title={`Couldn't load your ${symbol.replace(/USDT$/, "")} position`} compact />;
   }
 
   return (
@@ -229,10 +250,11 @@ function CompactPositionCard({ symbol }: { symbol: string }) {
 }
 
 function CompactOrdersCard({ symbol }: { symbol: string }) {
-  const { orders, loading } = useSymbolData(symbol);
+  const { orders, loading, ordersError } = useSymbolData(symbol);
 
-  if (loading) {
-    return <Card className="bg-card"><CardContent className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="animate-spin" /></CardContent></Card>;
+  if (loading) return <CompactCardSkeleton />;
+  if (ordersError != null && orders.length === 0) {
+    return <ErrorState error={ordersError} title={`Couldn't load your ${symbol.replace(/USDT$/, "")} open orders`} compact />;
   }
 
   return (

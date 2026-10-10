@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { botScheduler } from "@/automation/scheduler/BotScheduler";
 import { fail, ok, requireUserId, sanitizeConfig } from "./_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const userId = requireUserId(req);
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ success: true, schedulerActive: botScheduler.isRunning(), data: bots });
   } catch (error: any) {
     console.error("[bots] list failed", error);
-    return fail(500, error?.message ?? "Failed to list bots");
+    return errorResponse(error, 500, "Failed to list bots", "/api/bots");
   }
 }
 
@@ -47,6 +48,6 @@ export async function POST(req: NextRequest) {
     return ok({ botId });
   } catch (error: any) {
     console.error("[bots] create failed", error);
-    return fail(400, error?.message ?? "Failed to create bot");
+    return errorResponse(error, 400, "Failed to create bot", "/api/bots");
   }
 }

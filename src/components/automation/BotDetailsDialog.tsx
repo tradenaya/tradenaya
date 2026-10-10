@@ -9,6 +9,7 @@ import { CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtMoney, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
+import { defaultEntryExpiryMinutes } from "@/automation/planner/entry-expiry";
 import { currencyLabel } from "@/lib/currency/store";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 
@@ -106,7 +107,9 @@ export function BotDetailsDialog({ bot, position, open, onOpenChange }: BotDetai
               <Field label="Daily loss limit">{cfg.dailyLossLimit}%</Field>
               <Field label="Min. confidence">{cfg.minConfidence}%</Field>
               <Field label="Trailing stop">{cfg.enableTrailingStop ? `On (${cfg.trailingDistancePercent}%)` : "Off"}</Field>
-              <Field label="Order expiry">{cfg.orderExpiryMinutes} min</Field>
+              <Field label="Order expiry">
+                {cfg.orderExpiryMinutes != null ? `${cfg.orderExpiryMinutes} min` : `Auto (${defaultEntryExpiryMinutes(cfg.timeframe)} min)`}
+              </Field>
             </div>
 
             <div>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, X } from "lucide-react";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 
 interface Props {
   open: boolean;
@@ -32,6 +33,8 @@ export default function AdminSidebar({ open, onClose, tenantName }: Props) {
           className="h-16 flex items-center justify-between px-5 shrink-0"
           style={{ borderBottom: "1px solid rgba(201,154,88,0.12)" }}
         >
+          <div className="flex items-center gap-2.5">
+          <TradenayaLogo className="h-auto w-8 shrink-0" />
           <h1
             className="text-lg font-bold"
             style={{
@@ -44,6 +47,7 @@ export default function AdminSidebar({ open, onClose, tenantName }: Props) {
           >
             {tenantName || "Tradenaya"}
           </h1>
+          </div>
           <button onClick={onClose} className="md:hidden cursor-pointer" style={{ color: "#a89880" }}>
             <X size={20} />
           </button>

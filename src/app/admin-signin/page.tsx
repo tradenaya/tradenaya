@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock, Mail, Shield } from "lucide-react";
 import { toast } from "sonner";
+import { errorMessage, fetchJson } from "@/lib/api-client";
 
 import { Button } from "@/components/ui/button";
 import AuthShell from "@/components/auth/AuthShell";
@@ -27,16 +28,27 @@ export default function AdminSigninPage() {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/signin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, password: form.password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        toast.error(data.message || "Invalid credentials");
+      let data: {
+        user: {
+          tenantId: number;
+          tenantCode: string;
+          tenantName: string;
+          userId: number;
+          userCode: string;
+          firstName: string;
+          lastName: string;
+          email: string;
+          role: string;
+        };
+      };
+      try {
+        data = await fetchJson("/api/admin/signin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+      } catch (err: unknown) {
+        toast.error(errorMessage(err, "Invalid credentials"));
         return;
       }
 

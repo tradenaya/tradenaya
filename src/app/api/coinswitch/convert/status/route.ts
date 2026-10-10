@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 import { getConvertWalletStatus } from "@/lib/coinswitch/convert";
+import { errorResponse } from "@/lib/api-error";
 
 /**
  * GET /api/coinswitch/convert/status
@@ -24,6 +25,6 @@ export async function GET(req: NextRequest) {
     const status = await getConvertWalletStatus({ apiKey: keys.apiKey, apiSecret: keys.apiSecret });
     return NextResponse.json({ success: true, data: status });
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message ?? "Failed to load conversion status" }, { status: 502 });
+    return errorResponse(error, 502, "Failed to load conversion status", "/api/coinswitch/convert/status");
   }
 }

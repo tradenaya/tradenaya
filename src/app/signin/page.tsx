@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { errorMessage, fetchJson } from "@/lib/api-client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,16 +39,15 @@ export default function SigninPage() {
         return;
       }
 
-      const response = await fetch("/api/auth/signin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, password: form.password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        toast.error(data.message || "Invalid credentials");
+      let data: { user: { id: number; firstName: string; lastName: string; email: string } };
+      try {
+        data = await fetchJson("/api/auth/signin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+      } catch (err: unknown) {
+        toast.error(errorMessage(err, "Invalid credentials"));
         return;
       }
 
@@ -77,6 +78,7 @@ export default function SigninPage() {
 
       <Card className="relative z-10 w-full max-w-md border shadow-2xl" style={{ backgroundColor: "#171a20", color: "#f5f7fa", borderColor: "#2a2f38" }}>
         <CardHeader className="text-center">
+          <TradenayaLogo className="mx-auto mb-2 h-auto w-14" />
           <CardTitle className="text-3xl">Tradenaya</CardTitle>
           <CardDescription>User Sign In</CardDescription>
         </CardHeader>

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { BacktestError } from "@/automation/backtest/errors";
 import type { BacktestConfig } from "@/automation/backtest/types";
 import { fail, getBacktestService, ok, requireUserId } from "../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 function statusForCode(code: string): number {
   switch (code) {
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/backtests]", error);
-    return fail(500, error?.message ?? "Failed to list backtests");
+    return errorResponse(error, 500, "Failed to list backtests", "/api/analytics/backtests");
   }
 }
 
@@ -48,6 +49,6 @@ export async function POST(req: NextRequest) {
     if (error instanceof BacktestError) {
       return fail(statusForCode(error.code), error.message);
     }
-    return fail(500, error?.message ?? "Failed to run backtest");
+    return errorResponse(error, 500, "Failed to run backtest", "/api/analytics/backtests");
   }
 }

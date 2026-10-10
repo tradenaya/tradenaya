@@ -31,16 +31,9 @@ export function floorToStep(value: number, step: number, precision: number): num
   return Number(rounded.toFixed(precision));
 }
 
-/**
- * Highest allocation (as a percentage of the available balance) that still
- * leaves the configured headroom + fee buffer untouched, so the order's margin
- * can never consume the entire free balance.
- */
-export function maxSafeAllocationPct(available: number, headroom: number, feeBuffer: number): number {
-  if (!(available > 0)) return 0;
-  const override = (available * (1 - headroom) - feeBuffer) / available;
-  return Math.max(0, override) * 100;
-}
+import { maxSafeAllocationPct, MARGIN_FEE_BUFFER, MARGIN_HEADROOM } from "@/automation/risk/allocation-headroom";
+
+export { maxSafeAllocationPct, MARGIN_FEE_BUFFER, MARGIN_HEADROOM };
 
 interface NormalizedEntry {
   ok: boolean;
@@ -100,6 +93,20 @@ export function normalizeEntryOrder(
       };
     }
 
+    // The raised size must still respect Max Risk: a bigger quantity at the
+    // same stop distance loses more at SL than the user allowed.
+    const maxRiskAmount = Number(input.maxRiskAmount ?? NaN);
+    const stopDistance = Math.abs(price - Number(input.plan.stopLoss ?? NaN));
+    if (Number.isFinite(maxRiskAmount) && maxRiskAmount > 0 && Number.isFinite(stopDistance) && stopDistance > 0) {
+      const raisedLoss = raisedRounded * stopDistance;
+      if (raisedLoss > maxRiskAmount * 1.01) {
+        return {
+          ok: false,
+          message: `Position size ${quantity} is below the exchange minimum (${minQty}) for ${symbol}; raising it to ${raisedRounded} would risk ~${raisedLoss.toFixed(4)} USDT at SL, above the Max Risk limit of ${maxRiskAmount.toFixed(4)} USDT — trade skipped.`,
+        };
+      }
+    }
+
     quantity = raisedRounded;
   }
 
@@ -119,23 +126,6 @@ export function normalizeEntryOrder(
 
   return { ok: true, message: "ok", quantity, plan };
 }
-
-/**
- * Reserve a small buffer on top of the raw margin to cover maker/taker fees
- * and CoinSwitch's minimum-notional rounding, so the preflight guard does not
- * pass only for the exchange to reject at placement.
- */
-export const MARGIN_FEE_BUFFER = 0.01;
-
-/**
- * Fraction of the free (available) balance that must be left untouched when
- * placing an order. At 100% allocation the required margin equals the whole
- * available balance, leaving zero headroom, so even a few cents of fees or
- * rounding makes the exchange reject with "Insufficient balance". Enforcing
- * this keeps a deterministic clear pre-trade block instead of a cryptic
- * exchange rejection. This is why 75% allocation "works" but 100% fails.
- */
-export const MARGIN_HEADROOM = 0.02;
 
 export class OrderExecutorService {
   private readonly client: CoinSwitchClient;
