@@ -3,6 +3,7 @@
 import { Menu, User, LogOut, Mail, Shield } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { adminLogout } from "@/store/slices/adminAuthSlice";
 import { clearTenant } from "@/store/slices/tenantSlice";
@@ -56,6 +57,7 @@ export default function AdminNavbar({ onMenuClick }: Props) {
         >
           <Menu size={24} />
         </button>
+        <TradenayaLogo className="h-auto w-8 shrink-0" />
         <h1
           className="text-lg sm:text-xl font-bold hidden sm:block"
           style={{

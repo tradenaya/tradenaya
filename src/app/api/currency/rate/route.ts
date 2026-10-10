@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { coinSwitchRequest } from "@/lib/coinswitch";
 import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 /**
  * GET /api/currency/rate
@@ -130,7 +131,7 @@ export async function GET(req: NextRequest) {
     }
 
     throw fetchError instanceof Error ? fetchError : new Error("Unable to fetch the live USDT→INR rate from the exchange.");
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error?.message ?? "Failed to fetch rate" }, { status: 502 });
+  } catch (error) {
+    return errorResponse(error, 502, "Failed to fetch the USDT→INR rate", "/api/currency/rate");
   }
 }

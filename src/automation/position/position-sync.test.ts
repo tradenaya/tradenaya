@@ -368,7 +368,9 @@ describe("PositionRecovery.recoverAllActive (exchange→DB sync) — scenarios A
     expect(p.state).toBe("CLOSED");
     expect(p.exitReason).toBe("STOP_LOSS");
     expect(p.exitPrice).toBeCloseTo(96.5, 2);
-    expect(p.realizedPnl).toBeCloseTo(-350.62, 2);
+    // Ledger amounts are signed (positive = credit): the +0.02 funding was
+    // received, so it reduces the loss instead of adding to it.
+    expect(p.realizedPnl).toBeCloseTo(-350.58, 2);
     expect(p.fees).toBeCloseTo(0.6, 2);
     expect(store.closedSummaries[0].reason).toBe("STOP_LOSS");
     expect(execStore.stateUpdates).toContainEqual({ id: 10, state: "CLOSED" });

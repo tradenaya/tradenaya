@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 
 export const metadata = {
   title: "TRADENAYA — Trading ka naya tareeka",
@@ -245,7 +246,9 @@ export default function Home() {
           width: 84px;
           display: block;
           margin-bottom: 18px;
-          filter: invert(67%) sepia(31%) saturate(720%) hue-rotate(356deg) brightness(106%) drop-shadow(0 0 10px rgba(201,154,88,.35));
+          height: auto;
+          color: #c99a58;
+          filter: drop-shadow(0 0 10px rgba(201,154,88,.35));
         }
         .lbl-h {
           margin: 0;
@@ -703,8 +706,7 @@ export default function Home() {
 
             <div className="rule" />
 
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="logo" src="/landing/logo.png" alt="Tradenaya" />
+            <TradenayaLogo className="logo" />
 
             <h1 className="lbl-h">TRADENAYA</h1>
             <div className="tagline">Trading ka naya tareeka</div>

@@ -3,6 +3,7 @@ import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
 import { convertInrToUsdt, CoinSwitchAccessError } from "@/lib/coinswitch/convert";
 import { db } from "@/lib/db";
 import { getCustomerFromRequest } from "@/lib/auth";
+import { errorResponse } from "@/lib/api-error";
 
 async function ensureConvertHistoryTable() {
   await db.query(`
@@ -146,6 +147,6 @@ export async function POST(req: NextRequest) {
       rawResponse: JSON.stringify({ error: message }),
     });
 
-    return NextResponse.json({ success: false, message, statusCode: status }, { status });
+    return errorResponse(error, status, message, "/api/coinswitch/convert");
   }
 }

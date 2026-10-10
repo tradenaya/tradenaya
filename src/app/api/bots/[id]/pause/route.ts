@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { botScheduler } from "@/automation/scheduler/BotScheduler";
 import { fail, ok, parseBotId, requireUserId } from "../../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = requireUserId(req);
@@ -15,6 +16,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return ok({ paused: true });
   } catch (error: any) {
     console.error("[bots/[id]/pause]", error);
-    return fail(400, error?.message ?? "Failed to pause bot");
+    return errorResponse(error, 400, "Failed to pause bot", "/api/bots/[id]/pause");
   }
 }

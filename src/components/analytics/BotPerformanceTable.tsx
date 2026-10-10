@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -30,7 +31,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<BotSummary[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<BotSummary[]>(
     () => apiGet("/api/analytics/bots"),
     [filters.botId],
     { pollMs: 15_000 },
@@ -45,8 +46,10 @@ export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState
         <CardDescription>Live status and per-bot performance</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-48 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load bot performance" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={4} columns={7} />
         ) : bots.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No bots configured yet.</p>
         ) : (

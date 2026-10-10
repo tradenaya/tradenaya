@@ -1,7 +1,8 @@
 "use client"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { StatsSkeleton } from "@/components/ui/skeletons"
 import type { TradeStatistics } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -17,7 +18,7 @@ function Stat({ label, value, valueClass }: { label: string; value: string; valu
 }
 
 export function TradeStatsCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<TradeStatistics>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<TradeStatistics>(
     () => apiGet("/api/analytics/statistics", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -29,8 +30,10 @@ export function TradeStatsCard({ filters }: { filters: AnalyticsFilterState }) {
         <CardDescription>Distribution of closed trades</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-56 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load trade statistics" onRetry={refresh} />
+        ) : loading && !data ? (
+          <StatsSkeleton count={8} />
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">

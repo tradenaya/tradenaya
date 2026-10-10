@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { botScheduler } from "@/automation/scheduler/BotScheduler";
 import { fail, ok, parseBotId, requireUserId, sanitizeConfig } from "../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = requireUserId(req);
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return ok(bot);
   } catch (error: any) {
     console.error("[bots/[id]]", error);
-    return fail(500, error?.message ?? "Failed to load bot");
+    return errorResponse(error, 500, "Failed to load bot", "/api/bots/[id]");
   }
 }
 
@@ -32,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return ok(bot);
   } catch (error: any) {
     console.error("[bots/[id]] patch", error);
-    return fail(400, error?.message ?? "Failed to update bot");
+    return errorResponse(error, 400, "Failed to update bot", "/api/bots/[id]");
   }
 }
 
@@ -48,6 +49,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return ok({ deleted: true });
   } catch (error: any) {
     console.error("[bots/[id]] delete", error);
-    return fail(400, error?.message ?? "Failed to delete bot");
+    return errorResponse(error, 400, "Failed to delete bot", "/api/bots/[id]");
   }
 }

@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -28,7 +29,7 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const { data, loading } = useAsyncData<Paged<ClosedTradeSummary>>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<Paged<ClosedTradeSummary>>(
     () =>
       apiGet("/api/analytics/trades", {
         ...toQuery(filters),
@@ -62,8 +63,10 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
         <CardDescription>{total} total · click a row for details</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-64 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load recent trades" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={8} columns={8} />
         ) : trades.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No closed trades match the current filters.</p>
         ) : (

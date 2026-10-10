@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { ChevronRight, Bot, Cpu, Gauge, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { CardGridSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
@@ -15,19 +17,20 @@ export function BotOverviewCards() {
   const router = useRouter();
   const [bots, setBots] = useState<BotView[] | null>(null);
   const [schedulerActive, setSchedulerActive] = useState<boolean | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch("/api/bots", { cache: "no-store" });
-        const json = await res.json();
-        if (!cancelled && json.success) {
+        const json = await fetchJson<{ data?: BotView[]; schedulerActive?: boolean }>("/api/bots");
+        if (!cancelled) {
           setBots(Array.isArray(json.data) ? json.data : []);
           setSchedulerActive(json.schedulerActive ?? null);
+          setError(null);
         }
       } catch (err: unknown) {
-        if (!cancelled) console.error(err instanceof Error ? err.message : "Failed to load bots");
+        if (!cancelled) setError(err);
       }
     }
     load();
@@ -52,11 +55,10 @@ export function BotOverviewCards() {
         </button>
       </CardHeader>
       <CardContent className="pt-4">
-        {bots === null ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Skeleton className="h-24 w-full rounded-lg" />
-            <Skeleton className="h-24 w-full rounded-lg" />
-          </div>
+        {bots === null && error != null ? (
+          <ErrorState error={error} title="Couldn't load your strategies" />
+        ) : bots === null ? (
+          <CardGridSkeleton count={2} className="lg:grid-cols-3" />
         ) : bots.length === 0 ? (
           <div className="flex flex-col items-center gap-1 py-6 text-center">
             <p className="text-sm text-muted-foreground">No strategies running yet.</p>

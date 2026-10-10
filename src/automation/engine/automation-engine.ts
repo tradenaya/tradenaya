@@ -8,6 +8,8 @@ import type { AutomationConfig, StrategySignal } from "@/automation/types";
 import type { StrategyContext, StrategyDecision } from "@/automation/strategy/types";
 import type { MarketDataService } from "@/automation/market/market-data-service";
 import { normalizeInterval } from "@/automation/market/normalizer";
+import { closedCandles } from "@/automation/indicators/candle-resampler";
+import { MOMENTUM_RSI_THRESHOLD, passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
 import { summarizeDecision } from "@/automation/strategy/tradenaya/humanize";
 import type { AnalysisPhase } from "@/automation/scheduler/LiveActivityHub";
 
@@ -49,7 +51,8 @@ export class AutomationEngine {
       return { signal: "WAIT", analysis: { trend: "SIDEWAYS", confidence: 0, reasons: ["market data unavailable or stale"], price: null, summary: `No trade for ${config.symbol} — market data unavailable or stale` } };
     }
 
-    const candles = market.candles[config.timeframe] ?? market.candles[String(normalizeInterval(config.timeframe) ?? "")] ?? [];
+    const rawCandles = market.candles[config.timeframe] ?? market.candles[String(normalizeInterval(config.timeframe) ?? "")] ?? [];
+    const candles = closedCandles(rawCandles, normalizeInterval(config.timeframe));
     const freshness = String(market.isFresh ?? "UNKNOWN").toLowerCase();
     step("market", `Received ${candles.length} candles for ${config.symbol} ${config.timeframe}; ${freshness} data.`);
     step("indicators", "Computing indicators (EMA, RSI, MACD, ATR, ADX, Bollinger, VWAP, SuperTrend)…");
@@ -77,6 +80,13 @@ export class AutomationEngine {
 
     if (decision.signal === "WAIT") {
       return { signal: "WAIT", analysis };
+    }
+
+    if (config.momentumEntriesOnly && !passesMomentumFilter(decision.signal, Number(decision.indicators?.rsi))) {
+      const rsi = Number(decision.indicators?.rsi);
+      const summary = `No trade for ${config.symbol} — ${decision.signal} signal skipped: strong-momentum entries only (RSI ${Number.isFinite(rsi) ? rsi.toFixed(1) : "n/a"}, needs ${decision.signal === "BUY" ? `≥ ${MOMENTUM_RSI_THRESHOLD}` : `≤ ${100 - MOMENTUM_RSI_THRESHOLD}`})`;
+      step("strategy", summary);
+      return { signal: "WAIT", analysis: { ...analysis, summary } };
     }
 
     step("plan", `Planning ${decision.signal} trade for ${config.symbol}…`);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("GET", "/futures/leverage", { symbol: symbol.toLowerCase(), exchange: "EXCHANGE_2" }, keys?.apiKey, keys?.apiSecret);
 
     console.log("LEVERAGE GET URL:", url);
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("GET LEVERAGE ERROR", error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/leverage");
   }
 }
 
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
       leverage: Number(leverage),
     };
 
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/leverage", payload, keys?.apiKey, keys?.apiSecret);
 
     console.log("LEVERAGE POST URL:", url);
@@ -85,6 +86,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("UPDATE LEVERAGE ERROR", error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/leverage");
   }
 }

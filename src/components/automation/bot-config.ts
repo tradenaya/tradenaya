@@ -42,6 +42,8 @@ export interface BotConfig {
   dailyLossLimit: number | null;
   enableTrailingStop: boolean;
   trailingDistancePercent: number | null;
+  /** Only take entries with strong momentum in the trade's direction. */
+  momentumEntriesOnly: boolean;
   orderExpiryMinutes: number | null;
   minConfidence: number | null;
   driftAtr: number;
@@ -117,9 +119,10 @@ export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "lev
     dailyLossLimit: raw.dailyLossLimit != null ? Number(raw.dailyLossLimit) : null,
     enableTrailingStop: Boolean(raw.enableTrailingStop),
     trailingDistancePercent: raw.trailingDistancePercent != null ? Number(raw.trailingDistancePercent) : null,
+    momentumEntriesOnly: raw.momentumEntriesOnly === true,
     orderExpiryMinutes: raw.orderExpiryMinutes != null ? Number(raw.orderExpiryMinutes) : null,
     minConfidence: raw.minConfidence != null ? Number(raw.minConfidence) : null,
-    driftAtr: raw.driftAtr != null ? Number(raw.driftAtr) : 2.5,
+    driftAtr: raw.driftAtr != null ? Number(raw.driftAtr) : 1.5,
     maxCandles: raw.maxCandles != null ? Number(raw.maxCandles) : 24,
     hardCapCandles: raw.hardCapCandles != null ? Number(raw.hardCapCandles) : 48,
     regimeTolerancePct: raw.regimeTolerancePct != null ? Number(raw.regimeTolerancePct) : 0.3,

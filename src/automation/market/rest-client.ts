@@ -73,7 +73,10 @@ export class MarketDataRestClient {
       throw new MarketDataError(`Unsupported interval for REST: ${timeframe}`, "INVALID_DATA");
     }
 
-    const limit = options.limit ?? 100;
+    // 300 entry candles are needed for EMA200 and for the resampled 15m/1h
+    // context views to reach their own warm-up (100 candles left the 1h view at
+    // ~8 candles, so it always read "flat").
+    const limit = options.limit ?? 300;
     // Transient exchange failures can surface as an empty/unparseable response
     // while the cache still holds only the live candle. Retry once so a single
     // flake does not silently drop a valid symbol out of analysis.

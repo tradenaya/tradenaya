@@ -7,6 +7,11 @@ import { CoinSearchSelect } from "@/components/automation/CoinSearchSelect";
 import { formatPrice } from "@/components/analytics/format";
 import { computeTradePreview, type TradePreview } from "@/components/automation/trade-preview";
 import { TradePreviewPanel } from "@/components/automation/TradePreviewPanel";
+import { WalletAllocationNote } from "@/components/automation/WalletAllocationNote";
+import { ErrorState } from "@/components/ui/error-state";
+import { errorMessage, fetchData } from "@/lib/api-client";
+import { defaultEntryExpiryMinutes } from "@/automation/planner/entry-expiry";
+import { effectiveAllocation, MARGIN_FEE_BUFFER, MARGIN_HEADROOM } from "@/automation/risk/allocation-headroom";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
 
@@ -72,20 +77,21 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
   useDisplayCurrency();
   const [cfg, setCfg] = useState<BotConfig>(() => parseBotConfig(bot));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   const [wallet, setWallet] = useState<number | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState<unknown>(null);
   const [instrument, setInstrument] = useState<InstrumentInfo | null>(null);
   const [price, setPrice] = useState<number | null>(null);
 
   const [analyzingCoins, setAnalyzingCoins] = useState(false);
   const [coinAnalysis, setCoinAnalysis] = useState<CoinAnalysis[] | null>(null);
-  const [analysisError, setAnalysisError] = useState("");
+  const [analysisError, setAnalysisError] = useState<unknown>(null);
 
   const [autoPreview, setAutoPreview] = useState<AutoSelectionPreview | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
-  const [autoError, setAutoError] = useState("");
+  const [autoError, setAutoError] = useState<unknown>(null);
 
   const running = (bot.desiredStatus || bot.status) === "RUNNING";
 
@@ -93,7 +99,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
     if (open) {
       const t = setTimeout(() => {
         setCfg(parseBotConfig(bot));
-        setError("");
+        setError(null);
       }, 0);
       return () => clearTimeout(t);
     }
@@ -108,20 +114,20 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       setWallet(null);
       setWalletLoading(true);
     });
-    fetch("/api/coinswitch/futures/wallet-balance", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<{ base_asset_balances?: { base_asset: string; balances?: { total_available_balance?: string } }[] }>(
+      "/api/coinswitch/futures/wallet-balance",
+    )
+      .then((data) => {
         if (cancelled) return;
-        if (json.success) {
-          const usdt = json.data?.base_asset_balances?.find(
-            (b: { base_asset: string }) => String(b.base_asset).toUpperCase() === "USDT",
-          );
-          const bal = Number(usdt?.balances?.total_available_balance);
-          setWallet(Number.isFinite(bal) ? bal : null);
-        }
+        const usdt = data?.base_asset_balances?.find((b) => String(b.base_asset).toUpperCase() === "USDT");
+        const bal = Number(usdt?.balances?.total_available_balance);
+        setWallet(Number.isFinite(bal) ? bal : null);
+        setWalletError(null);
       })
-      .catch(() => {
-        if (!cancelled) setWallet(null);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setWallet(null);
+        setWalletError(err);
       })
       .finally(() => {
         if (!cancelled) setWalletLoading(false);
@@ -202,7 +208,8 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         dailyLossLimit: cfg.dailyLossLimit ?? 5,
         enableTrailingStop: cfg.enableTrailingStop ?? false,
         trailingDistancePercent: cfg.enableTrailingStop ? cfg.trailingDistancePercent : null,
-        driftAtr: cfg.driftAtr ?? 2.5,
+        momentumEntriesOnly: cfg.momentumEntriesOnly ?? false,
+        driftAtr: cfg.driftAtr ?? 1.5,
         regimeTolerancePct: cfg.regimeTolerancePct ?? 0.3,
         maxCandles: cfg.maxCandles ?? 24,
         hardCapCandles: cfg.hardCapCandles ?? 48,
@@ -223,6 +230,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
     cfg.dailyLossLimit,
     cfg.enableTrailingStop,
     cfg.trailingDistancePercent,
+    cfg.momentumEntriesOnly,
     cfg.driftAtr,
     cfg.regimeTolerancePct,
     cfg.maxCandles,
@@ -239,18 +247,16 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
     queueMicrotask(() => {
       if (cancelled) return;
       setAutoLoading(true);
-      setAutoError("");
+      setAutoError(null);
     });
-    fetch(autoPreviewUrl, { cache: "no-store", signal: controller.signal })
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<{ best?: AutoSelectionPreview | null }>(autoPreviewUrl, { signal: controller.signal })
+      .then((data) => {
         if (cancelled) return;
-        if (json.success) setAutoPreview(json.data?.best ?? null);
-        else setAutoError(json.message || "Failed to preview auto-selection");
+        setAutoPreview(data?.best ?? null);
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return;
-        if (!cancelled) setAutoError("Failed to preview auto-selection");
+        if (controller.signal.aborted) return;
+        if (!cancelled) setAutoError(err);
       })
       .finally(() => {
         if (!cancelled) setAutoLoading(false);
@@ -272,7 +278,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       if (wallet == null) return null;
       const pct = Number(cfg.walletPercent);
       if (!Number.isFinite(pct)) return null;
-      return wallet * (pct / 100);
+      return effectiveAllocation(pct, wallet).amount;
     }
     const amount = Number(cfg.capital);
     return Number.isFinite(amount) ? amount : null;
@@ -283,7 +289,11 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       walletBalance: wallet,
       capitalMode: isPercent ? "percent" : "fixed",
       capital: Number(cfg.capital) || 0,
-      walletPercent: isPercent ? Number(cfg.walletPercent) : null,
+      walletPercent: isPercent
+        ? wallet != null
+          ? effectiveAllocation(Number(cfg.walletPercent), wallet).effectivePct
+          : Number(cfg.walletPercent)
+        : null,
       leverage: Number(cfg.leverage) || 1,
       maxRiskPerTradePct: Number(cfg.maxRiskPerTrade) || 0,
       currentPrice: price,
@@ -308,17 +318,15 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       else if (wallet != null && cap - wallet > 1e-9) errs.capital = `Exceeds available balance of ${wallet.toFixed(4)} USDT.`;
     }
 
-    if (wallet != null && wallet > 0) {
+    // Percent mode is capped to the safe maximum automatically (see the note
+    // under the field); only a fixed amount above it is an error.
+    if (wallet != null && wallet > 0 && !isPercent) {
       const allocatedAmt = effectiveCapital;
       if (allocatedAmt != null && allocatedAmt > 0) {
-        const headroom = 0.02;
-        const feeBuffer = 0.01;
-        const safeMax = wallet * (1 - headroom) - feeBuffer;
+        const safeMax = wallet * (1 - MARGIN_HEADROOM) - MARGIN_FEE_BUFFER;
         if (allocatedAmt > safeMax + 1e-9) {
           const safePct = Math.max(0, (safeMax / wallet) * 100);
-          const msg = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
-          if (isPercent) errs.walletPercent = msg;
-          else errs.capital = msg;
+          errs.capital = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
         }
       }
     }
@@ -373,18 +381,15 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
 
   async function analyzeCoins() {
     setAnalyzingCoins(true);
-    setAnalysisError("");
+    setAnalysisError(null);
     setCoinAnalysis(null);
     try {
-      const res = await fetch(
+      const data = await fetchData<CoinAnalysis[]>(
         `/api/bots/analyze-coins?timeframe=${encodeURIComponent(cfg.timeframe ?? "1h")}&limit=25`,
-        { cache: "no-store" },
       );
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Failed to analyze coins");
-      setCoinAnalysis(Array.isArray(json.data) ? json.data : []);
+      setCoinAnalysis(Array.isArray(data) ? data : []);
     } catch (err: unknown) {
-      setAnalysisError(err instanceof Error ? err.message : "Failed to analyze coins");
+      setAnalysisError(err);
     } finally {
       setAnalyzingCoins(false);
     }
@@ -488,7 +493,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
   }
 
   async function save() {
-    setError("");
+    setError(null);
     if (running) {
       const message = "Pause or stop the bot before changing its configuration.";
       setError(message);
@@ -520,7 +525,8 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         dailyLossLimit: Number(cfg.dailyLossLimit),
         enableTrailingStop: cfg.enableTrailingStop,
         trailingDistancePercent: cfg.enableTrailingStop && cfg.trailingDistancePercent != null ? Number(cfg.trailingDistancePercent) : undefined,
-        driftAtr: Number(cfg.driftAtr) || 2.5,
+        momentumEntriesOnly: cfg.momentumEntriesOnly ?? false,
+        driftAtr: Number(cfg.driftAtr) || 1.5,
         regimeTolerancePct: Number(cfg.regimeTolerancePct) || 0.3,
         maxCandles: Number(cfg.maxCandles) || 24,
         hardCapCandles: Number(cfg.hardCapCandles) || 48,
@@ -539,8 +545,8 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       onSaved?.();
       onOpenChange(false);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to update bot";
-      setError(message);
+      const message = errorMessage(err, "Failed to update bot");
+      setError(err);
       toast.error(message);
     } finally {
       setSaving(false);
@@ -597,6 +603,9 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                 <span className="text-sm text-red-400">Unavailable</span>
               )}
             </div>
+            {!walletLoading && walletError != null && (
+              <ErrorState error={walletError} title="Couldn't load your futures balance" compact className="mt-2" />
+            )}
             {wallet != null && isPercent && effectiveCapital != null && (
               <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Allocated for trading</span>
@@ -698,8 +707,8 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                     <span className="text-muted-foreground">•</span>
                   )}
                 </div>
-                {autoError ? (
-                  <p className="text-red-400">{autoError}</p>
+                {autoError != null ? (
+                  <ErrorState error={autoError} title="Couldn't preview auto-selection" compact />
                 ) : autoLoading && !autoPreview ? (
                   <p className="text-muted-foreground">Analyzing market opportunities…</p>
                 ) : autoPreview ? (
@@ -760,8 +769,8 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                 </Button>
               </div>
 
-              {analysisError && (
-                <p className="mt-1.5 text-xs text-red-400">{analysisError}</p>
+              {analysisError != null && (
+                <ErrorState error={analysisError} title="Couldn't analyze coins" compact className="mt-1.5" />
               )}
 
               {coinAnalysis && (
@@ -919,11 +928,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
                 placeholder="10"
               />
               {fieldErrors.walletPercent && <FieldError>{fieldErrors.walletPercent}</FieldError>}
-              {wallet != null && effectiveCapital != null && (
-                <p className="text-xs text-muted-foreground">
-                  ≈ {fmtWallet(effectiveCapital!)}
-                </p>
-              )}
+              <WalletAllocationNote requestedPct={Number(cfg.walletPercent)} wallet={wallet} format={fmtWallet} />
               {notActiveIssue && <p className="text-xs text-red-400">{notActiveIssue}</p>}
               {minOrderIssue && <p className="text-xs text-red-400">{minOrderIssue}</p>}
             </div>
@@ -993,9 +998,12 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
               onChange={(e) =>
                 update("orderExpiryMinutes", e.target.value === "" ? null : Number(e.target.value))
               }
-              placeholder="Optional"
+              placeholder={`Auto: ${defaultEntryExpiryMinutes(cfg.timeframe)}`}
             />
             {fieldErrors.orderExpiry && <FieldError>{fieldErrors.orderExpiry}</FieldError>}
+            <p className="text-[11px] text-muted-foreground">
+              Empty = auto: an unfilled entry is cancelled after one {cfg.timeframe} candle (min 30 min).
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -1019,7 +1027,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
               type="number"
               min={0.5}
               step={0.1}
-              value={cfg.driftAtr ?? 2.5}
+              value={cfg.driftAtr ?? 1.5}
               onChange={(e) => update("driftAtr", Number(e.target.value))}
               placeholder="2.5"
             />
@@ -1064,6 +1072,25 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
           </div>
 
           <div className="md:col-span-2">
+            <div className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id="edit-momentum"
+                  type="checkbox"
+                  checked={cfg.momentumEntriesOnly ?? false}
+                  onChange={(e) => update("momentumEntriesOnly", e.target.checked)}
+                  className="h-4 w-4 rounded border-border accent-emerald-500"
+                />
+                <Label htmlFor="edit-momentum" className="mb-0">Strong-momentum entries only</Label>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Only trades when momentum is already strong in the trade&apos;s direction (RSI ≥ 80 for longs, ≤ 20 for
+                shorts). Far fewer trades — the only filter that was profitable in backtests.
+              </p>
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
                 <input
@@ -1105,7 +1132,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
-          {error && <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400 md:col-span-2">{error}</div>}
+          {error != null && <ErrorState error={error} title="Couldn't save the bot" className="md:col-span-2" />}
         </div>
 
         <DialogFooter>

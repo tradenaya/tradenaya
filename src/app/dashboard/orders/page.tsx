@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -64,7 +65,7 @@ export default function OrdersPage() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  const { data, error, loading, refresh } = useAsyncData<Paged<OrderHistoryRow>>(
+  const { data, error, errorInfo, loading, refresh } = useAsyncData<Paged<OrderHistoryRow>>(
     () =>
       apiGet("/api/orders", {
         page,
@@ -131,9 +132,9 @@ export default function OrdersPage() {
         </CardHeader>
         <CardContent className="pt-4">
           {error && !data ? (
-            <p className="py-8 text-center text-sm text-red-400">{error}</p>
+            <ErrorState error={errorInfo ?? error} title="Couldn't load order history" onRetry={refresh} />
           ) : loading && !data ? (
-            <Skeleton className="h-96 w-full rounded-lg" />
+            <TableSkeleton rows={8} columns={8} />
           ) : orders.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-12">
               <History className="h-8 w-8 text-muted-foreground" />

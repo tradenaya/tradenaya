@@ -49,5 +49,6 @@ export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig 
     maxCandles: n(body.maxCandles),
     hardCapCandles: n(body.hardCapCandles),
     regimeTolerancePct: n(body.regimeTolerancePct),
+    momentumEntriesOnly: body.momentumEntriesOnly === true,
   };
 }

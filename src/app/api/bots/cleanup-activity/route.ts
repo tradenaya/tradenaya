@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { botScheduler } from "@/automation/scheduler/BotScheduler";
 import { fail, ok, requireUserId } from "../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 /**
  * POST /api/bots/cleanup-activity
@@ -20,6 +21,6 @@ export async function POST(req: NextRequest) {
     return ok(removed);
   } catch (error: any) {
     console.error("[bots/cleanup-activity]", error);
-    return fail(500, error?.message ?? "Failed to clean activity logs");
+    return errorResponse(error, 500, "Failed to clean activity logs", "/api/bots/cleanup-activity");
   }
 }

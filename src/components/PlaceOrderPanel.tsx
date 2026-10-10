@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { ErrorState } from "@/components/ui/error-state";
+import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
 
 interface InstrumentInfo {
   min_base_quantity: string;
@@ -59,7 +61,7 @@ export default function PlaceOrderPanel({
   const [limitPrice, setLimitPrice] = useState("");
 
   const [instrument, setInstrument] = useState<InstrumentInfo | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [available, setAvailable] = useState<number | null>(null);
 
   const [leverage, setLeverage] = useState<number>(1);
@@ -80,19 +82,20 @@ export default function PlaceOrderPanel({
 
   const [phase, setPhase] = useState<Phase>({ status: "idle" });
 
+  const [balanceError, setBalanceError] = useState<unknown>(null);
+
   const refreshBalance = useCallback(() => {
-    fetch(`/api/coinswitch/futures/wallet-balance`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success) {
-          const usdt = json.data.base_asset_balances?.find(
-            (b: any) => b.base_asset === "USDT"
-          );
-          setAvailable(usdt ? Number(usdt.balances.total_available_balance) : 0);
-        }
+    fetchData<{ base_asset_balances?: { base_asset: string; balances: { total_available_balance: string } }[] }>(
+      `/api/coinswitch/futures/wallet-balance`,
+    )
+      .then((data) => {
+        const usdt = data?.base_asset_balances?.find((b) => b.base_asset === "USDT");
+        setAvailable(usdt ? Number(usdt.balances.total_available_balance) : 0);
+        setBalanceError(null);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setAvailable(null);
+        setBalanceError(err);
       });
   }, []);
 
@@ -100,18 +103,13 @@ export default function PlaceOrderPanel({
     setLoadError(null);
     let cancelled = false;
 
-    fetch(`/api/coinswitch/futures/instrument-info`)
-      .then((r) => r.json())
-      .then((json) => {
+    fetchData<Record<string, InstrumentInfo>>(`/api/coinswitch/futures/instrument-info`)
+      .then((data) => {
         if (cancelled) return;
-        if (json.success) {
-          setInstrument(json.data[symbol] ?? null);
-        } else {
-          setLoadError(json.message ?? "Failed to load instrument info");
-        }
+        setInstrument(data?.[symbol] ?? null);
       })
-      .catch(() => {
-        if (!cancelled) setLoadError("Failed to load instrument info");
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err);
       });
 
     refreshBalance();
@@ -227,31 +225,26 @@ export default function PlaceOrderPanel({
     setLeverageSaving(true);
     setLeverageError(null);
     try {
-      const res = await fetch("/api/coinswitch/futures/leverage", {
+      await fetchJson("/api/coinswitch/futures/leverage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbol, leverage: newLeverage }),
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message ?? "failed to update leverage");
       setLeverage(newLeverage);
       setSavedLeverage(newLeverage);
-    } catch (err: any) {
-      setLeverageError(err.message);
+    } catch (err: unknown) {
+      setLeverageError(errorMessage(err, "Failed to update leverage"));
     } finally {
       setLeverageSaving(false);
     }
   }
 
   async function placeOrder(payload: Record<string, any>) {
-    const res = await fetch("/api/coinswitch/futures/order", {
+    return fetchData<any>("/api/coinswitch/futures/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message ?? "order failed");
-    return json.data;
   }
 
   async function pollUntilTerminal(orderId: string) {
@@ -614,7 +607,8 @@ export default function PlaceOrderPanel({
           )}
         </div>
 
-        {loadError && <p className="text-xs text-amber-400">{loadError}</p>}
+        {loadError != null && <ErrorState error={loadError} title="Couldn't load trading rules for this coin" compact />}
+        {balanceError != null && <ErrorState error={balanceError} title="Couldn't load your available balance" compact onRetry={refreshBalance} />}
         {validationErrors.length > 0 && (
           <div className="space-y-1">
             {validationErrors.map((err) => (

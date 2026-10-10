@@ -2,7 +2,8 @@
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { ListSkeleton } from "@/components/ui/skeletons"
 import type { ActivityFeed } from "@/automation/analytics/types"
 import { apiGet, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -15,7 +16,7 @@ function SeverityBadge({ severity }: { severity: "INFO" | "WARNING" | "ERROR" })
 }
 
 export function ActivityCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<ActivityFeed>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<ActivityFeed>(
     () => apiGet("/api/analytics/activity", { limit: 80 }),
     [filters.botId],
     { pollMs: 20_000 },
@@ -30,12 +31,10 @@ export function ActivityCard({ filters }: { filters: AnalyticsFilterState }) {
         <CardDescription>Scheduler, position and execution events</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-3/4" />
-          </div>
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load the activity feed" onRetry={refresh} />
+        ) : loading && !data ? (
+          <ListSkeleton rows={5} />
         ) : items.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No activity yet.</p>
         ) : (

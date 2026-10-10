@@ -160,7 +160,15 @@ export class BacktestExecutionEngine {
   private processPendingOrder(candle: MarketCandle): CandleProcessingResult {
     const order = this.activeOrder as SimulatedOrder;
 
-    if (candle.timestamp > order.expiresAt) {
+    // The order is decided on the signal candle's close, so it can only fill on
+    // LATER candles. Filling on the signal candle itself would use price moves
+    // that happened before the order existed (look-ahead) — impossible live.
+    if (candle.timestamp <= order.createdAt) {
+      return { orderFilled: false, positionClosed: false };
+    }
+
+    // A candle that opens at/after the expiry can no longer fill the order.
+    if (candle.timestamp >= order.expiresAt) {
       this.activeOrder = null;
       return { orderFilled: false, positionClosed: false };
     }

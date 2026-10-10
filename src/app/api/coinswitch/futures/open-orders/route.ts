@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
       ...(symbol && { symbol: symbol.toLowerCase() }),
     };
 
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
@@ -34,6 +35,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("OPEN ORDERS ERROR", error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/open-orders");
   }
 }

@@ -10,7 +10,8 @@ import {
   YAxis,
 } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { ChartSkeleton } from "@/components/ui/skeletons"
 import type { EquityAnalytics } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -20,7 +21,7 @@ const AXIS_STROKE = "#a89880"
 const GRID_STROKE = "rgba(168,152,128,0.15)"
 
 export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<EquityAnalytics>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<EquityAnalytics>(
     () => apiGet("/api/analytics/equity", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -52,8 +53,10 @@ export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) 
         </div>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-64 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load the equity curve" onRetry={refresh} />
+        ) : loading && !data ? (
+          <ChartSkeleton height={256} />
         ) : (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">

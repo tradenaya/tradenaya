@@ -10,7 +10,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { CardGridSkeleton, ListSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { AutoBadge } from "@/components/automation/AutoBadge";
@@ -286,16 +288,18 @@ export default function AutomationPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTabId>("live");
 
+  const [botsError, setBotsError] = useState<unknown>(null);
+
   async function loadBots() {
     try {
-      const res = await fetch("/api/bots", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Failed to load bots");
-      const list = Array.isArray(json.data) ? json.data : [];
+      const json = await fetchJson<{ data?: unknown; schedulerActive?: boolean }>("/api/bots");
+      const list = Array.isArray(json.data) ? (json.data as BotView[]) : [];
       setBots(list);
       setSchedulerActive(json.schedulerActive ?? null);
+      setBotsError(null);
     } catch (err: unknown) {
-      console.error(err instanceof Error ? err.message : "Failed to load bots");
+      console.error("Failed to load bots", err);
+      setBotsError(err);
     } finally {
       setLoading(false);
     }
@@ -338,13 +342,11 @@ export default function AutomationPage() {
   async function act(id: number, action: "start" | "pause" | "stop") {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/bots/${id}/${action}`, {
+      const json = await fetchJson<{ message?: string }>(`/api/bots/${id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || `Failed to ${action} bot`);
       toast.success(json.message || `Bot ${action === "start" ? "resumed" : action === "pause" ? "paused" : "stopped"}`);
       await loadBots();
     } catch (err: unknown) {
@@ -363,9 +365,7 @@ export default function AutomationPage() {
     setConfirmDelete(null);
     setBusyId(bot.id);
     try {
-      const res = await fetch(`/api/bots/${bot.id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete bot");
+      await fetchJson(`/api/bots/${bot.id}`, { method: "DELETE" });
       toast.success(`${bot.symbol} deleted`);
       await loadBots();
     } catch (err: unknown) {
@@ -383,9 +383,7 @@ export default function AutomationPage() {
     for (const id of ids) {
       setBusyId(id);
       try {
-        const res = await fetch(`/api/bots/${id}`, { method: "DELETE" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete bot");
+        await fetchJson(`/api/bots/${id}`, { method: "DELETE" });
         deleted++;
       } catch (err: unknown) {
         failed++;
@@ -452,8 +450,10 @@ export default function AutomationPage() {
 
       {/* Live status — full width, this is the one thing that matters most right now */}
       <section className={cn(mobileTab === "live" ? "block" : "hidden", "lg:block")}>
-        {loading && bots.length === 0 ? (
-          <Skeleton className="h-40 w-full rounded-lg" />
+        {botsError != null && bots.length === 0 ? (
+          <ErrorState error={botsError} title="Couldn't load your bots" onRetry={() => void loadBots()} />
+        ) : loading && bots.length === 0 ? (
+          <CardGridSkeleton count={3} />
         ) : (
           <LiveOverview bots={bots} positions={positions} onDetails={setDetailBot} onViewChart={(bot) => router.push(`/trade/${displaySymbol(bot, parseBotConfig(bot))}`)} />
         )}
@@ -492,8 +492,13 @@ export default function AutomationPage() {
               )}
             </div>
           </div>
-          {loading && bots.length === 0 ? (
-            <Skeleton className="h-64 w-full rounded-lg" />
+          {botsError != null && bots.length > 0 && (
+            <ErrorState error={botsError} title="Couldn't refresh bots — showing the last loaded list" compact className="mb-3" onRetry={() => void loadBots()} />
+          )}
+          {botsError != null && bots.length === 0 ? (
+            <ErrorState error={botsError} title="Couldn't load your bots" compact onRetry={() => void loadBots()} />
+          ) : loading && bots.length === 0 ? (
+            <ListSkeleton rows={4} className="rounded-lg border border-border bg-card p-3" />
           ) : bots.length === 0 ? (
             <Card className="border border-border bg-card">
               <CardContent className="py-10 text-center text-sm text-muted-foreground">No bots configured yet.</CardContent>

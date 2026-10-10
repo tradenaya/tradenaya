@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, getAnalyticsService, ok, requireUserId } from "../../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = requireUserId(req);
@@ -13,6 +14,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/trades/[id]]", error);
-    return fail(500, error?.message ?? "Failed to load trade detail");
+    return errorResponse(error, 500, "Failed to load trade detail", "/api/analytics/trades/[id]");
   }
 }

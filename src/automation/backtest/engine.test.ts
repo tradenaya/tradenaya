@@ -38,6 +38,34 @@ function buildUptrend(count: number, seed: number): MarketCandle[] {
   return candles;
 }
 
+/**
+ * Uptrend with periodic pullbacks: rises for ~10 candles, then dips for 3.
+ * Entries are LIMIT orders placed below price and can only fill on candles
+ * AFTER the signal, so the series needs real pullbacks to produce fills.
+ */
+function buildUptrendWithPullbacks(count: number, seed: number): MarketCandle[] {
+  const rand = mulberry32(seed);
+  const candles: MarketCandle[] = [];
+  let price = 100;
+  for (let i = 0; i < count; i += 1) {
+    const open = price;
+    const inPullback = i % 13 >= 10;
+    const drift = inPullback ? -0.0035 : 0.0022;
+    const close = open * (1 + drift + (rand() - 0.5) * 0.003);
+    candles.push({
+      timestamp: 1_700_000_000_000 + i * INTERVAL_MS,
+      open,
+      high: Math.max(open, close) * (1 + rand() * 0.002),
+      low: Math.min(open, close) * (1 - rand() * 0.002),
+      close,
+      volume: 500 + rand() * 1500,
+      timeframe: "5",
+    });
+    price = close;
+  }
+  return candles;
+}
+
 function baseConfig(candles: MarketCandle[]): BacktestConfig {
   return {
     symbol: "BTCUSDT",
@@ -72,7 +100,7 @@ describe("BacktestingEngine (end to end)", () => {
   });
 
   it("generates trades, tracks metrics, and is deterministic", async () => {
-    const candles = buildUptrend(600, 7);
+    const candles = buildUptrendWithPullbacks(600, 7);
     const provider: HistoricalMarketDataProvider = { getCandles: async () => candles };
     const engine = new BacktestingEngine({ provider, backtestId: 2 });
 
@@ -94,7 +122,7 @@ describe("BacktestingEngine (end to end)", () => {
   });
 
   it("reports every trade consistently and settles balances against the portfolio", async () => {
-    const candles = buildUptrend(400, 21);
+    const candles = buildUptrendWithPullbacks(400, 21);
     const trades: unknown[] = [];
     const provider: HistoricalMarketDataProvider = { getCandles: async () => candles };
     const engine = new BacktestingEngine({

@@ -6,7 +6,10 @@ import { Bot, CandlestickChart, ChevronRight, Eye, Layers, TrendingDown, Trendin
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { CardGridSkeleton, ListSkeleton, StatsSkeleton } from "@/components/ui/skeletons";
+import { fetchJson } from "@/lib/api-client";
+import { uniquePositions } from "@/components/positions/unique-positions";
 import WalletSummary from "@/components/WalletSummary";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { AutoBadge } from "@/components/automation/AutoBadge";
@@ -74,55 +77,51 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Position | null>(null);
   const [connection, setConnection] = useState<"connected" | "disconnected">("connected");
+  // Per-section errors: a failing endpoint shows its real cause in its own card
+  // instead of a misleading "No open positions" / endless skeleton.
+  const [errors, setErrors] = useState<Record<"summary" | "positions" | "orders" | "bots", unknown>>({
+    summary: null,
+    positions: null,
+    orders: null,
+    bots: null,
+  });
+  const [reloadKey, setReloadKey] = useState(0);
+  const retry = () => setReloadKey((k) => k + 1);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      try {
-        const [summaryRes, posRes, ordRes, botsRes] = await Promise.all([
-          fetch("/api/analytics/summary", { cache: "no-store" }),
-          fetch("/api/coinswitch/futures/all-positions", { cache: "no-store" }),
-          fetch("/api/coinswitch/futures/all-open-orders", { cache: "no-store" }),
-          fetch("/api/bots", { cache: "no-store" }),
-        ]);
+      const [summaryRes, posRes, ordRes, botsRes] = await Promise.allSettled([
+        fetchJson<{ data?: AccountSummary }>("/api/analytics/summary"),
+        fetchJson<{ data?: unknown; raw?: { data?: unknown } }>("/api/coinswitch/futures/all-positions"),
+        fetchJson<{ data?: unknown }>("/api/coinswitch/futures/all-open-orders"),
+        fetchJson<{ data?: unknown }>("/api/bots"),
+      ]);
+      if (cancelled) return;
 
-        const [summaryJson, posJson, ordJson, botsJson] = await Promise.all([
-          summaryRes.json(),
-          posRes.json(),
-          ordRes.json(),
-          botsRes.json(),
-        ]);
-
-        if (!cancelled) {
-          if (summaryJson.success) {
-            setSummary(summaryJson.data ?? null);
-            setConnection("connected");
-          } else {
-            setConnection("disconnected");
-          }
-          if (posJson.success) {
-            const list = Array.isArray(posJson.data) ? posJson.data : Array.isArray(posJson?.raw?.data) ? posJson.raw.data : [];
-            setPositions(list);
-          }
-          if (ordJson.success) {
-            const list = Array.isArray(ordJson.data) ? ordJson.data : Array.isArray(ordJson?.data?.orders) ? ordJson.data.orders : [];
-            setOrders(list);
-          }
-          if (botsJson.success) setBots(Array.isArray(botsJson.data) ? botsJson.data : []);
-        }
-      } catch {
-        if (!cancelled) setConnection("disconnected");
-      } finally {
-        if (!cancelled) setLoading(false);
+      if (summaryRes.status === "fulfilled") setSummary(summaryRes.value.data ?? null);
+      if (posRes.status === "fulfilled") {
+        const json = posRes.value;
+        setPositions(uniquePositions(Array.isArray(json.data) ? (json.data as Position[]) : Array.isArray(json.raw?.data) ? (json.raw.data as Position[]) : []));
       }
+      if (ordRes.status === "fulfilled") {
+        const data = ordRes.value.data as { orders?: OpenOrder[] } | OpenOrder[] | undefined;
+        setOrders(Array.isArray(data) ? data : Array.isArray(data?.orders) ? data.orders : []);
+      }
+      if (botsRes.status === "fulfilled") setBots(Array.isArray(botsRes.value.data) ? (botsRes.value.data as BotView[]) : []);
+
+      const reason = (r: PromiseSettledResult<unknown>) => (r.status === "rejected" ? r.reason : null);
+      setErrors({ summary: reason(summaryRes), positions: reason(posRes), orders: reason(ordRes), bots: reason(botsRes) });
+      setConnection(summaryRes.status === "fulfilled" ? "connected" : "disconnected");
+      setLoading(false);
     }
-    load();
-    const interval = setInterval(load, 10000);
+    void load();
+    const interval = setInterval(() => void load(), 10000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [reloadKey]);
 
   const sideBadge = (side: string) =>
     side === "LONG" || side === "BUY" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400";
@@ -159,8 +158,10 @@ export default function DashboardPage() {
           <CardDescription>From automated trading ({currencyLabel()})</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          {loading || !summary ? (
-            <Skeleton className="h-28 w-full rounded-lg" />
+          {errors.summary != null && !summary ? (
+            <ErrorState error={errors.summary} title="Couldn't load the PnL summary" onRetry={retry} />
+          ) : loading || !summary ? (
+            <StatsSkeleton count={4} />
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatBox label="Today" value={`${summary.todayPnl >= 0 ? "+" : ""}${money(summary.todayPnl, 2)}`} up={summary.todayPnl >= 0} />
@@ -192,8 +193,10 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent className="pt-4">
           <div key="active">
-          {loading ? (
-            <Skeleton className="h-20 w-full rounded-lg" />
+          {errors.bots != null && bots.length === 0 ? (
+            <ErrorState error={errors.bots} title="Couldn't load your bots" onRetry={retry} />
+          ) : loading ? (
+            <CardGridSkeleton count={2} className="xl:grid-cols-4" />
           ) : runningBots.length === 0 ? (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-lg border border-dashed border-border py-5 px-4 text-center">
               <div className="w-full">
@@ -255,8 +258,13 @@ export default function DashboardPage() {
             <CardDescription>{positions.filter((p) => Number(p.position_size) > 0).length} active position{(positions.filter((p) => Number(p.position_size) > 0).length === 1 ? "" : "s")}</CardDescription>
           </CardHeader>
           <CardContent className="pt-4">
-            {loading ? (
-              <Skeleton className="h-40 w-full rounded-lg" />
+            {errors.positions != null && positions.length > 0 && (
+              <ErrorState error={errors.positions} title="Couldn't refresh positions — showing the last loaded data" compact className="mb-3" onRetry={retry} />
+            )}
+            {errors.positions != null && positions.length === 0 ? (
+              <ErrorState error={errors.positions} title="Couldn't load open positions" onRetry={retry} />
+            ) : loading ? (
+              <CardGridSkeleton count={3} />
             ) : positions.filter((p) => Number(p.position_size) > 0).length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">No open positions.</p>
             ) : (
@@ -339,8 +347,10 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
-              {loading ? (
-                <Skeleton className="h-24 w-full rounded-lg" />
+              {errors.orders != null && orders.length === 0 ? (
+                <ErrorState error={errors.orders} title="Couldn't load open orders" onRetry={retry} compact />
+              ) : loading ? (
+                <ListSkeleton rows={3} />
               ) : orders.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No open orders.</p>
               ) : (

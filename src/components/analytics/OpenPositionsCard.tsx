@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -28,7 +29,7 @@ function ProtectionBadge({ status }: { status: string }) {
 }
 
 export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<OpenPositionAnalytics[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<OpenPositionAnalytics[]>(
     () => apiGet("/api/analytics/positions"),
     [filters.botId],
     { pollMs: 15_000 },
@@ -43,8 +44,10 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
         <CardDescription>Live unrealized PnL by position</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-40 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load open positions" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={4} columns={7} />
         ) : positions.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No open positions.</p>
         ) : (

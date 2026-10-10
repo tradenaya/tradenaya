@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { ListSkeleton } from "@/components/ui/skeletons";
+import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
 import { orderTypeLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms";
 
 interface OpenOrder {
@@ -25,22 +27,15 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
   const [orders, setOrders] = useState<OpenOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   async function fetchOpenOrders() {
     try {
-      const res = await fetch(`/api/coinswitch/futures/open-orders?symbol=${symbol}`, {
-        cache: "no-store",
-      });
-      const json = await res.json();
-      if (json.success) {
-        setOrders(json.data ?? json.data?.orders ?? []);
-        setError(null);
-      } else {
-        setError(json.message ?? "failed to load open orders");
-      }
-    } catch (err: any) {
-      setError(err.message);
+      const data = await fetchData<OpenOrder[] | { orders?: OpenOrder[] }>(`/api/coinswitch/futures/open-orders?symbol=${symbol}`);
+      setOrders(Array.isArray(data) ? data : data?.orders ?? []);
+      setError(null);
+    } catch (err: unknown) {
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -56,19 +51,15 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
   async function cancelOrder(orderId: string) {
     setCancelingId(orderId);
     try {
-      const res = await fetch("/api/coinswitch/futures/cancel-order", {
+      await fetchJson("/api/coinswitch/futures/cancel-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order_id: orderId }),
       });
-      const json = await res.json();
-      if (!json.success) {
-        throw new Error(json.message ?? "cancel failed");
-      }
       toast.success("Order cancelled");
       await fetchOpenOrders();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to cancel order"));
     } finally {
       setCancelingId(null);
     }
@@ -88,10 +79,13 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
         </div>
       </CardHeader>
       <CardContent className="pt-4">
+        {error != null && orders.length > 0 && (
+          <ErrorState error={error} title="Couldn't refresh orders — showing the last loaded data" compact className="mb-3" onRetry={() => void fetchOpenOrders()} />
+        )}
         {loading ? (
-          <Skeleton className="h-24 w-full rounded-lg" />
-        ) : error ? (
-          <p className="text-sm text-red-400">{error}</p>
+          <ListSkeleton rows={3} />
+        ) : error != null && orders.length === 0 ? (
+          <ErrorState error={error} title={`Couldn't load open orders on ${symbol}`} onRetry={() => void fetchOpenOrders()} />
         ) : orders.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">No open orders on {symbol}.</p>
         ) : (

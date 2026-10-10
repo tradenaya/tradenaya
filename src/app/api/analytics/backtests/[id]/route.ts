@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, getBacktestService, ok, requireUserId } from "../../_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = requireUserId(req);
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/backtests/[id]]", error);
-    return fail(500, error?.message ?? "Failed to load backtest");
+    return errorResponse(error, 500, "Failed to load backtest", "/api/analytics/backtests/[id]");
   }
 }
 
@@ -29,6 +30,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return ok({ deleted: true });
   } catch (error: any) {
     console.error("[analytics/backtests/[id]] delete", error);
-    return fail(500, error?.message ?? "Failed to delete backtest");
+    return errorResponse(error, 500, "Failed to delete backtest", "/api/analytics/backtests/[id]");
   }
 }

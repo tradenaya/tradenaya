@@ -36,6 +36,12 @@ export interface AutomationConfig {
   hardCapCandles?: number;
   /** Ignore regime EMA flips smaller than this % when deciding trend direction. Default 0.3. */
   regimeTolerancePct?: number;
+  /**
+   * Only take entries whose momentum is already strong in the trade's
+   * direction (RSI14 >= 80 for longs, <= 20 for shorts on the entry timeframe).
+   * Fewer trades; off when absent so existing bots keep their behaviour.
+   */
+  momentumEntriesOnly?: boolean;
   /** User-assigned display name for this bot (optional). */
   name?: string;
 }

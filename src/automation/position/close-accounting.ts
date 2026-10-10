@@ -9,7 +9,7 @@ export interface CloseAccounting {
   grossProfit: number;
   /** Trading commission for entry + exit (USDT). */
   commission: number;
-  /** Funding fees accrued while the position was open (USDT). */
+  /** Net funding cost while the position was open (USDT); negative when funding was received. */
   fundingFee: number;
   /** True net P&L = grossProfit - commission - fundingFee. */
   realizedPnl: number;
@@ -47,7 +47,10 @@ export async function reconcileClose(
   const gross = grossProfitOf(position.side, entryPrice, exitPrice, qty);
 
   const windowOpen = position.createdAt ? new Date(position.createdAt).getTime() : undefined;
-  const windowClose = position.closedAt ? new Date(position.closedAt).getTime() : undefined;
+  // At close time the row has not been marked closed yet, so closedAt is null.
+  // Without an explicit end the ledger query is open-ended and can return
+  // commission rows that do not belong to this trade; bound it to "now".
+  const windowClose = position.closedAt ? new Date(position.closedAt).getTime() : Date.now();
 
   let commission = 0;
   let fundingFee = 0;
@@ -81,7 +84,9 @@ export async function reconcileClose(
       estimated = true;
     }
     if (fundingTx) {
-      for (const t of fundingTx) fundingFee += Math.abs(amountOf(t));
+      // Ledger amounts are signed: negative = paid, positive = received. Keep
+      // the sign so received funding reduces the cost instead of adding to it.
+      for (const t of fundingTx) fundingFee -= amountOf(t);
     } else {
       estimated = true;
     }

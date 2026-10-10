@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 interface PlaceOrderBody {
   symbol: string;
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     if (body.price !== undefined) orderPayload.price = body.price;
     if (body.trigger_price !== undefined) orderPayload.trigger_price = body.trigger_price;
 
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/order", orderPayload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
@@ -73,9 +74,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("PLACE ORDER ERROR", error);
-    return NextResponse.json(
-      { success: false, message: error.message },
-      { status: 500 }
-    );
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/order");
   }
 }

@@ -4,6 +4,7 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 
 interface Props {
   title: string;
@@ -67,13 +68,9 @@ export default function AuthShell({
               background: "rgba(201,154,88,0.08)",
             }}
           >
-            <img
-              src="/logo/tradenaya-logo.png"
-              alt="Tradenaya"
-              className="h-11 w-11 object-contain"
-              style={{
-                filter: "invert(67%) sepia(31%) saturate(720%) hue-rotate(356deg) brightness(106%) drop-shadow(0 0 10px rgba(201,154,88,0.35))",
-              }}
+            <TradenayaLogo
+              className="h-auto w-10"
+              style={{ filter: "drop-shadow(0 0 10px rgba(201,154,88,0.35))" }}
             />
           </div>
 

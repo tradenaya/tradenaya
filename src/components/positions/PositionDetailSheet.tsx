@@ -12,6 +12,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { fetchData } from "@/lib/api-client";
 import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
@@ -96,7 +98,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
   useDisplayCurrency();
   const [detail, setDetail] = useState<AutomationPositionDetail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -105,14 +107,12 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
     async function load() {
       if (!cancelled) {
         setLoading(true);
-        setError("");
+        setError(null);
         setDetail(null);
       }
       try {
-        const res = await fetch("/api/analytics/positions", { cache: "no-store" });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.message || "Failed to load position details");
-        const list = Array.isArray(json.data) ? json.data : [];
+        const data = await fetchData<unknown>("/api/analytics/positions");
+        const list = Array.isArray(data) ? data : [];
         const wantedSide = position.position_side === "LONG" ? "BUY" : "SELL";
         const match = list.find(
           (p: AutomationPositionDetail) =>
@@ -123,7 +123,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load position details");
+          setError(err);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -222,8 +222,8 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               <Skeleton className="h-40 w-full rounded-lg" />
               <Skeleton className="h-40 w-full rounded-lg" />
             </div>
-          ) : error ? (
-            <p className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">{error}</p>
+          ) : error != null ? (
+            <ErrorState error={error} title="Couldn't load position details" />
           ) : (
             <>
               <div

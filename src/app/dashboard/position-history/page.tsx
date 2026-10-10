@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight, Layers, ChevronDown, ChevronUp } from "lucid
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -120,7 +121,8 @@ function formatTimestamp(ts: string | null): string {
   if (!ts) return "—"
   try {
     const d = new Date(ts)
-    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    if (Number.isNaN(d.getTime())) return "—"
+    return d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
   } catch {
     return "—"
   }
@@ -131,7 +133,7 @@ export default function PositionHistoryPage() {
   const [page, setPage] = useState(1)
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null)
 
-  const { data, error, loading } = useAsyncData<PositionHistoryData>(
+  const { data, error, errorInfo, loading, refresh } = useAsyncData<PositionHistoryData>(
     () => apiGet("/api/position-history", { page, pageSize: PAGE_SIZE, sortBy: "closedAt", sortDir: "desc" }),
     [page],
   )
@@ -151,11 +153,13 @@ export default function PositionHistoryPage() {
       </div>
 
       {error && !data ? (
-        <Card className="bg-card">
-          <CardContent className="py-12 text-center text-sm text-red-400">{error}</CardContent>
-        </Card>
+        <ErrorState error={errorInfo ?? error} title="Couldn't load position history" onRetry={refresh} />
       ) : loading && !data ? (
-        <Skeleton className="h-96 w-full rounded-lg" />
+        <Card className="bg-card">
+          <CardContent className="pt-4">
+            <TableSkeleton rows={10} columns={9} />
+          </CardContent>
+        </Card>
       ) : (
         <>
           {active.length > 0 && (
@@ -247,12 +251,24 @@ export default function PositionHistoryPage() {
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[700px]">
+                <>
+                <ul className="space-y-3 md:hidden">
+                  {closed.map((trade) => (
+                    <ClosedTradeCard
+                      key={`m-${trade.tradeId}`}
+                      trade={trade}
+                      expanded={expandedTrade === trade.id}
+                      onToggle={() => setExpandedTrade(expandedTrade === trade.id ? null : trade.id)}
+                    />
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto md:block">
+                  <Table className="min-w-[820px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-8"></TableHead>
                         <TableHead>Symbol</TableHead>
+                        <TableHead className="whitespace-nowrap">Opened / Closed</TableHead>
                         <TableHead>Side</TableHead>
                         <TableHead className="text-right">Entry</TableHead>
                         <TableHead className="text-right">Exit</TableHead>
@@ -282,6 +298,16 @@ export default function PositionHistoryPage() {
                                 {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                               </TableCell>
                               <TableCell className="font-medium">{trade.symbol}</TableCell>
+                              <TableCell className="whitespace-nowrap text-xs tabular-nums">
+                                <div>
+                                  <span className="text-muted-foreground">Opened </span>
+                                  {formatTimestamp(trade.entryTime)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Closed </span>
+                                  {formatTimestamp(trade.exitTime)}
+                                </div>
+                              </TableCell>
                               <TableCell>
                                 <Badge className={sideBadge(trade.side)}>{trade.side}</Badge>
                               </TableCell>
@@ -324,104 +350,8 @@ export default function PositionHistoryPage() {
                             </TableRow>
                             {isExpanded && (
                               <TableRow key={`detail-${trade.tradeId}`} className="bg-muted/30">
-                                <TableCell colSpan={15} className="py-3 px-4">
-                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs min-w-0">
-                                    <div>
-                                      <span className="text-muted-foreground">Outcome</span>
-                                      <p className={`font-bold ${trade.outcome === "WIN" ? "text-emerald-400" : trade.outcome === "LOSS" ? "text-red-400" : "text-zinc-400"}`}>
-                                        {trade.outcome === "WIN" ? "Won" : trade.outcome === "LOSS" ? "Lost" : "Breakeven"}
-                                        {" "}{pnlText(trade.profitLoss)}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Exit Reason</span>
-                                      <p className="font-bold">
-                                        <Badge className={exitReasonBadgeClass(trade.exitReason)}>
-                                          {exitReasonLabel(trade.exitReason)}
-                                        </Badge>
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">ROI</span>
-                                      <p className={`font-bold ${signClass(trade.percentage)}`}>
-                                        {trade.percentage >= 0 ? "+" : ""}{trade.percentage.toFixed(2)}%
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Gross Profit</span>
-                                      <p className={`font-medium ${signClass(trade.grossProfit)}`}>
-                                        {trade.grossProfit != null && trade.grossProfit !== 0
-                                          ? pnlText(trade.grossProfit)
-                                          : "—"}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Commission</span>
-                                      <p className="font-medium">-{trade.commission != null && trade.commission > 0 ? formatMoney(trade.commission) : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Funding</span>
-                                      <p className="font-medium">{trade.fundingFee != null && trade.fundingFee !== 0 ? (trade.fundingFee > 0 ? `-${formatMoney(trade.fundingFee)}` : `+${formatMoney(Math.abs(trade.fundingFee))}`) : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Net P&amp;L</span>
-                                      <p className={`font-bold ${signClass(trade.profitLoss)}`}>
-                                        {trade.profitLoss != null ? pnlText(trade.profitLoss) : "—"}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Bot</span>
-                                      <p className="font-medium">{trade.botName}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Strategy</span>
-                                      <p className="font-medium">{trade.strategy}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Investment</span>
-                                      <p className="font-medium">{formatMoney(trade.investment)}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Position Size</span>
-                                      <p className="font-medium">{trade.positionSize != null ? `${trade.positionSize.toFixed(4)} ${trade.symbol.replace("USDT", "")}` : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Stop Loss</span>
-                                      <p className="font-medium text-red-400">{trade.stopLoss != null ? formatPrice(trade.stopLoss) : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Take Profit</span>
-                                      <p className="font-medium text-emerald-400">{trade.takeProfit != null ? formatPrice(trade.takeProfit) : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Trailing Stop</span>
-                                      <p className="font-medium">{trade.trailingActivated ? "Activated" : "Not triggered"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Balance After</span>
-                                      <p className="font-medium">
-                                        {trade.balanceAfter != null
-                                          ? `${trade.balanceAfter >= 0 ? "" : "-"}${formatMoney(Math.abs(trade.balanceAfter))}`
-                                          : "—"}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Entry Time</span>
-                                      <p className="font-medium">{formatTimestamp(trade.entryTime)}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Exit Time</span>
-                                      <p className="font-medium">{formatTimestamp(trade.exitTime)}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Highest Price</span>
-                                      <p className="font-medium">{trade.highestPrice != null ? formatPrice(trade.highestPrice) : "—"}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-muted-foreground">Lowest Price</span>
-                                      <p className="font-medium">{trade.lowestPrice != null ? formatPrice(trade.lowestPrice) : "—"}</p>
-                                    </div>
-                                  </div>
+                                <TableCell colSpan={16} className="py-3 px-4">
+                                  <TradeDetailGrid trade={trade} className="grid-cols-2 sm:grid-cols-4" />
                                 </TableCell>
                               </TableRow>
                             )}
@@ -431,6 +361,7 @@ export default function PositionHistoryPage() {
                     </TableBody>
                   </Table>
                 </div>
+                </>
               )}
 
               {total > PAGE_SIZE && (
@@ -458,5 +389,148 @@ export default function PositionHistoryPage() {
         </>
       )}
     </div>
+  )
+}
+
+
+/** Full trade breakdown, shared by the desktop expanded row and the mobile card. */
+function TradeDetailGrid({ trade, className = "" }: { trade: ClosedTrade; className?: string }) {
+  return (
+    <div className={`grid gap-x-4 gap-y-3 text-xs min-w-0 ${className}`}>
+      <div>
+        <span className="text-muted-foreground">Outcome</span>
+        <p className={`font-bold ${trade.outcome === "WIN" ? "text-emerald-400" : trade.outcome === "LOSS" ? "text-red-400" : "text-zinc-400"}`}>
+          {trade.outcome === "WIN" ? "Won" : trade.outcome === "LOSS" ? "Lost" : "Breakeven"}
+          {" "}{pnlText(trade.profitLoss)}
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Exit Reason</span>
+        <p className="font-bold">
+          <Badge className={exitReasonBadgeClass(trade.exitReason)}>
+            {exitReasonLabel(trade.exitReason)}
+          </Badge>
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">ROI</span>
+        <p className={`font-bold ${signClass(trade.percentage)}`}>
+          {trade.percentage >= 0 ? "+" : ""}{trade.percentage.toFixed(2)}%
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Gross Profit</span>
+        <p className={`font-medium ${signClass(trade.grossProfit)}`}>
+          {trade.grossProfit != null && trade.grossProfit !== 0
+            ? pnlText(trade.grossProfit)
+            : "—"}
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Commission</span>
+        <p className="font-medium">-{trade.commission != null && trade.commission > 0 ? formatMoney(trade.commission) : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Funding</span>
+        <p className="font-medium">{trade.fundingFee != null && trade.fundingFee !== 0 ? (trade.fundingFee > 0 ? `-${formatMoney(trade.fundingFee)}` : `+${formatMoney(Math.abs(trade.fundingFee))}`) : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Net P&amp;L</span>
+        <p className={`font-bold ${signClass(trade.profitLoss)}`}>
+          {trade.profitLoss != null ? pnlText(trade.profitLoss) : "—"}
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Bot</span>
+        <p className="font-medium">{trade.botName}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Strategy</span>
+        <p className="font-medium">{trade.strategy}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Investment</span>
+        <p className="font-medium">{formatMoney(trade.investment)}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Position Size</span>
+        <p className="font-medium">{trade.positionSize != null ? `${trade.positionSize.toFixed(4)} ${trade.symbol.replace("USDT", "")}` : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Stop Loss</span>
+        <p className="font-medium text-red-400">{trade.stopLoss != null ? formatPrice(trade.stopLoss) : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Take Profit</span>
+        <p className="font-medium text-emerald-400">{trade.takeProfit != null ? formatPrice(trade.takeProfit) : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Trailing Stop</span>
+        <p className="font-medium">{trade.trailingActivated ? "Activated" : "Not triggered"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Balance After</span>
+        <p className="font-medium">
+          {trade.balanceAfter != null
+            ? `${trade.balanceAfter >= 0 ? "" : "-"}${formatMoney(Math.abs(trade.balanceAfter))}`
+            : "—"}
+        </p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Entry Time</span>
+        <p className="font-medium">{formatTimestamp(trade.entryTime)}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Exit Time</span>
+        <p className="font-medium">{formatTimestamp(trade.exitTime)}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Highest Price</span>
+        <p className="font-medium">{trade.highestPrice != null ? formatPrice(trade.highestPrice) : "—"}</p>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Lowest Price</span>
+        <p className="font-medium">{trade.lowestPrice != null ? formatPrice(trade.lowestPrice) : "—"}</p>
+      </div>
+    </div>
+  )
+}
+
+/** Mobile layout: one full-width card per closed trade; tap to expand the details. */
+function ClosedTradeCard({ trade, expanded, onToggle }: { trade: ClosedTrade; expanded: boolean; onToggle: () => void }) {
+  return (
+    <li className="rounded-lg border border-border bg-background/40">
+      <button type="button" onClick={onToggle} className="w-full space-y-2.5 p-3 text-left" aria-expanded={expanded}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-foreground">{trade.symbol}</span>
+            <Badge className={sideBadge(trade.side)}>{trade.side}</Badge>
+            <Badge className={exitReasonBadgeClass(trade.exitReason)}>{exitReasonLabel(trade.exitReason)}</Badge>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className={`text-sm font-semibold tabular-nums ${signClass(trade.profitLoss)}`}>{pnlText(trade.profitLoss)}</div>
+            <div className={`text-[11px] tabular-nums ${signClass(trade.percentage)}`}>
+              {trade.percentage >= 0 ? "+" : ""}{trade.percentage.toFixed(2)}%
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+          <div><span className="text-muted-foreground">Entry </span><span className="tabular-nums">{formatPrice(trade.entryPrice)}</span></div>
+          <div><span className="text-muted-foreground">Exit </span><span className="tabular-nums">{formatPrice(trade.exitPrice)}</span></div>
+          <div className="min-w-0"><span className="text-muted-foreground">Opened </span><span className="tabular-nums">{formatTimestamp(trade.entryTime)}</span></div>
+          <div className="min-w-0"><span className="text-muted-foreground">Closed </span><span className="tabular-nums">{formatTimestamp(trade.exitTime)}</span></div>
+          <div><span className="text-muted-foreground">Duration </span>{formatDuration(trade.durationMs)}</div>
+          <div><span className="text-muted-foreground">Leverage </span>{trade.leverage ? `${trade.leverage}x` : "—"}</div>
+        </div>
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {expanded ? "Hide details" : "Show details"}
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-t border-border bg-muted/30 p-3">
+          <TradeDetailGrid trade={trade} className="grid-cols-2" />
+        </div>
+      )}
+    </li>
   )
 }

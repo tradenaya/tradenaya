@@ -2,7 +2,8 @@
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { ChartSkeleton } from "@/components/ui/skeletons"
 import type { OutcomeAnalytics, TradeOutcome } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
@@ -18,7 +19,7 @@ const STATUS_META: Record<TradeOutcome, { label: string; color: string }> = {
 const STATUS_ORDER: TradeOutcome[] = ["WIN", "LOSS", "BREAKEVEN", "CANCELLED"]
 
 export function TradeOutcomesCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<OutcomeAnalytics>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<OutcomeAnalytics>(
     () => apiGet("/api/analytics/outcomes", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -34,8 +35,10 @@ export function TradeOutcomesCard({ filters }: { filters: AnalyticsFilterState }
         <CardDescription>Every closed trade classified by result</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-56 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load trade outcomes" onRetry={refresh} />
+        ) : loading && !data ? (
+          <ChartSkeleton height={224} />
         ) : (
           <>
             <div className="rounded-lg border border-border bg-background/40 px-3 py-2 text-sm">

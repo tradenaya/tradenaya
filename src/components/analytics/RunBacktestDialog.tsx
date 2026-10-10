@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { DatePicker } from "@/components/ui/date-picker"
 import type { BacktestConfig } from "@/automation/backtest/types"
 import { apiSend } from "./api"
+import { ErrorState } from "@/components/ui/error-state"
 
 const inputClass = "h-9 rounded-md border border-border bg-input px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
@@ -45,16 +46,18 @@ export function RunBacktestDialog({
   const [to, setTo] = useState(defaultTo)
   const [capital, setCapital] = useState("1000")
   const [leverage, setLeverage] = useState("5")
-  const [risk, setRisk] = useState("1.5")
+  const [risk, setRisk] = useState("5")
   const [dailyLoss, setDailyLoss] = useState("5")
-  const [trailing, setTrailing] = useState(true)
+  // Defaults mirror a newly created live bot so a backtest shows how new bots trade.
+  const [trailing, setTrailing] = useState(false)
+  const [momentumOnly, setMomentumOnly] = useState(true)
   const [trailingDist, setTrailingDist] = useState("1")
   const [feeBps, setFeeBps] = useState("5")
   const [slippageBps, setSlippageBps] = useState("0")
   const [policy, setPolicy] = useState("CONSERVATIVE")
   const [description, setDescription] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
 
   const submit = async () => {
     setError(null)
@@ -76,6 +79,7 @@ export function RunBacktestDialog({
       dailyLossLimit: Number(dailyLoss),
       enableTrailingStop: trailing,
       trailingDistancePercent: trailing ? Number(trailingDist) : 0,
+      momentumEntriesOnly: momentumOnly,
       feeRateBps: Number(feeBps),
       slippageBps: Number(slippageBps),
       executionPolicy: policy as BacktestConfig["executionPolicy"],
@@ -92,7 +96,7 @@ export function RunBacktestDialog({
       onCreated()
       onOpenChange(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to run backtest")
+      setError(e)
     } finally {
       setSubmitting(false)
     }
@@ -167,6 +171,16 @@ export function RunBacktestDialog({
               <option value="TARGET_FIRST">Target first</option>
             </select>
           </Field>
+          <Field label="Strong-momentum entries only">
+            <select
+              className={inputClass}
+              value={momentumOnly ? "on" : "off"}
+              onChange={(e) => setMomentumOnly(e.target.value === "on")}
+            >
+              <option value="on">On (like new bots)</option>
+              <option value="off">Off</option>
+            </select>
+          </Field>
           <Field label="Trailing stop">
             <select
               className={inputClass}
@@ -189,7 +203,7 @@ export function RunBacktestDialog({
           </div>
         </div>
 
-        {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</p>}
+        {error != null && <ErrorState error={error} title="Couldn't run the backtest" />}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>

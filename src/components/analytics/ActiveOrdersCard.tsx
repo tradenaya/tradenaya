@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -24,7 +25,7 @@ const KIND_BADGE: Record<string, { label: string; className: string }> = {
 }
 
 export function ActiveOrdersCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<ActiveOrderAnalytics[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<ActiveOrderAnalytics[]>(
     () => apiGet("/api/analytics/orders"),
     [filters.botId],
     { pollMs: 15_000 },
@@ -39,8 +40,10 @@ export function ActiveOrdersCard({ filters }: { filters: AnalyticsFilterState })
         <CardDescription>Working entries and protective exits</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-40 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load active orders" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={4} columns={6} />
         ) : orders.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No active orders.</p>
         ) : (

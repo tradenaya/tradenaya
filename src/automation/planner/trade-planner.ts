@@ -9,6 +9,7 @@ import type { RiskRewardValidator } from "./risk-reward-validator";
 import { DefaultRiskRewardValidator } from "./risk-reward-validator";
 import type { TradeValidator } from "./trade-validator";
 import { DefaultTradeValidator } from "./trade-validator";
+import { defaultEntryExpiryMinutes } from "./entry-expiry";
 
 export interface TradePlanner {
   plan(context: PlannerContext): TradePlan;
@@ -24,7 +25,7 @@ export class DefaultTradePlanner implements TradePlanner {
   ) {}
 
   plan(context: PlannerContext): TradePlan {
-    const expiryTime = this.computeExpiryTime(context.config.orderExpiryMinutes);
+    const expiryTime = this.computeExpiryTime(context.config.orderExpiryMinutes, context.config.timeframe);
     const decision = context.strategyDecision;
 
     if (decision.signal === "WAIT") {
@@ -107,8 +108,8 @@ export class DefaultTradePlanner implements TradePlanner {
       .join(" ");
   }
 
-  private computeExpiryTime(orderExpiryMinutes?: number): string {
-    const minutes = orderExpiryMinutes && orderExpiryMinutes > 0 ? orderExpiryMinutes : 120;
+  private computeExpiryTime(orderExpiryMinutes?: number, timeframe?: string): string {
+    const minutes = orderExpiryMinutes && orderExpiryMinutes > 0 ? orderExpiryMinutes : defaultEntryExpiryMinutes(timeframe);
     return new Date(Date.now() + minutes * 60 * 1000).toISOString();
   }
 }

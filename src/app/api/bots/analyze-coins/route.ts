@@ -6,6 +6,7 @@ import { serverMarketDataService } from "@/automation/market/service";
 import { normalizeInterval } from "@/automation/market/normalizer";
 import { botScheduler } from "@/automation/scheduler/BotScheduler";
 import { scanCandles, type CoinOpportunity } from "@/automation/opportunity/scanner";
+import { errorResponse } from "@/lib/api-error";
 
 interface TickerRow {
   symbol?: string;
@@ -117,6 +118,6 @@ export async function GET(req: NextRequest) {
     return ok(scanned);
   } catch (error: unknown) {
     console.error("ANALYZE COINS ERROR", error);
-    return fail(500, error instanceof Error ? error.message : "Failed to analyze coins");
+    return errorResponse(error, 500, "Failed to analyze coins", "/api/bots/analyze-coins");
   }
 }

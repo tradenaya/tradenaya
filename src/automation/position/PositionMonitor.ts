@@ -32,6 +32,8 @@ import {
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 const ENTRY_VISIBILITY_GRACE_MS = 10 * 60_000;
 const ENTRY_VALIDITY_INTERVAL_MS = 60_000;
+/** How often the "waiting for entry to fill" status is published to the live trace. */
+const WAITING_STATUS_INTERVAL_MS = 5 * 60_000;
 
 export class PositionMonitor {
   private readonly store: PositionStore;
@@ -47,6 +49,7 @@ export class PositionMonitor {
   private readonly config: PositionManagerConfig;
   private readonly protective: ProtectiveOrdersService;
   private readonly lastValidityCheck = new Map<number, number>();
+  private readonly lastWaitingPublish = new Map<number, number>();
 
   private timer: NodeJS.Timeout | null = null;
   private processing = new Set<number>();
@@ -410,9 +413,49 @@ export class PositionMonitor {
       hardCapCandles: hardCapCandles,
       regimeTolerancePct: regimeTolerancePct,
     });
-    if (result.keep) return null;
+    if (result.keep) {
+      this.publishWaitingForFill(position, limitPrice, resolvedPrice, execution?.expiresAt ?? null, result.driftBand ?? null, now);
+      return null;
+    }
     await this.log(position, "ENTRY_CANCELLED", result.reason ?? "entry invalidated by live market conditions");
     return result.reason ?? "entry invalidated";
+  }
+
+  /**
+   * Readable "why is nothing happening" line for a resting entry: where the
+   * order sits vs. the market, and exactly when/why it will be cancelled.
+   * Throttled so the live trace is not flooded every validity check.
+   */
+  private publishWaitingForFill(
+    position: PositionRecord,
+    limitPrice: number | null,
+    marketPrice: number,
+    expiresAt: number | null,
+    driftBand: number | null,
+    now: number,
+  ): void {
+    const last = this.lastWaitingPublish.get(position.id) ?? 0;
+    if (now - last < WAITING_STATUS_INTERVAL_MS || limitPrice == null || !(limitPrice > 0)) return;
+    this.lastWaitingPublish.set(position.id, now);
+
+    const awayPct = (Math.abs(marketPrice - limitPrice) / limitPrice) * 100;
+    const minutesLeft = expiresAt != null ? Math.max(0, Math.round((expiresAt - now) / 60_000)) : null;
+    const runAwayPct = driftBand != null ? (driftBand / limitPrice) * 100 : null;
+    const direction = position.side === "BUY" ? "rises" : "falls";
+    const parts = [
+      `Waiting for entry to fill — ${position.side} ${position.symbol} at ${limitPrice}, market ${marketPrice} (${awayPct.toFixed(2)}% away).`,
+      minutesLeft != null ? `Cancelled in ~${minutesLeft} min if not filled` : "Cancelled at expiry if not filled",
+      runAwayPct != null ? `, or sooner if price ${direction} more than ${runAwayPct.toFixed(2)}% beyond the entry (setup missed).` : ".",
+      " A new scan starts right after a cancel.",
+    ];
+    liveActivityHub.publish({
+      botId: position.botId,
+      userId: position.userId,
+      symbol: position.symbol,
+      phase: "lifecycle",
+      message: parts.join(""),
+      detail: { limitPrice, marketPrice, awayPct, minutesLeft, runAwayPct },
+    });
   }
 
   private async closeUnfilledEntry(position: PositionRecord, detail: string): Promise<void> {

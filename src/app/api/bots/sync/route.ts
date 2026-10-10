@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { fail, ok, requireUserId } from "@/app/api/bots/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 /**
  * POST /api/bots/sync
@@ -21,6 +22,6 @@ export async function POST(req: NextRequest) {
     return ok(summary);
   } catch (error: any) {
     console.error("[api] /api/bots/sync failed", error);
-    return fail(500, error?.message ?? "Failed to sync positions with exchange");
+    return errorResponse(error, 500, "Failed to sync positions with exchange", "/api/bots/sync");
   }
 }

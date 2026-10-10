@@ -1,11 +1,12 @@
 import { NextResponse, NextRequest } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
   try {
     const payload = { exchange: "EXCHANGE_2", limit: 50 };
-    const keys = await getKeysFromRequest(req as any);
+    const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
 
     const res = await fetch(url, {
@@ -27,6 +28,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, data: data.data });
   } catch (error: any) {
     console.log("ALL OPEN ORDERS ERROR", error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return errorResponse(error, 500, "Request failed", "/api/coinswitch/futures/all-open-orders");
   }
 }

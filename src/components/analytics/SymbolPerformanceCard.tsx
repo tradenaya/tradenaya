@@ -1,7 +1,8 @@
 "use client"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import {
   Table,
   TableBody,
@@ -16,7 +17,7 @@ import { useAsyncData } from "./use-data"
 import { formatMoney, formatPercent, pnlText, signClass } from "./format"
 
 export function SymbolPerformanceCard({ filters }: { filters: AnalyticsFilterState }) {
-  const { data, loading } = useAsyncData<SymbolPerformance[]>(
+  const { data, loading, errorInfo, refresh } = useAsyncData<SymbolPerformance[]>(
     () => apiGet("/api/analytics/symbols", toQuery(filters)),
     [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
   )
@@ -30,8 +31,10 @@ export function SymbolPerformanceCard({ filters }: { filters: AnalyticsFilterSta
         <CardDescription>PnL breakdown by trading pair</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
-        {loading && !data ? (
-          <Skeleton className="h-40 w-full rounded-lg" />
+        {errorInfo && !data ? (
+          <ErrorState error={errorInfo} title="Couldn't load symbol performance" onRetry={refresh} />
+        ) : loading && !data ? (
+          <TableSkeleton rows={5} columns={5} />
         ) : symbols.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">No data</p>
         ) : (

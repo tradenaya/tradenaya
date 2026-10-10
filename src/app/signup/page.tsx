@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock, Mail, User } from "lucide-react";
 import { toast } from "sonner";
+import { errorMessage, fetchJson } from "@/lib/api-client";
 
 import { Button } from "@/components/ui/button";
 import AuthShell from "@/components/auth/AuthShell";
@@ -31,19 +32,15 @@ export default function SignupPage() {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/signup", {
+      await fetchJson("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form }),
       });
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success("Account created — please sign in");
-        router.push("/signin");
-      } else {
-        toast.error(data.message || "Sign up failed");
-      }
+      toast.success("Account created — please sign in");
+      router.push("/signin");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Sign up failed"));
     } finally {
       setLoading(false);
     }

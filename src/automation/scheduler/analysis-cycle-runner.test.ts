@@ -435,3 +435,97 @@ describe("AnalysisCycleRunner — live risk gate stays authoritative and visible
     expect(scheduleNextRun.mock.calls.length).toBe(1);
   });
 });
+
+describe("AnalysisCycleRunner — auto-select falls through ranked coins", () => {
+  const autoBot: BotRuntimeState = {
+    ...RUNNING_BOT,
+    symbol: "AUTO",
+    configJson: JSON.stringify({ ...JSON.parse(RUNNING_BOT.configJson as string), autoSelect: true }),
+  };
+
+  const opportunity = (symbol: string, score: number): AutoBestOpportunity =>
+    ({ symbol, side: "LONG", instrument: null, leverage: 5, score, confidence: 0.7, price: 100_000, atrPct: 0.5, trend: "UP", factors: {} }) as unknown as AutoBestOpportunity;
+
+  function makeAutoRunner(opts: {
+    ranked: AutoBestOpportunity[];
+    engineRun: ReturnType<typeof vi.fn>;
+    execute: ReturnType<typeof vi.fn>;
+    dailyRealizedPnl?: number;
+  }) {
+    const scheduleNextRun = vi.fn(async () => {});
+    const runner = new AnalysisCycleRunner(
+      {
+        store: {
+          getBot: vi.fn(async () => autoBot),
+          hasActiveTradeForBot: vi.fn(async () => false),
+          getDailyStats: vi.fn(async () => ({ realizedPnl: opts.dailyRealizedPnl ?? 0, tradeCount: 0 })),
+        },
+        stateManager: { transition: vi.fn(async () => true) },
+        events: { emit: vi.fn(async () => {}) },
+        lifecycle: {
+          setRuntimeError: vi.fn(async () => {}),
+          updateBotHeartbeat: vi.fn(async () => {}),
+          updateHeartbeatAt: vi.fn(async () => {}),
+          countActiveBotsForUser: vi.fn(async () => 0),
+          setRetryCount: vi.fn(async () => {}),
+          scheduleNextRun,
+          setConfig: vi.fn(async () => {}),
+          updateSelectedCoin: vi.fn(async () => {}),
+        },
+        client: {
+          getWalletSnapshot: vi.fn(async () => ({ available: 85, total: 100, blocked: 15, positionMargin: 15, openOrderMargin: 0, equity: null })),
+          getPositions: vi.fn(async () => []),
+          getOpenOrders: vi.fn(async () => []),
+        },
+        engine: vi.fn(() => ({ run: opts.engineRun })),
+        riskManager: new DefaultRiskManager(),
+        executor: { execute: opts.execute },
+        config: { analysisIntervalMinutes: 5 },
+        refreshLease: vi.fn(async () => true),
+        coinAutoSelector: {
+          selectBestOpportunity: vi.fn(async () => opts.ranked[0] ?? null),
+          selectRankedOpportunities: vi.fn(async () => opts.ranked),
+        },
+      } as unknown as AnalysisCycleDependencies,
+    );
+    return { runner, scheduleNextRun };
+  }
+
+  it("tries the next coin in the same cycle when the top coin is rejected, and places the order there", async () => {
+    // SOL (top-ranked) is rejected by the planner; ETH is valid.
+    const engineRun = vi.fn(async (config: AutomationConfig) =>
+      config.symbol === "SOLUSDT"
+        ? { signal: "WAIT", analysis: { trend: "UP", confidence: 0, reasons: [], price: 100_000, summary: "R:R too low" } }
+        : { signal: "BUY", plan: { ...PLAN, symbol: config.symbol }, analysis: { trend: "UP", confidence: 0.8, reasons: [], price: 100_000, summary: "ok" } },
+    );
+    const execute = vi.fn(async () => ({ state: "CANCELLED", message: "executor cancelled", executionId: "x", filledQuantity: 0 }));
+    const { runner, scheduleNextRun } = makeAutoRunner({ ranked: [opportunity("SOLUSDT", 90), opportunity("ETHUSDT", 80), opportunity("XRPUSDT", 70)], engineRun, execute });
+
+    const result = await runner.runCycle(autoBot.id);
+
+    const symbolsRun = engineRun.mock.calls.map(([config]) => (config as AutomationConfig).symbol);
+    expect(symbolsRun).toEqual(["SOLUSDT", "ETHUSDT"]); // stops once an order was submitted
+    expect(execute).toHaveBeenCalledOnce();
+    expect((execute.mock.calls[0] as unknown[])[0]).toMatchObject({ plan: { symbol: "ETHUSDT" } });
+    expect(result.message).toContain("executor cancelled");
+    expect(scheduleNextRun).toHaveBeenCalledOnce();
+  });
+
+  it("stops after the first coin when an account-level limit (daily loss) rejects it", async () => {
+    const engineRun = vi.fn(async (config: AutomationConfig) => ({
+      signal: "BUY",
+      plan: { ...PLAN, symbol: config.symbol },
+      analysis: { trend: "UP", confidence: 0.8, reasons: [], price: 100_000, summary: "ok" },
+    }));
+    const execute = vi.fn();
+    // Daily loss limit 5% of 85 = 4.25; a -50 day breaches it for every coin.
+    const { runner, scheduleNextRun } = makeAutoRunner({ ranked: [opportunity("SOLUSDT", 90), opportunity("ETHUSDT", 80)], engineRun, execute, dailyRealizedPnl: -50 });
+
+    const result = await runner.runCycle(autoBot.id);
+
+    expect(engineRun).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.message).toMatch(/Daily loss limit/);
+    expect(scheduleNextRun).toHaveBeenCalledOnce();
+  });
+});

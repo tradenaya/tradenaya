@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/ui/error-state"
 import {
   Dialog,
   DialogContent,
@@ -61,23 +62,30 @@ export function BacktestDetailDialog({
   backtestId: number | null
 }) {
   const [data, setData] = useState<BacktestDetail | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
   const loading = data === null && error === null
 
   useEffect(() => {
     if (!open || backtestId == null) return
     let cancelled = false
+    // Clear the previous backtest so a different one never flashes stale data.
+    queueMicrotask(() => {
+      if (cancelled) return
+      setData(null)
+      setError(null)
+    })
     apiGet<BacktestDetail>(`/api/analytics/backtests/${backtestId}`)
       .then((detail) => {
         if (!cancelled) setData(detail)
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load backtest")
+        if (!cancelled) setError(e)
       })
     return () => {
       cancelled = true
     }
-  }, [open, backtestId])
+  }, [open, backtestId, attempt])
 
   const metrics = data?.metrics
 
@@ -101,7 +109,7 @@ export function BacktestDetailDialog({
           </div>
         )}
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error != null && <ErrorState error={error} title="Couldn't load the backtest" onRetry={() => setAttempt((a) => a + 1)} />}
 
         {data && (
           <div className="space-y-4">
@@ -109,6 +117,17 @@ export function BacktestDetailDialog({
               {STATUS_BADGE[data.status] && <Badge className={STATUS_BADGE[data.status].className}>{STATUS_BADGE[data.status].label}</Badge>}
               <Badge className="bg-muted text-muted-foreground">{data.executionPolicy ?? "—"} policy</Badge>
               <Badge className="bg-muted text-muted-foreground">{data.slippageApplied ? "Slippage on" : "No slippage"}</Badge>
+              {(() => {
+                const cfg = ((data as { config?: Record<string, unknown> | null }).config ?? {}) as Record<string, unknown>
+                return (
+                  <>
+                    <Badge className={cfg.momentumEntriesOnly === true ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"}>
+                      {cfg.momentumEntriesOnly === true ? "Strong-momentum entries only" : "All strategy entries"}
+                    </Badge>
+                    <Badge className="bg-muted text-muted-foreground">{cfg.enableTrailingStop === true ? "Trailing stop on" : "No trailing stop"}</Badge>
+                  </>
+                )
+              })()}
               {data.botId != null && <Badge className="bg-muted text-muted-foreground">bot #{data.botId}</Badge>}
             </div>
 
