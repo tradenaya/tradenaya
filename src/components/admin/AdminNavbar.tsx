@@ -3,6 +3,7 @@
 import { Menu, User, LogOut, Mail, Shield } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { adminLogout } from "@/store/slices/adminAuthSlice";
@@ -31,10 +32,29 @@ export default function AdminNavbar({ onMenuClick }: Props) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  /**
+   * Only clear the local session once the server has cleared the login cookie.
+   * If the request fails (e.g. no network) the cookie is still valid, so
+   * clearing local state would leave a half-logged-out screen — stay signed
+   * in and say why instead.
+   */
   async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
-      await fetch("/api/admin/signout", { method: "POST" });
-    } catch {}
+      const res = await fetch("/api/admin/signout", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      setLoggingOut(false);
+      toast.error("Couldn't log you out", {
+        description: navigator.onLine
+          ? "The server didn't respond. You're still signed in — please try again."
+          : "You're offline. You're still signed in — reconnect to the internet and try again.",
+      });
+      return;
+    }
 
     dispatch(adminLogout());
     dispatch(clearTenant());

@@ -25,7 +25,7 @@ import {
 import { formatTimestamp } from "@/components/analytics/format";
 import { orderTypeLabel, positionSideLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { convertUsdt, currencyLabel, getCurrencyState, formatDisplayPrice } from "@/lib/currency/store";
 
 type Position = ExchangePosition;
 
@@ -43,11 +43,17 @@ interface OpenOrder {
   updated_at?: string | number | null;
 }
 
-function money(value: string | number | null | undefined): string {
+/** Quantity in coin units — never currency-converted. */
+function qty(value: string | number | null | undefined): string {
   if (value == null) return "—";
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
   return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/** USDT price/amount in the chosen display currency. */
+function money(value: string | number | null | undefined): string {
+  return formatDisplayPrice(value);
 }
 
 function balance(value: string | number | null | undefined): string {
@@ -264,7 +270,7 @@ export default function AllPositionsPage() {
                              {positionSideLabel(pos.position_side)} {pos.leverage}x
                            </Badge>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{money(pos.position_size)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{qty(pos.position_size)}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(pos.avg_entry_price)}</TableCell>
                         <TableCell className="text-right tabular-nums hidden lg:table-cell">{money(pos.mark_price)}</TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden xl:table-cell">
@@ -364,7 +370,7 @@ export default function AllPositionsPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{orderTypeLabel(order.order_type)}</TableCell>
                       <TableCell className="text-muted-foreground">{order.status}</TableCell>
-                      <TableCell className="text-right tabular-nums">{money(order.quantity)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{qty(order.quantity)}</TableCell>
                       <TableCell className="text-right tabular-nums">{money(order.price)}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">
                         {(() => {

@@ -516,7 +516,7 @@ export class OrderExecutorService {
         ok: false,
         message:
           `Cannot open ${symbol} safely: this order needs ~${requiredMargin.toFixed(4)} USDT in margin ` +
-          `(${normalized.quantity} @ ${price}, 1/${input.leverage}x, fees included) but leaving a ${(headroom * 100).toFixed(0)}% headroom ` +
+          `(${normalized.quantity} @ ${price} USDT, 1/${input.leverage}x, fees included) but leaving a ${(headroom * 100).toFixed(0)}% headroom ` +
           `only ${spendable.toFixed(4)} USDT of your ${available.toFixed(4)} USDT free balance is usable. ` +
           `Reduce your capital allocation (e.g. to ~${maxSafeAllocationPct(available, headroom, MARGIN_FEE_BUFFER).toFixed(0)}%) or lower leverage so the order no longer consumes the whole available balance.`,
       };

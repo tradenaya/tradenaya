@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ErrorState } from "@/components/ui/error-state";
 import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
+import { formatDisplayPrice, formatUsdtAmount, localizeUsdtText } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface InstrumentInfo {
   min_base_quantity: string;
@@ -56,6 +58,7 @@ export default function PlaceOrderPanel({
   symbol: string;
   markPrice: number | null;
 }) {
+  const currency = useDisplayCurrency();
   const [side, setSide] = useState<Side>("BUY");
   const [orderType, setOrderType] = useState<OrderType>("MARKET");
   const [limitPrice, setLimitPrice] = useState("");
@@ -183,7 +186,7 @@ export default function PlaceOrderPanel({
     }
     if (marginNeeded != null && available != null && available >= 0 && marginNeeded > available) {
       validationErrors.push(
-        `Margin needed ${marginNeeded.toFixed(2)} USDT exceeds available balance ${available.toFixed(2)} USDT.`,
+        localizeUsdtText(`Margin needed ${marginNeeded.toFixed(2)} USDT exceeds available balance ${available.toFixed(2)} USDT.`),
       );
     }
   }
@@ -445,6 +448,11 @@ export default function PlaceOrderPanel({
               onChange={(e) => setLimitPrice(e.target.value)}
               placeholder={pricePrecision != null ? `0.${"0".repeat(Math.min(pricePrecision, 8))}` : "0.00"}
             />
+            {currency.currency === "INR" && toNum(limitPrice) != null && (
+              <p className="text-xs text-muted-foreground">
+                Orders are placed in USDT · ≈ {formatDisplayPrice(toNum(limitPrice))}
+              </p>
+            )}
           </div>
         )}
 
@@ -504,7 +512,7 @@ export default function PlaceOrderPanel({
             Position Size — {pct}% of available balance
             {available !== null && (
               <span className="ml-1 text-xs text-muted-foreground">
-                ({available.toFixed(2)} USDT available)
+                ({formatUsdtAmount(available)} available)
               </span>
             )}
           </Label>
@@ -544,21 +552,21 @@ export default function PlaceOrderPanel({
           {notional != null && (
             <div className="mt-1 flex justify-between text-xs text-muted-foreground">
               <span>Notional</span>
-              <span>{notional.toFixed(2)} USDT</span>
+              <span>{formatUsdtAmount(notional)}</span>
             </div>
           )}
           {marginNeeded != null && (
             <div className="mt-1 flex justify-between text-xs text-muted-foreground">
               <span>Margin needed @ {leverage}x</span>
               <span className={available != null && marginNeeded > available ? "text-red-400" : ""}>
-                {marginNeeded.toFixed(2)} USDT
+                {formatUsdtAmount(marginNeeded)}
               </span>
             </div>
           )}
           {estFee != null && estFee > 0 && (
             <div className="mt-1 flex justify-between text-xs text-muted-foreground">
               <span>Est. entry fee ({((takerFeeRate ?? 0) * 100).toFixed(3)}%)</span>
-              <span>{estFee.toFixed(4)} USDT</span>
+              <span>{formatUsdtAmount(estFee, 4)}</span>
             </div>
           )}
           {instrument && (

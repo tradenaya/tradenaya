@@ -18,7 +18,7 @@ import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { convertUsdt, currencyLabel, getCurrencyState, formatDisplayPrice } from "@/lib/currency/store";
 
 export interface ExchangePosition {
   position_id: string;
@@ -69,7 +69,13 @@ function num(value: string | number | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** USDT price/amount in the chosen display currency. */
 function money(value: number | string | null | undefined, digits = 4): string {
+  return formatDisplayPrice(num(value), digits);
+}
+
+/** Quantity in coin units — never currency-converted. */
+function qty(value: number | string | null | undefined, digits = 4): string {
   const n = num(value);
   if (n == null) return "—";
   return n.toLocaleString("en-US", { maximumFractionDigits: digits });
@@ -292,7 +298,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               ])}
 
               {rows("Position", [
-                { label: "Size", value: money(position.position_size) },
+                { label: "Size", value: qty(position.position_size) },
                 { label: "Margin", value: money(margin) },
                 {
                   label: "Est. Liq. distance",

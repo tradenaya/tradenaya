@@ -72,7 +72,7 @@ export class TradenayaSmartV1Strategy implements BaseStrategy {
     const mediumView = mediumCandles.length > 0 ? buildMarketView(mediumCandles, thresholds) : null;
 
     report?.(
-      `Entry: price ${round(entryView.price)} · RSI ${roundOpt(lastValue(entryView.rsi))} · ADX ${roundOpt(lastValue(entryView.adx))} · ATR% ${entryView.price > 0 ? round((entryView.atrValue / entryView.price) * 100) : null}`,
+      `Entry: price ${round(entryView.price)} USDT · RSI ${roundOpt(lastValue(entryView.rsi))} · ADX ${roundOpt(lastValue(entryView.adx))} · ATR% ${entryView.price > 0 ? round((entryView.atrValue / entryView.price) * 100) : null}`,
       { price: round(entryView.price), rsi: roundOpt(lastValue(entryView.rsi)), adx: roundOpt(lastValue(entryView.adx)) },
     );
 

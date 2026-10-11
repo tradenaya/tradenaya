@@ -1,19 +1,17 @@
 /**
- * INR → USDT conversion helpers for CoinSwitch PRO Spot trading.
+ * INR ⇄ USDT conversion helpers for CoinSwitch PRO Spot trading.
  *
  * Deposited INR sits in the user's CoinSwitch exchange (spot) wallet but the
  * automation trades USDT-margined futures. These helpers read the spot wallet,
  * find the live USDT/INR price, place a spot BUY order on the `coinswitchx`
  * INR venue at the current market price, and report what was actually filled.
  *
- * The spot exchange API currently accepts LIMIT orders only, so "buy at market"
- * is implemented as a LIMIT order priced at the best ask, polled until it fills
- * (with a market-order attempt first, dropped to limit automatically if the
- * exchange rejects the `type`).
+ * The spot exchange API accepts LIMIT orders only, so "convert at market" is a
+ * LIMIT order at the best ask (INR→USDT buy) or best bid (USDT→INR sell),
+ * polled until it fills.
  */
 
 import { buildSignedRequest } from "./reference-client";
-import crypto from "crypto";
 
 export interface CoinSwitchKeys {
   apiKey: string;
@@ -324,6 +322,23 @@ export async function getUsdtInrBestAsk(keys: CoinSwitchKeys): Promise<number | 
   }
 }
 
+/** Highest bid price for USDT/INR — the effective market sell price for a seller. */
+export async function getUsdtInrBestBid(keys: CoinSwitchKeys): Promise<number | null> {
+  try {
+    const { ok, body } = await signed("GET", "/depth", { exchange: "coinswitchx", symbol: "USDT/INR", limit: 5 }, keys);
+    if (!ok) return null;
+    const data = body?.data ?? body;
+    const bids: unknown[] = Array.isArray(data?.bids) ? data.bids : Array.isArray(data?.data?.bids) ? data.data.bids : [];
+    const prices = bids
+      .map((row: any) => (Array.isArray(row) ? toNumber(row[0]) : toNumber(row?.price)))
+      .filter((p) => Number.isFinite(p) && p > 0) as number[];
+    if (prices.length === 0) return null;
+    return Math.max(...prices);
+  } catch {
+    return null;
+  }
+}
+
 export interface SpotOrderLike {
   order_id?: string;
   client_order_id?: string;
@@ -359,64 +374,117 @@ async function cancelSpotOrderById(keys: CoinSwitchKeys, orderId: string): Promi
   }
 }
 
-const FILLED_LIKE = /executed|filled|complete|done|success/i;
-const CLOSED_LIKE = /cancel|expire|reject|fail|insufficient|error/i;
+/** Fully filled. "PARTIALLY_EXECUTED" must NOT match — it is still open. */
+const FULLY_FILLED = /^(executed|filled|completed?|done|success)$/i;
+const CLOSED_LIKE = /cancel|expire|reject|fail|insufficient|error|discard/i;
 
-/**
- * Poll a spot order until it fills (success) or reaches a terminal state.
- * Returns the executed quantity, average fill price and status.
- */
-async function waitForFill(keys: CoinSwitchKeys, orderId: string, timeoutMs = 14_000, intervalMs = 1_500): Promise<{ executed: number; rate: number; fee: number | null; status: string; stillOpen: boolean }> {
-  const started = Date.now();
-  let lastOrder: SpotOrderLike | null = null;
+interface FillResult {
+  executed: number;
+  rate: number;
+  fee: number | null;
+  status: string;
+}
 
-  while (Date.now() - started < timeoutMs) {
-    lastOrder = await getSpotOrderById(keys, orderId);
-    if (lastOrder) {
-      const status = String(lastOrder.status ?? "");
-      const executed = toNumber(lastOrder.executed_qty) || 0;
-      if (executed > 0) {
-        return {
-          executed,
-          rate: toNumber(lastOrder.average_price ?? lastOrder.avg_price) || 0,
-          fee: toNumber(lastOrder.execution_fee ?? lastOrder.fee ?? lastOrder.fees) || null,
-          status: status || "EXECUTED",
-          stillOpen: false,
-        };
-      }
-      if (CLOSED_LIKE.test(status)) {
-        return { executed: 0, rate: 0, fee: null, status: status || "CLOSED", stillOpen: false };
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-
-  lastOrder = lastOrder ?? (await getSpotOrderById(keys, orderId));
-  if (lastOrder) {
-    const executed = toNumber(lastOrder.executed_qty) || 0;
-    if (executed > 0) {
-      return {
-        executed,
-        rate: toNumber(lastOrder.average_price ?? lastOrder.avg_price) || 0,
-        fee: toNumber(lastOrder.execution_fee ?? lastOrder.fee ?? lastOrder.fees) || null,
-        status: String(lastOrder.status ?? "PARTIALLY_EXECUTED"),
-        stillOpen: false,
-      };
-    }
-    const status = String(lastOrder.status ?? "");
-    if (!FILLED_LIKE.test(status)) {
-      await cancelSpotOrderById(keys, orderId);
-      return { executed: 0, rate: 0, fee: null, status: status || "OPEN", stillOpen: false };
-    }
-  }
-
-  return { executed: 0, rate: 0, fee: null, status: "TIMEOUT", stillOpen: true };
+function fillOf(order: SpotOrderLike, fallbackStatus: string): FillResult {
+  return {
+    executed: toNumber(order.executed_qty) || 0,
+    rate: toNumber(order.average_price ?? order.avg_price) || 0,
+    fee: toNumber(order.execution_fee ?? order.fee ?? order.fees) || null,
+    status: String(order.status ?? "") || fallbackStatus,
+  };
 }
 
 /**
- * Convert an INR amount into USDT via a spot market buy on CoinSwitch.
- * Throws a human-readable Error on any failure (insufficient balance, no spot
- * access, min amount, price moved before fill, ...).
+ * Poll a spot order until it fully fills or closes. If it is still (partly)
+ * open at the timeout, cancel the remainder and report exactly what executed,
+ * so the result never claims more — or less — than really moved.
+ */
+async function waitForFill(keys: CoinSwitchKeys, orderId: string, timeoutMs = 12_000, intervalMs = 1_500): Promise<FillResult> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const order = await getSpotOrderById(keys, orderId);
+    if (order) {
+      const status = String(order.status ?? "");
+      if (FULLY_FILLED.test(status) || CLOSED_LIKE.test(status)) return fillOf(order, status);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  await cancelSpotOrderById(keys, orderId);
+  const final = await getSpotOrderById(keys, orderId);
+  return final ? fillOf(final, "CANCELLED") : { executed: 0, rate: 0, fee: null, status: "UNKNOWN" };
+}
+
+function exchangeRejection(body: any): Error {
+  const msg = firstMessage(body);
+  if (/\binvalid access\b/i.test(msg)) {
+    return new Error(
+      "Your CoinSwitch API key does not have Spot (INR) trading permission. Enable Spot trading in CoinSwitch PRO → API Trading → Permissions, or reconnect with a key that has spot access.",
+    );
+  }
+  return new Error(msg ? `CoinSwitch rejected the order: ${msg}` : "CoinSwitch rejected the order. Please try again.");
+}
+
+/**
+ * Place a USDT/INR LIMIT order at the live top of book and wait for it to fill.
+ * The CoinSwitch spot API only accepts limit orders (side, symbol, type, price,
+ * quantity, exchange), so "convert at market" = limit at the best ask (buy) or
+ * best bid (sell). If the book moves away before it fills, the remainder is
+ * cancelled and re-quoted once.
+ */
+async function executeUsdtInr(
+  keys: CoinSwitchKeys,
+  side: "buy" | "sell",
+  /** Quantity to order at `price`, given what earlier attempts already filled. */
+  sizeAt: (price: number, done: { executed: number; notional: number }) => number | Error,
+  quotePrecision: number,
+): Promise<{ executed: number; rate: number; fee: number | null; status: string; orderId: string; lastPrice: number }> {
+  let executed = 0;
+  let notional = 0;
+  let fee: number | null = null;
+  let status = "";
+  let orderId = "";
+  let lastPrice = 0;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const quote = side === "buy" ? await getUsdtInrBestAsk(keys) : await getUsdtInrBestBid(keys);
+    if (quote == null) throw new Error("Could not fetch the current USDT/INR price from the exchange. Please try again.");
+    const price = side === "buy" ? ceilTo(quote, quotePrecision) : floorTo(quote, quotePrecision);
+    lastPrice = price;
+
+    const quantity = sizeAt(price, { executed, notional });
+    if (quantity instanceof Error) {
+      if (executed > 0) break; // the first attempt already filled most of it
+      throw quantity;
+    }
+    if (quantity <= 0) break;
+
+    const placed = await placeSpotOrder(keys, { side, symbol: "USDT/INR", type: "limit", price, quantity, exchange: "coinswitchx" });
+    if (!placed.ok) {
+      if (executed > 0) break;
+      throw exchangeRejection(placed.body);
+    }
+    orderId = placed.order?.order_id ?? orderId;
+    if (!placed.order?.order_id) throw new Error("The exchange did not return an order ID. Please check your CoinSwitch order history.");
+
+    const fill = await waitForFill(keys, placed.order.order_id);
+    status = fill.status;
+    if (fill.executed > 0) {
+      executed += fill.executed;
+      notional += fill.executed * (fill.rate > 0 ? fill.rate : price);
+      if (fill.fee != null) fee = (fee ?? 0) + fill.fee;
+    }
+    if (FULLY_FILLED.test(fill.status)) break;
+  }
+
+  return { executed, rate: executed > 0 ? notional / executed : 0, fee, status: status || "UNKNOWN", orderId, lastPrice };
+}
+
+/** Headroom so a "Max" order still covers the exchange's trading fee. */
+const SPOT_FEE_BUFFER = 0.005;
+
+/**
+ * Convert an INR amount into USDT (spot BUY of USDT/INR on CoinSwitch).
+ * Throws a human-readable Error on any failure.
  */
 export async function convertInrToUsdt(keys: CoinSwitchKeys, amountInr: number): Promise<ConversionResult> {
   if (!Number.isFinite(amountInr) || amountInr <= 0) {
@@ -444,89 +512,119 @@ export async function convertInrToUsdt(keys: CoinSwitchKeys, amountInr: number):
   const basePrecision = orderInfo?.basePrecision ?? 6;
   const quotePrecision = orderInfo?.quotePrecision ?? 2;
 
-  const placeData = (ask: number): { price: number; quantity: number } | Error => {
-    const price = ceilTo(ask, quotePrecision);
-    if (!Number.isFinite(price) || price <= 0) return new Error("Could not determine the current USDT price.");
-    const quantity = floorTo(amountInr / price, basePrecision);
-    if (quantity <= 0) return new Error("The amount is too small at the current USDT price. Try a bigger amount.");
-    return { price, quantity };
-  };
+  // Spending (almost) the whole INR balance leaves nothing for the fee, which
+  // the exchange rejects as insufficient balance — keep a small buffer then.
+  const budget = amountInr * (1 + SPOT_FEE_BUFFER) > inrAvailable ? amountInr / (1 + SPOT_FEE_BUFFER) : amountInr;
+  const run = await executeUsdtInr(
+    keys,
+    "buy",
+    (price, done) => {
+      const left = budget - done.notional;
+      let quantity = floorTo(left / price, basePrecision);
+      // Rounding the quantity down puts the order value just under the amount
+      // typed — at the ₹ minimum that is below what CoinSwitch accepts. Round
+      // up to the minimum instead when the wallet still covers it + the fee.
+      if (quantity * price < minOrderInr) {
+        const atMin = ceilTo(minOrderInr / price, basePrecision);
+        if (done.executed === 0 && atMin * price * (1 + SPOT_FEE_BUFFER) <= inrAvailable) {
+          quantity = atMin;
+        } else {
+          return new Error(
+            `CoinSwitch needs at least ₹${minOrderInr.toLocaleString("en-IN")} per order, plus a little extra INR for the trading fee. ` +
+              `Your wallet has ₹${inrAvailable.toLocaleString("en-IN", { maximumFractionDigits: 2 })} — try a slightly bigger amount, or add INR first.`,
+          );
+        }
+      }
+      return quantity;
+    },
+    quotePrecision,
+  );
 
-  let ask = await getUsdtInrBestAsk(keys);
-  if (ask == null) throw new Error("Could not fetch the current USDT price from the exchange. Please try again.");
-  let sized = placeData(ask);
-  if (sized instanceof Error) throw sized;
-
-  const clientOrderId = crypto.randomUUID();
-  let placed: { ok: boolean; status: number; body: any; order: SpotOrderLike | null };
-  let orderId = "";
-
-  const marketBody = {
-    side: "buy",
-    symbol: "USDT/INR",
-    type: "market",
-    quantity: sized.quantity,
-    exchange: "coinswitchx",
-    client_order_id: clientOrderId,
-    expiry_period: 60,
-  };
-
-  placed = await placeSpotOrder(keys, marketBody);
-
-  if (!placed.ok) {
-    const msg = firstMessage(placed.body);
-    // The spot endpoint currently accepts LIMIT orders only — drop to a limit
-    // order priced at the freshly-quoted ask when the exchange rejects `type`.
-    if (/type|market/i.test(msg)) {
-      ask = await getUsdtInrBestAsk(keys);
-      if (ask == null) throw new Error("Could not re-quote the USDT price. Please try again.");
-      sized = placeData(ask);
-      if (sized instanceof Error) throw sized;
-      placed = await placeSpotOrder(keys, {
-        ...marketBody,
-        type: "limit",
-        price: sized.price,
-        // A limit buy is intentionally slightly above the last trade so it
-        // fills at the ask instead of sitting unfilled.
-        expiry_period: 60,
-      });
-    }
+  if (run.executed <= 0) {
+    throw new Error("Your INR→USDT conversion didn't fill at the current market price — no money was moved. Please try again.");
   }
 
-  if (!placed.ok) {
-    const msg = firstMessage(placed.body);
-    if (/\binvalid access\b/i.test(msg)) {
-      throw new Error(
-        "Your CoinSwitch API key does not have Spot (INR) trading permission. Enable Spot trading in CoinSwitch PRO → API Trading → Permissions, or reconnect with a key that has spot access.",
-      );
-    }
-    if (/insufficient|balance|amount/i.test(msg)) {
-      throw new Error(`The exchange rejected the order: ${msg}`);
-    }
-    throw new Error(msg ? `CoinSwitch rejected the order: ${msg}` : "CoinSwitch rejected the order. Please try again.");
-  }
-
-  orderId = placed.order?.order_id ?? "";
-  if (!orderId) throw new Error("The exchange did not return an order ID. Please try again.");
-
-  const fill = await waitForFill(keys, orderId);
-
-  if (fill.executed <= 0) {
-    throw new Error("Your INR→USDT conversion didn't fill at the current market price — no money was moved. Please try again.")
-  }
-
-  const rate = fill.rate > 0 ? fill.rate : ask;
-  const inrSpent = fill.executed * rate;
-
+  const rate = run.rate > 0 ? run.rate : run.lastPrice;
   return {
     amountInr,
-    inrSpent,
-    usdtReceived: fill.executed,
+    inrSpent: run.executed * rate,
+    usdtReceived: run.executed,
     rate,
-    fee: fill.fee,
-    orderId,
-    clientOrderId,
-    status: fill.status,
+    fee: run.fee,
+    orderId: run.orderId,
+    clientOrderId: run.orderId,
+    status: run.status,
+  };
+}
+
+export interface SellResult {
+  amountUsdt: number;
+  usdtSold: number;
+  inrReceived: number;
+  rate: number;
+  fee: number | null;
+  orderId: string;
+  status: string;
+}
+
+/**
+ * Convert USDT into INR (spot SELL of USDT/INR on CoinSwitch). Sells from the
+ * spot (exchange) wallet — USDT in the Futures wallet must be transferred to
+ * spot in CoinSwitch first.
+ */
+export async function convertUsdtToInr(keys: CoinSwitchKeys, amountUsdt: number): Promise<SellResult> {
+  if (!Number.isFinite(amountUsdt) || amountUsdt <= 0) {
+    throw new Error("Enter an amount greater than zero.");
+  }
+
+  const holdings = await getSpotHoldings(keys);
+  const usdtHolding = holdings.find(isUsdtHolding);
+  const usdtAvailable = usdtHolding ? toNumber(usdtHolding.main_balance) || 0 : 0;
+  if (amountUsdt > usdtAvailable + 0.000001) {
+    throw new Error(
+      `Insufficient USDT in your CoinSwitch spot wallet — you are selling ${amountUsdt} USDT but it has ${usdtAvailable.toLocaleString("en-US", { maximumFractionDigits: 6 })} USDT. ` +
+        "USDT in your Futures wallet must first be moved to the spot wallet in CoinSwitch PRO → Wallet → Transfer.",
+    );
+  }
+
+  const orderInfo = (await getUsdtInrOrderInfo(keys)) ?? null;
+  const minOrderInr = orderInfo?.minOrderInr ?? 100;
+  const maxOrderInr = orderInfo?.maxOrderInr ?? null;
+  const basePrecision = orderInfo?.basePrecision ?? 6;
+  const quotePrecision = orderInfo?.quotePrecision ?? 2;
+
+  const run = await executeUsdtInr(
+    keys,
+    "sell",
+    (price, done) => {
+      const quantity = floorTo(amountUsdt - done.executed, basePrecision);
+      const valueInr = quantity * price;
+      if (quantity <= 0 || valueInr < minOrderInr) {
+        return new Error(
+          `The minimum conversion on CoinSwitch is ₹${minOrderInr.toLocaleString("en-IN")} — ${quantity} USDT is only about ₹${valueInr.toLocaleString("en-IN", { maximumFractionDigits: 2 })} at the current price.`,
+        );
+      }
+      if (maxOrderInr != null && valueInr > maxOrderInr) {
+        return new Error(`One conversion order is capped at ₹${maxOrderInr.toLocaleString("en-IN")} on CoinSwitch. Try a smaller amount.`);
+      }
+      return quantity;
+    },
+    quotePrecision,
+  );
+
+  if (run.executed <= 0) {
+    throw new Error("Your USDT→INR conversion didn't fill at the current market price — no money was moved. Please try again.");
+  }
+
+  const rate = run.rate > 0 ? run.rate : run.lastPrice;
+  return {
+    amountUsdt,
+    usdtSold: run.executed,
+    inrReceived: run.executed * rate,
+    rate,
+    fee: run.fee,
+    orderId: run.orderId,
+    status: run.status,
   };
 }
 

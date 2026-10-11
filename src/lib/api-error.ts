@@ -97,9 +97,14 @@ export function describeError(error: unknown): { message: string; details: ApiEr
   const stack = str(e.stack);
   if (stack) details.stack = stack.split("\n").slice(1, 6).map((line) => line.trim()).filter(Boolean);
 
+  // mysql2 marks connection-level failures as fatal; "connect ETIMEDOUT" alone
+  // doesn't tell anyone the database is the thing that's unreachable.
+  const dbUnreachable = e.fatal === true && /^(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|PROTOCOL_CONNECTION_LOST)$/.test(details.code ?? "");
   const message = details.sqlMessage
     ? `Database error${details.code ? ` (${details.code})` : ""}: ${details.sqlMessage}`
-    : details.detail ?? (details.code ? `Error ${details.code}` : "Unknown error");
+    : dbUnreachable
+      ? `The server can't reach its database (${details.code}). Check that the database is running and reachable from the server, then try again.`
+      : details.detail ?? (details.code ? `Error ${details.code}` : "Unknown error");
   return { message, details };
 }
 

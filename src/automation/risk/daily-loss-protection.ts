@@ -13,13 +13,13 @@ export class DefaultDailyLossProtection implements DailyLossProtection {
       checks.push({
         name: "daily-loss-limit",
         passed: false,
-        message: `Daily loss limit reached: ${daily.realizedPnl.toFixed(2)} is at or beyond the limit of -${lossLimit.toFixed(2)}.`,
+        message: `Daily loss limit reached: ${daily.realizedPnl.toFixed(2)} USDT is at or beyond the limit of -${lossLimit.toFixed(2)} USDT.`,
       });
     } else {
       checks.push({
         name: "daily-loss-limit",
         passed: true,
-        message: `Daily PnL ${daily.realizedPnl.toFixed(2)} is within the loss limit of -${lossLimit.toFixed(2)}.`,
+        message: `Daily PnL ${daily.realizedPnl.toFixed(2)} USDT is within the loss limit of -${lossLimit.toFixed(2)} USDT.`,
       });
     }
 

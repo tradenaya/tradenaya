@@ -14,6 +14,7 @@ import {
 import type { TradeDetail } from "@/automation/analytics/types"
 import { apiGet } from "./api"
 import { formatDate, formatDuration, formatMoney, formatPrice, pnlText, signClass } from "./format"
+import { localizeUsdtText } from "@/lib/currency/store"
 
 function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
@@ -113,7 +114,7 @@ export function TradeDetailDialog({
                     <li key={event.id} className="flex items-start justify-between gap-3 text-xs">
                       <span className="text-foreground">
                         <span className="mr-1.5 font-medium text-muted-foreground">{event.type}</span>
-                        {event.message}
+                        {localizeUsdtText(event.message)}
                       </span>
                       <span className="shrink-0 text-muted-foreground">{formatDate(event.timestamp)}</span>
                     </li>

@@ -84,18 +84,18 @@ export function evaluateEntryValidity(ctx: EntryValidityContext): EntryValidityR
   const regimeTol = (ctx.regimeTolerancePct ?? 0.3) / 100;
   if (base.ema20 != null && base.ema50 != null) {
     if (ctx.side === "BUY" && base.ema20 < base.ema50 * (1 - regimeTol)) {
-      hard.push(`base trend flipped bearish (EMA20 ${base.ema20.toFixed(2)} < EMA50 ${base.ema50.toFixed(2)}; ${(100 * (base.ema20 - base.ema50) / base.ema50).toFixed(2)}% under EMA50)`);
+      hard.push(`base trend flipped bearish (EMA20 ${base.ema20.toFixed(2)} USDT < EMA50 ${base.ema50.toFixed(2)} USDT; ${(100 * (base.ema20 - base.ema50) / base.ema50).toFixed(2)}% under EMA50)`);
     }
     if (ctx.side === "SELL" && base.ema20 > base.ema50 * (1 + regimeTol)) {
-      hard.push(`base trend flipped bullish (EMA20 ${base.ema20.toFixed(2)} > EMA50 ${base.ema50.toFixed(2)}; ${(100 * (base.ema20 - base.ema50) / base.ema50).toFixed(2)}% above EMA50)`);
+      hard.push(`base trend flipped bullish (EMA20 ${base.ema20.toFixed(2)} USDT > EMA50 ${base.ema50.toFixed(2)} USDT; ${(100 * (base.ema20 - base.ema50) / base.ema50).toFixed(2)}% above EMA50)`);
     }
   }
   if (htf && htf.ema20 != null && htf.ema50 != null) {
     if (ctx.side === "BUY" && htf.ema20 < htf.ema50 * (1 - regimeTol)) {
-      hard.push(`higher-timeframe regime flipped down (HTF EMA20 ${htf.ema20.toFixed(2)} < EMA50 ${htf.ema50.toFixed(2)}; ${(100 * (htf.ema20 - htf.ema50) / htf.ema50).toFixed(2)}% under EMA50)`);
+      hard.push(`higher-timeframe regime flipped down (HTF EMA20 ${htf.ema20.toFixed(2)} USDT < EMA50 ${htf.ema50.toFixed(2)} USDT; ${(100 * (htf.ema20 - htf.ema50) / htf.ema50).toFixed(2)}% under EMA50)`);
     }
     if (ctx.side === "SELL" && htf.ema20 > htf.ema50 * (1 + regimeTol)) {
-      hard.push(`higher-timeframe regime flipped up (HTF EMA20 ${htf.ema20.toFixed(2)} > EMA50 ${htf.ema50.toFixed(2)}; ${(100 * (htf.ema20 - htf.ema50) / htf.ema50).toFixed(2)}% above EMA50)`);
+      hard.push(`higher-timeframe regime flipped up (HTF EMA20 ${htf.ema20.toFixed(2)} USDT > EMA50 ${htf.ema50.toFixed(2)} USDT; ${(100 * (htf.ema20 - htf.ema50) / htf.ema50).toFixed(2)}% above EMA50)`);
     }
   }
 
@@ -131,12 +131,12 @@ export function evaluateEntryValidity(ctx: EntryValidityContext): EntryValidityR
     if (ctx.side === "BUY" && ctx.marketPrice > ctx.limitPrice + band) {
       const movePct = (100 * (ctx.marketPrice - ctx.limitPrice) / ctx.limitPrice).toFixed(1);
       const moves = ((ctx.marketPrice - ctx.limitPrice) / band).toFixed(1);
-      hard.push(`price moved ${movePct}% above the buy level (${moves}x drift band = ${driftAtrUsed}xATR(${atr.toFixed(2)}); entry zone broken)`);
+      hard.push(`price moved ${movePct}% above the buy level (${moves}x drift band = ${driftAtrUsed}xATR(${atr.toFixed(2)} USDT); entry zone broken)`);
     }
     if (ctx.side === "SELL" && ctx.marketPrice < ctx.limitPrice - band) {
       const movePct = (100 * (ctx.limitPrice - ctx.marketPrice) / ctx.limitPrice).toFixed(1);
       const moves = ((ctx.limitPrice - ctx.marketPrice) / band).toFixed(1);
-      hard.push(`price moved ${movePct}% below the sell level (${moves}x drift band = ${driftAtrUsed}xATR(${atr.toFixed(2)}); entry zone broken)`);
+      hard.push(`price moved ${movePct}% below the sell level (${moves}x drift band = ${driftAtrUsed}xATR(${atr.toFixed(2)} USDT); entry zone broken)`);
     }
   }
 

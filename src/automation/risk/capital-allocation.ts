@@ -44,7 +44,7 @@ export class DefaultCapitalAllocation implements CapitalAllocation {
         allocatedCapital: 0,
         maxAllowed,
         valid: false,
-        reason: `Selected capital ${allocated.toFixed(2)} exceeds the maximum allocation of ${maxAllowed.toFixed(2)} (${maxCapitalAllocationPct}% of wallet).`,
+        reason: `Selected capital ${allocated.toFixed(2)} USDT exceeds the maximum allocation of ${maxAllowed.toFixed(2)} USDT (${maxCapitalAllocationPct}% of wallet).`,
       };
     }
 
@@ -54,7 +54,7 @@ export class DefaultCapitalAllocation implements CapitalAllocation {
         allocatedCapital: 0,
         maxAllowed,
         valid: false,
-        reason: `Selected capital ${allocated.toFixed(2)} exceeds the available balance of ${available.toFixed(2)} after the minimum reserve of ${minWalletBalance.toFixed(2)}.`,
+        reason: `Selected capital ${allocated.toFixed(2)} USDT exceeds the available balance of ${available.toFixed(2)} USDT after the minimum reserve of ${minWalletBalance.toFixed(2)} USDT.`,
       };
     }
 

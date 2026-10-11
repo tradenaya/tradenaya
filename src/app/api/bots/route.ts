@@ -23,23 +23,23 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const config = sanitizeConfig(body ?? {});
 
-    // Wallet-% must be a percentage of REMAINING available across running bots:
-    // sum every other bot's walletPercent for this user, block at 100%.
+    // Wallet-% bots share one wallet: the other bots' % plus this one may total
+    // at most 100%. Exactly 100% is allowed — the scheduler caps it to the safe
+    // share (fee + margin headroom), as the create dialog explains.
     if (config.capitalMode === "percent" && config.walletPercent != null) {
       const others = await botScheduler.listBots(userId);
-      const allocatedTotal =
-        others.reduce((sum, bot) => sum + (bot.capitalMode === "percent" ? bot.walletPercent ?? 0 : 0), 0) +
-        config.walletPercent;
-      if (allocatedTotal - 100 > 1e-9) {
+      const othersTotal = others.reduce((sum, bot) => sum + (bot.capitalMode === "percent" ? bot.walletPercent ?? 0 : 0), 0);
+      const remaining = Math.max(0, 100 - othersTotal);
+      if (remaining <= 1e-9) {
         return fail(
           400,
-          `Cannot start bot: ${config.walletPercent}% of remaining + existing allocations would exceed 100% of your available futures balance. Lower the wallet %, or reduce another bot's allocation first.`,
+          `Cannot start bot: your other bots already use 100% of the wallet. Lower another bot's % or delete a bot first.`,
         );
       }
-      if (allocatedTotal > 100 - 1e-9) {
+      if (othersTotal + config.walletPercent - 100 > 1e-9) {
         return fail(
           400,
-          `Cannot start bot: your wallet is 100% allocated already. No remaining available balance for a new % bot. Lower another bot's % or delete a bot first.`,
+          `Cannot start bot: your other bots already use ${othersTotal}% of the wallet, so at most ${remaining}% is left for this bot. Lower the wallet % to ${remaining}% or less, or reduce another bot's allocation first.`,
         );
       }
     }
