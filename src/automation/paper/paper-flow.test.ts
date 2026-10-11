@@ -8,7 +8,7 @@ import type { TradePlan } from "@/automation/planner/types";
 import { detectExecutedClose } from "@/automation/position/executed-close";
 import { reconcileClose } from "@/automation/position/close-accounting";
 import type { PositionRecord } from "@/automation/position/PositionManagerTypes";
-import { paperExchange, PaperExchange, TAKER_FEE, MAKER_FEE, type Candle1m } from "./exchange";
+import { paperExchange, PaperExchange, TAKER_FEE, MAKER_FEE, TAKER_SLIPPAGE, type Candle1m } from "./exchange";
 import { MemoryPaperStore } from "./store";
 import { runWithTradingMode } from "./mode";
 
@@ -115,18 +115,22 @@ describe("paper trading — full trade through the real executor", () => {
     await runWithTradingMode("PAPER", async () => {
       // The monitor's close detection reads the order status through the real client.
       const closeInfo = await detectExecutedClose(h.client, 1, { stopLossOrderId: sl.orderId, takeProfitOrderId: tp.orderId });
-      expect(closeInfo).toMatchObject({ reason: "STOP_LOSS", price: 97, realizedPnl: -4 });
+      const slFill = 97 * (1 - TAKER_SLIPPAGE);
+      expect(closeInfo?.reason).toBe("STOP_LOSS");
+      expect(closeInfo?.price).toBeCloseTo(slFill, 6);
+      expect(closeInfo?.realizedPnl).toBeCloseTo((slFill - 99) * 2, 6);
 
       // Close accounting reads commissions from the paper ledger through the real client.
       const position = { side: "BUY", filledQuantity: 2, quantity: 2, createdAt: new Date(Date.UTC(2026, 9, 1)).toISOString(), closedAt: null, symbol: "BTCUSDT" } as unknown as PositionRecord;
-      const accounting = await reconcileClose(h.client, 1, position, 99, 97);
-      const fees = 99 * 2 * MAKER_FEE + 97 * 2 * TAKER_FEE;
-      expect(accounting.grossProfit).toBeCloseTo(-4, 6);
+      const accounting = await reconcileClose(h.client, 1, position, 99, slFill);
+      const fees = 99 * 2 * MAKER_FEE + slFill * 2 * TAKER_FEE;
+      const gross = (slFill - 99) * 2;
+      expect(accounting.grossProfit).toBeCloseTo(gross, 6);
       expect(accounting.commission).toBeCloseTo(fees, 6);
-      expect(accounting.realizedPnl).toBeCloseTo(-4 - fees, 6);
+      expect(accounting.realizedPnl).toBeCloseTo(gross - fees, 6);
 
       // Paper wallet reflects exactly that, and the take-profit was cancelled.
-      expect(await h.client.getWalletBalance(1)).toBeCloseTo(1000 - 4 - fees, 6);
+      expect(await h.client.getWalletBalance(1)).toBeCloseTo(1000 + gross - fees, 6);
       expect((await h.client.getOrderStatus(1, tp.orderId)).status).toBe("CANCELLED");
       expect(await h.client.getPositions(1, "BTCUSDT")).toEqual([]);
     });

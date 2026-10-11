@@ -158,18 +158,3 @@ export function PaperTradingMenu() {
     </div>
   );
 }
-
-/** Always-visible reminder under the top bar while paper mode is on. */
-export function PaperModeBanner() {
-  const mode = useTradingMode();
-  if (mode !== "PAPER") return null;
-  return (
-    <div className="flex items-center justify-center gap-2 px-4 py-1.5 text-center text-xs font-medium text-black" style={{ backgroundColor: "#d97706" }} role="status">
-      <FlaskConical size={13} />
-      PAPER TRADING — simulated money, real market prices. Your real CoinSwitch balance is not used.
-      <button type="button" onClick={() => setTradingMode("LIVE")} className="ml-1 underline underline-offset-2">
-        Back to live
-      </button>
-    </div>
-  );
-}

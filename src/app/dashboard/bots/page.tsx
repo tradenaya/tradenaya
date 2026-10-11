@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { CandlestickChart, Check, Eye, Loader2, MoreVertical, Pause, Play, Plus, Power, Square, Pencil, Trash, X } from "lucide-react";
+import { CandlestickChart, Check, Eye, Loader2, MoreVertical, Pause, Play, Plus, Power, Square, Pencil, Trash } from "lucide-react";
 import { toast } from "sonner";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -93,6 +93,29 @@ function positionPnlPct(side: "BUY" | "SELL", entry: number | null, current: num
   if (!entry || entry <= 0 || current == null) return "—";
   const dir = side === "BUY" ? 1 : -1;
   return `${((dir * (current - entry)) / entry * 100).toFixed(2)}%`;
+}
+
+/** Small checkbox used for selecting bots to delete (supports a "mixed" state for Select all). */
+function SelectBox({ checked, disabled, label, onToggle }: { checked: boolean | "mixed"; disabled?: boolean; label: string; onToggle: () => void }) {
+  const on = checked === true;
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onToggle}
+      className={cn(
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors",
+        on || checked === "mixed" ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40 bg-transparent hover:border-foreground/60",
+        disabled && "cursor-not-allowed opacity-30 hover:border-muted-foreground/40",
+      )}
+    >
+      {on ? <Check size={13} strokeWidth={3} /> : checked === "mixed" ? <span className="h-0.5 w-2.5 rounded bg-current" /> : null}
+    </button>
+  );
 }
 
 function isLive(bot: BotView): boolean {
@@ -283,7 +306,6 @@ export default function AutomationPage() {
   const [confirmStop, setConfirmStop] = useState<BotView | null>(null);
   const [editBot, setEditBot] = useState<BotView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BotView | null>(null);
-  const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [confirmDeleteMany, setConfirmDeleteMany] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -398,9 +420,12 @@ export default function AutomationPage() {
     }
     setBusyId(null);
     setSelectedIds(new Set());
-    setSelecting(false);
     await loadBots();
   }
+
+  // Only stopped bots can be deleted; running ones are never selectable.
+  const deletableIds = bots.filter((b) => !isLive(b)).map((b) => b.id);
+  const allSelected = deletableIds.length > 0 && deletableIds.every((id) => selectedIds.has(id));
 
   function toggleSelected(id: number) {
     setSelectedIds((prev) => {
@@ -464,7 +489,16 @@ export default function AutomationPage() {
       <div className="grid gap-6 lg:h-[34rem] lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
         <section className={cn("flex min-h-0 flex-col", mobileTab === "bots" ? "block" : "hidden", "lg:block")}>
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Bots</h2>
+            <div className="flex items-center gap-2">
+              {deletableIds.length > 0 && (
+                <SelectBox
+                  checked={allSelected ? true : selectedIds.size > 0 ? "mixed" : false}
+                  label={allSelected ? "Clear selection" : "Select all stopped bots"}
+                  onToggle={() => setSelectedIds(allSelected ? new Set() : new Set(deletableIds))}
+                />
+              )}
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Bots</h2>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
@@ -474,23 +508,6 @@ export default function AutomationPage() {
               >
                 <Plus size={12} /> New bot
               </Button>
-              {bots.length > 0 && (
-                <Button
-                  size="sm"
-                  variant={selecting ? "default" : "outline"}
-                  className="h-6 gap-1.5 px-2 text-xs"
-                  onClick={() => {
-                    setSelecting((prev) => {
-                      const next = !prev;
-                      if (!next) setSelectedIds(new Set());
-                      return next;
-                    });
-                  }}
-                >
-                  {selecting ? <X size={12} /> : <Check size={12} />}
-                  {selecting ? "Done" : "Select…"}
-                </Button>
-              )}
             </div>
           </div>
           {botsError != null && bots.length > 0 && (
@@ -514,23 +531,12 @@ export default function AutomationPage() {
                 const busy = busyId === bot.id;
                 return (
                   <div key={bot.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-2.5">
-                    {selecting && (
-                      <button
-                        type="button"
-                        disabled={live}
-                        title={live ? "Stop the bot before deleting" : undefined}
-                        onClick={() => toggleSelected(bot.id)}
-                        className={cn(
-                          "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors",
-                          selectedIds.has(bot.id)
-                            ? "border-red-500/60 bg-red-500/25 text-red-300"
-                            : "border-border text-transparent hover:border-red-500/50 hover:text-red-500/40",
-                          live && "cursor-not-allowed opacity-30",
-                        )}
-                      >
-                        <Check size={13} />
-                      </button>
-                    )}
+                    <SelectBox
+                      checked={selectedIds.has(bot.id)}
+                      disabled={live}
+                      label={live ? "Stop this bot before deleting it" : `Select ${botName(bot, cfg) ?? "bot"}`}
+                      onToggle={() => toggleSelected(bot.id)}
+                    />
                     <div
                       className={cn(
                         "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-bold",
@@ -624,10 +630,10 @@ export default function AutomationPage() {
               })}
             </div>
           )}
-          {selecting && (
-            <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
-              <span className="text-xs text-muted-foreground">
-                {selectedIds.size} of {bots.length} selected
+          {selectedIds.size > 0 && (
+            <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2" role="region" aria-label="Selected bots">
+              <span className="text-xs font-medium text-foreground">
+                {selectedIds.size} selected
               </span>
               <div className="flex items-center gap-2">
                 <Button
@@ -646,7 +652,7 @@ export default function AutomationPage() {
                   onClick={() => setConfirmDeleteMany(true)}
                 >
                   {busyId != null ? <Loader2 className="animate-spin" size={13} /> : <Trash size={13} />}
-                  Delete selected
+                  Delete {selectedIds.size}
                 </Button>
               </div>
             </div>

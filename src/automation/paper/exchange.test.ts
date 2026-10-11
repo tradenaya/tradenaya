@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAKER_FEE, PaperExchange, TAKER_FEE, liquidationPrice, type Candle1m, type PaperMarket } from "./exchange";
+import { FUNDING_INTERVAL_MS, LIMIT_TRADE_THROUGH, MAKER_FEE, PaperExchange, TAKER_FEE, TAKER_SLIPPAGE, liquidationPrice, type Candle1m, type PaperMarket } from "./exchange";
 import { MemoryPaperStore } from "./store";
 import { runWithTradingMode, currentTradingMode } from "./mode";
 import { CoinSwitchClient } from "@/automation/executor/client";
@@ -90,18 +90,22 @@ describe("paper exchange — fills against market data", () => {
     candle(100, 96.5);
     candle(98, 96); // hits 97
 
+    const entryFill = 100 * (1 + TAKER_SLIPPAGE); // market entry slips up
+    const slFill = 97 * (1 - TAKER_SLIPPAGE); // stop sells slip down
     const slStatus = body(await call("GET", "/futures/order", { order_id: sl.order_id })).order;
-    expect(slStatus).toMatchObject({ status: "EXECUTED", avg_execution_price: 97, realised_pnl: -3 });
+    expect(slStatus.status).toBe("EXECUTED");
+    expect(slStatus.avg_execution_price).toBeCloseTo(slFill, 6);
+    expect(slStatus.realised_pnl).toBeCloseTo(slFill - entryFill, 5);
     expect(body(await call("GET", "/futures/order", { order_id: tp.order_id })).order.status).toBe("CANCELLED");
     expect(body(await call("GET", "/futures/positions"))).toEqual([]);
 
-    const fees = 100 * TAKER_FEE + 97 * TAKER_FEE;
+    const fees = entryFill * TAKER_FEE + slFill * TAKER_FEE;
     const wallet = body(await call("GET", "/futures/wallet_balance")).base_asset_balances[0].balances;
-    expect(Number(wallet.total_balance)).toBeCloseTo(1000 - 3 - fees, 6);
+    expect(Number(wallet.total_balance)).toBeCloseTo(1000 + (slFill - entryFill) - fees, 6);
 
     // Ledger + closed-order history in the shapes the close accounting reads.
     const tx = body(await call("GET", "/futures/transactions", { symbol: "btcusdt", type: "COMMISSION" }));
-    expect(tx.reduce((s: number, t: { amount: number }) => s + t.amount, 0)).toBeCloseTo(-fees, 8);
+    expect(tx.reduce((s: number, t: { amount: number }) => s + t.amount, 0)).toBeCloseTo(-fees, 6);
     const closed = body(await call("POST", "/futures/orders/closed", { symbol: "btcusdt" })).orders;
     expect(closed.find((o: { order_id: string }) => o.order_id === sl.order_id)).toMatchObject({ reduce_only: true, status: "EXECUTED" });
   });
@@ -113,7 +117,9 @@ describe("paper exchange — fills against market data", () => {
     const tp = body(await call("POST", "/futures/order", { symbol: "ethusdt", side: "BUY", order_type: "TAKE_PROFIT_MARKET", quantity: 1, trigger_price: 90, reduce_only: true }));
     setPrice(89);
     candle(101, 89);
-    expect(body(await call("GET", "/futures/order", { order_id: tp.order_id })).order).toMatchObject({ status: "EXECUTED", realised_pnl: 10 });
+    const tpOrder = body(await call("GET", "/futures/order", { order_id: tp.order_id })).order;
+    expect(tpOrder.status).toBe("EXECUTED");
+    expect(tpOrder.realised_pnl).toBeCloseTo(100 * (1 - TAKER_SLIPPAGE) - 90 * (1 + TAKER_SLIPPAGE), 6);
   });
 
   it("assumes the stop first when a candle reaches both stop and target", async () => {
@@ -134,7 +140,8 @@ describe("paper exchange — fills against market data", () => {
     candle(100, 85); // liq ~90.5
     expect(body(await call("GET", "/futures/positions"))).toEqual([]);
     const wallet = body(await call("GET", "/futures/wallet_balance")).base_asset_balances[0].balances;
-    expect(Number(wallet.total_balance)).toBeCloseTo(1000 - 100 - 100 * 10 * TAKER_FEE, 6);
+    const entry = 100 * (1 + TAKER_SLIPPAGE);
+    expect(Number(wallet.total_balance)).toBeCloseTo(1000 - entry - entry * 10 * TAKER_FEE, 6); // margin = entry*10/10
   });
 
   it("rejects a stop that would trigger immediately (like the exchange)", async () => {
@@ -142,6 +149,45 @@ describe("paper exchange — fills against market data", () => {
     await call("POST", "/futures/order", { symbol: "btcusdt", side: "BUY", order_type: "MARKET", quantity: 1 });
     const r = await call("POST", "/futures/order", { symbol: "btcusdt", side: "SELL", order_type: "STOP_MARKET", quantity: 1, trigger_price: 101, reduce_only: true });
     expect(r!.status).toBe(400);
+  });
+
+  it("does NOT fill a limit that price only touched (needs a trade-through)", async () => {
+    const { call, candle } = setup(1000);
+    const o = body(await call("POST", "/futures/order", { symbol: "btcusdt", side: "BUY", order_type: "LIMIT", quantity: 1, price: 95 }));
+    candle(100, 95); // touched exactly
+    expect(body(await call("GET", "/futures/order", { order_id: o.order_id })).order.status).toBe("OPEN");
+    candle(100, 95 * (1 - LIMIT_TRADE_THROUGH) - 0.001); // traded through
+    expect(body(await call("GET", "/futures/order", { order_id: o.order_id })).order.status).toBe("EXECUTED");
+  });
+
+  it("fills a stop that price gapped through at the worse price, not the stop", async () => {
+    const { call, candle, setPrice } = setup(1000);
+    await call("POST", "/futures/order", { symbol: "btcusdt", side: "BUY", order_type: "MARKET", quantity: 1 });
+    const sl = body(await call("POST", "/futures/order", { symbol: "btcusdt", side: "SELL", order_type: "STOP_MARKET", quantity: 1, trigger_price: 97, reduce_only: true }));
+    setPrice(90);
+    candle(92, 90); // whole candle below the stop
+    const o = body(await call("GET", "/futures/order", { order_id: sl.order_id })).order;
+    expect(o.avg_execution_price).toBeCloseTo(92 * (1 - TAKER_SLIPPAGE), 6);
+  });
+
+  it("charges funding every 8h at the live rate (longs pay, shorts receive), once per settlement", async () => {
+    let now = Date.UTC(2026, 9, 1, 7, 0);
+    const store = new MemoryPaperStore();
+    const ex = new PaperExchange(store, { price: async () => 100, candles: async () => [], funding: async () => ({ rate: 0.0001, nextFundingTime: null }) }, () => now);
+    await store.saveWallet({ userId: 1, balance: 1000, initialBalance: 1000 });
+    await ex.handle("POST", "/futures/order", { symbol: "btcusdt", side: "BUY", order_type: "MARKET", quantity: 5 }, 1);
+    const afterEntry = (await store.getWallet(1))!.balance;
+    now += 2 * 60 * 60_000; // 09:00 -> crossed the 08:00 settlement
+    await ex.match(1);
+    await ex.match(1); // repeated reads must not charge twice
+    const funding = store.transactions.filter((t) => t.type === "FUNDING_FEE");
+    expect(funding).toHaveLength(1);
+    expect(funding[0].createdAt).toBe(Date.UTC(2026, 9, 1, 8, 0));
+    expect(funding[0].amount).toBeCloseTo(-0.0001 * 100 * 5, 8);
+    expect((await store.getWallet(1))!.balance).toBeCloseTo(afterEntry - 0.05, 8);
+    now += FUNDING_INTERVAL_MS; // next settlement at 16:00
+    await ex.match(1);
+    expect(store.transactions.filter((t) => t.type === "FUNDING_FEE")).toHaveLength(2);
   });
 
   it("leaves market-data endpoints to the real exchange", async () => {

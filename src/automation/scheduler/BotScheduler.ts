@@ -18,6 +18,7 @@ import { SchedulerRecovery } from "./SchedulerRecovery";
 import { AnalysisCycleRunner } from "./AnalysisCycleRunner";
 import { DEFAULT_SCHEDULER_CONFIG, type SchedulerConfig, type SchedulerState } from "./SchedulerTypes";
 import { sendTelegramAsync, telegramBotStarted, telegramBotStopped } from "@/lib/telegram";
+import { MAX_RUNNING_BOTS } from "./SchedulerTypes";
 
 export interface BotSchedulerDependencies {
   config?: SchedulerConfig;
@@ -282,11 +283,11 @@ export class BotScheduler {
       throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your CoinSwitch account.");
     }
 
-    // Hard limit: max 3 running bots per user
-    const runningCount = await this.lifecycle.countActiveBotsForUser(userId);
-    if (runningCount >= 3) {
+    // Hard limit: MAX_RUNNING_BOTS running bots per user (per trading mode)
+    const runningCount = await this.lifecycle.countActiveBotsForUser(userId, config.tradingMode === "PAPER" ? "PAPER" : "LIVE");
+    if (runningCount >= MAX_RUNNING_BOTS) {
       throw new Error(
-        `Maximum of 3 bots allowed per user. You currently have ${runningCount} running bot${runningCount === 1 ? "" : "s"}. Stop or delete a bot before starting a new one.`,
+        `Maximum of ${MAX_RUNNING_BOTS} bots allowed per user. You currently have ${runningCount} running bot${runningCount === 1 ? "" : "s"}. Stop or delete a bot before starting a new one.`,
       );
     }
 
@@ -387,9 +388,9 @@ export class BotScheduler {
         throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your CoinSwitch account.");
       }
       const runningCount = await this.lifecycle.countActiveBotsForUser(userId, mode);
-      if (runningCount >= 3) {
+      if (runningCount >= MAX_RUNNING_BOTS) {
         throw new Error(
-          `Maximum of 3 running ${mode === "PAPER" ? "paper " : ""}bots allowed per user. You currently have ${runningCount} running. Stop a bot before starting another one.`,
+          `Maximum of ${MAX_RUNNING_BOTS} running ${mode === "PAPER" ? "paper " : ""}bots allowed per user. You currently have ${runningCount} running. Stop a bot before starting another one.`,
         );
       }
       if (bot.configJson) {

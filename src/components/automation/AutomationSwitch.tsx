@@ -267,7 +267,8 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
       {botList.length > 0 && (
         <div className="border-t border-border px-4 sm:px-6 py-4">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Active strategies</p>
-          <div className="flex flex-wrap gap-2">
+          {/* Equal-width, equal-height cards: 1 per row on phones, more as space allows. */}
+          <div className="grid auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {botList.map((bot) => {
               const live = runningStates.includes(bot.desiredStatus ?? bot.status);
               const cfg = parseBotConfig(bot);
@@ -277,10 +278,10 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
               return (
                 <div
                   key={bot.id}
-                  className={`rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-muted/40"}`}
+                  className={`flex h-full min-w-0 flex-col justify-center rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-muted/40"}`}
                 >
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-medium text-foreground">
-                    {name && <span className="max-w-40 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
+                    {name && <span className="min-w-0 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
                     <span>{sym.replace(/USDT$/, "") || "Auto"}</span>
                     {cfg.autoSelect && <AutoBadge />}
                     {dir && (
@@ -290,7 +291,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {bot.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
+                    {cfg.timeframe || bot.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
                   </div>
                   {bot.lastError && <div className="mt-1 text-xs text-red-400">{localizeUsdtText(bot.lastError)}</div>}
                 </div>

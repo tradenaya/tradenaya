@@ -71,3 +71,6 @@ export interface CycleResult {
   action: "ANALYZED" | "TRADE_EXECUTED" | "POSITION_HANDOFF" | "ERROR" | "SKIPPED";
   message: string;
 }
+
+/** Most bots one user may have running at once, per trading mode (live and paper count separately). */
+export const MAX_RUNNING_BOTS = 5;

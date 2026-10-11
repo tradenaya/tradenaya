@@ -10,7 +10,7 @@ import { customerLogout } from "@/store/slices/customerAuthSlice";
 import { clearTenant } from "@/store/slices/tenantSlice";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { setDisplayCurrency } from "@/lib/currency/store";
-import { PaperModeBanner, PaperTradingMenu } from "./PaperTradingMenu";
+import { PaperTradingMenu } from "./PaperTradingMenu";
 import { useTradingMode } from "@/lib/trading-mode/TradingModeProvider";
 
 interface Props {
@@ -203,7 +203,6 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         </div>
       )}
     </header>
-    <PaperModeBanner />
     </>
   );
 }
