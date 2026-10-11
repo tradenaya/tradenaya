@@ -16,6 +16,8 @@ import { DatePicker } from "@/components/ui/date-picker"
 import type { BacktestConfig } from "@/automation/backtest/types"
 import { apiSend } from "./api"
 import { ErrorState } from "@/components/ui/error-state"
+import { StrategyPicker } from "@/components/automation/StrategyPicker"
+import { DEFAULT_STRATEGY_ID, TREND_BREAKOUT_ID, strategyInfo } from "@/automation/strategy/catalog"
 
 const inputClass = "h-9 rounded-md border border-border bg-input px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
@@ -41,7 +43,9 @@ export function RunBacktestDialog({
   onCreated: () => void
 }) {
   const [symbol, setSymbol] = useState("BTCUSDT")
+  const [strategy, setStrategy] = useState<string>(DEFAULT_STRATEGY_ID)
   const [timeframe, setTimeframe] = useState("1h")
+  const info = strategyInfo(strategy)
   const [from, setFrom] = useState(defaultFrom)
   const [to, setTo] = useState(defaultTo)
   const [capital, setCapital] = useState("1000")
@@ -69,7 +73,8 @@ export function RunBacktestDialog({
     }
     const config: BacktestConfig = {
       symbol: symbol.trim().toUpperCase(),
-      timeframe,
+      strategy,
+      timeframe: info.fixedTimeframe ?? timeframe,
       startTime,
       endTime,
       initialCapital: Number(capital),
@@ -77,9 +82,10 @@ export function RunBacktestDialog({
       leverage: Number(leverage),
       maxRiskPerTrade: Number(risk),
       dailyLossLimit: Number(dailyLoss),
-      enableTrailingStop: trailing,
+      // Trend Breakout always uses its own candle-channel trailing stop.
+      enableTrailingStop: info.id === TREND_BREAKOUT_ID ? false : trailing,
       trailingDistancePercent: trailing ? Number(trailingDist) : 0,
-      momentumEntriesOnly: momentumOnly,
+      momentumEntriesOnly: info.supportsMomentumFilter && momentumOnly,
       feeRateBps: Number(feeBps),
       slippageBps: Number(slippageBps),
       executionPolicy: policy as BacktestConfig["executionPolicy"],
@@ -111,11 +117,22 @@ export function RunBacktestDialog({
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <StrategyPicker
+              id="backtest-strategy"
+              value={strategy}
+              onChange={(id) => {
+                setStrategy(id)
+                const fixed = strategyInfo(id).fixedTimeframe
+                if (fixed) setTimeframe(fixed)
+              }}
+            />
+          </div>
           <Field label="Symbol">
             <Input className={inputClass} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="BTCUSDT" />
           </Field>
           <Field label="Timeframe">
-            <select className={inputClass} value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+            <select className={inputClass} value={info.fixedTimeframe ?? timeframe} onChange={(e) => setTimeframe(e.target.value)} disabled={Boolean(info.fixedTimeframe)}>
               <option value="5m">5m</option>
               <option value="15m">15m</option>
               <option value="30m">30m</option>
@@ -171,6 +188,7 @@ export function RunBacktestDialog({
               <option value="TARGET_FIRST">Target first</option>
             </select>
           </Field>
+          {info.supportsMomentumFilter && (
           <Field label="Strong-momentum entries only">
             <select
               className={inputClass}
@@ -181,6 +199,8 @@ export function RunBacktestDialog({
               <option value="off">Off</option>
             </select>
           </Field>
+          )}
+          {info.id !== TREND_BREAKOUT_ID && (
           <Field label="Trailing stop">
             <select
               className={inputClass}
@@ -191,7 +211,8 @@ export function RunBacktestDialog({
               <option value="off">Disabled</option>
             </select>
           </Field>
-          {trailing && (
+          )}
+          {trailing && info.id !== TREND_BREAKOUT_ID && (
             <Field label="Trailing distance (%)">
               <Input className={inputClass} type="number" step="0.1" min="0.1" value={trailingDist} onChange={(e) => setTrailingDist(e.target.value)} />
             </Field>

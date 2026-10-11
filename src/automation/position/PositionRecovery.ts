@@ -7,6 +7,7 @@ import { detectExecutedClose, detectClosedOrderClose, confirmExternalClose, dete
 import { reconcileClose } from "./close-accounting";
 import { classifyStatus } from "@/automation/executor/order-status";
 import { usdt } from "@/lib/currency/usdt-text";
+import { withBotMode } from "@/automation/paper/mode";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 
@@ -90,6 +91,11 @@ export class PositionRecovery {
 
   /** @internal Reconcile a single tracked position against the exchange. Called by recoverAllActive() in bulk, and by the monitor loop to keep ERROR positions recoverable cycle-by-cycle without requiring a restart. */
   async reconcile(position: PositionRecord): Promise<ReconcileOutcome> {
+    // Paper positions reconcile against the paper exchange, never the real one.
+    return withBotMode(position.botId, () => this.reconcileInMode(position));
+  }
+
+  private async reconcileInMode(position: PositionRecord): Promise<ReconcileOutcome> {
     if (!isReconcilableState(position)) return "skipped";
 
     // If the exchange is unreachable during recovery, leave the position

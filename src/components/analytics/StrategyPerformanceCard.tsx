@@ -1,5 +1,7 @@
 "use client"
 
+import { strategyLabel } from "@/automation/strategy/catalog"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ErrorState } from "@/components/ui/error-state"
 import { TableSkeleton } from "@/components/ui/skeletons"
@@ -19,7 +21,7 @@ import { formatPercent, pnlText, signClass } from "./format"
 export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<StrategyPerformance[]>(
     () => apiGet("/api/analytics/strategies", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   const strategies = data ?? []
@@ -54,7 +56,7 @@ export function StrategyPerformanceCard({ filters }: { filters: AnalyticsFilterS
             <TableBody>
               {strategies.map((s) => (
                 <TableRow key={s.strategy}>
-                  <TableCell className="font-medium text-foreground">{s.strategy}</TableCell>
+                  <TableCell className="font-medium text-foreground">{strategyLabel(s.strategy)}</TableCell>
                   <TableCell className="text-right tabular-nums hidden sm:table-cell">{s.bots}</TableCell>
                   <TableCell className="text-right tabular-nums hidden sm:table-cell">{s.trades}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatPercent(s.winRate)}</TableCell>

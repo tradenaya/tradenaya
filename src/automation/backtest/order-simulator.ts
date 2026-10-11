@@ -57,14 +57,15 @@ export class BacktestOrderSimulator {
       const targetFirst = this.policy === "TARGET_FIRST";
       return targetFirst
         ? { triggered: true, exitReason: "TAKE_PROFIT", exitPrice: position.takeProfit }
-        : { triggered: true, exitReason: "STOP_LOSS", exitPrice: position.stopLoss };
+        : { triggered: true, exitReason: position.trailingActivated ? "TRAILING_STOP" : "STOP_LOSS", exitPrice: position.stopLoss };
     }
 
     if (tpReached) {
       return { triggered: true, exitReason: "TAKE_PROFIT", exitPrice: position.takeProfit };
     }
 
-    return { triggered: true, exitReason: "STOP_LOSS", exitPrice: position.stopLoss };
+    // A stop that has been trailed is reported as a trailing-stop exit.
+    return { triggered: true, exitReason: position.trailingActivated ? "TRAILING_STOP" : "STOP_LOSS", exitPrice: position.stopLoss };
   }
 }
 

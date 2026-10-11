@@ -26,8 +26,8 @@ const KIND_BADGE: Record<string, { label: string; className: string }> = {
 
 export function ActiveOrdersCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<ActiveOrderAnalytics[]>(
-    () => apiGet("/api/analytics/orders"),
-    [filters.botId],
+    () => apiGet("/api/analytics/orders", { strategy: filters.strategy }),
+    [filters.botId, filters.strategy],
     { pollMs: 15_000 },
   )
 

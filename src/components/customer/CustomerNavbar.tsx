@@ -10,6 +10,8 @@ import { customerLogout } from "@/store/slices/customerAuthSlice";
 import { clearTenant } from "@/store/slices/tenantSlice";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { setDisplayCurrency } from "@/lib/currency/store";
+import { PaperModeBanner, PaperTradingMenu } from "./PaperTradingMenu";
+import { useTradingMode } from "@/lib/trading-mode/TradingModeProvider";
 
 interface Props {
   onMenuClick: () => void;
@@ -21,6 +23,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
   const customerAuth = useAppSelector((state) => state.customerAuth);
   const tenant = useAppSelector((state) => state.tenant);
   const displayCurrency = useDisplayCurrency();
+  const tradingMode = useTradingMode();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -75,6 +78,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
   }
 
   return (
+    <>
     <header
       className="h-16 border-b flex items-center justify-between px-5"
       style={{ backgroundColor: "var(--background)", color: "var(--foreground)", borderColor: "var(--border)" }}
@@ -86,6 +90,9 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         <div className="flex items-center gap-2.5">
           <TradenayaLogo className="h-auto w-8 shrink-0" />
           <h1 className="text-lg sm:text-xl brand-heading">{tenant.tenantName || "Tradenaya"}</h1>
+          {tradingMode === "PAPER" && (
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-black" style={{ backgroundColor: "#d97706" }}>PAPER</span>
+          )}
         </div>
       </div>
 
@@ -123,6 +130,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
                   <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>{customerAuth.email}</div>
                   <div className="text-xs mt-1" style={{ color: "var(--primary)" }}>{customerAuth.role}</div>
                 </div>
+                <PaperTradingMenu />
                 <div className="px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm">Currency</span>
@@ -195,5 +203,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         </div>
       )}
     </header>
+    <PaperModeBanner />
+    </>
   );
 }

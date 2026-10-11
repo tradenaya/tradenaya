@@ -30,8 +30,8 @@ function ProtectionBadge({ status }: { status: string }) {
 
 export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<OpenPositionAnalytics[]>(
-    () => apiGet("/api/analytics/positions"),
-    [filters.botId],
+    () => apiGet("/api/analytics/positions", { strategy: filters.strategy }),
+    [filters.botId, filters.strategy],
     { pollMs: 15_000 },
   )
 

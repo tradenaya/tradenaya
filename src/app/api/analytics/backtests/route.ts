@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { BacktestError } from "@/automation/backtest/errors";
 import type { BacktestConfig } from "@/automation/backtest/types";
+import { DEFAULT_STRATEGY_ID, isKnownStrategy, strategyInfo } from "@/automation/strategy/catalog";
 import { fail, getBacktestService, ok, requireUserId } from "../_helpers";
 import { errorResponse } from "@/lib/api-error";
 
@@ -41,7 +42,15 @@ export async function POST(req: NextRequest) {
   const userId = requireUserId(req);
   if (!userId) return fail(401, "Unauthorized");
   try {
-    const body = (await req.json()) as BacktestConfig;
+    const raw = (await req.json()) as BacktestConfig;
+    const strategy = isKnownStrategy(raw.strategy) ? raw.strategy : DEFAULT_STRATEGY_ID;
+    const info = strategyInfo(strategy);
+    const body: BacktestConfig = {
+      ...raw,
+      strategy,
+      timeframe: info.fixedTimeframe ?? raw.timeframe,
+      momentumEntriesOnly: info.supportsMomentumFilter && raw.momentumEntriesOnly === true,
+    };
     const data = await getBacktestService().run(userId, body);
     return ok(data);
   } catch (error: any) {

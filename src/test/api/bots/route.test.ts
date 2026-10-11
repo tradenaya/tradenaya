@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const scheduler = vi.hoisted(() => ({
   bots: [] as Array<{ capitalMode: "fixed" | "percent"; walletPercent?: number }>,
-  startBot: vi.fn(async () => ({ botId: 42 })),
+  createBot: vi.fn(async () => ({ botId: 42 })),
 }));
 
 vi.mock("@/lib/auth", () => ({ getCustomerFromRequest: () => ({ customerId: 7, email: null }) }));
 vi.mock("@/automation/scheduler/BotScheduler", () => ({
   botScheduler: {
     listBots: async () => scheduler.bots,
-    startBot: scheduler.startBot,
+    createBot: scheduler.createBot,
     ensureStarted: async () => undefined,
     isRunning: () => true,
   },
@@ -27,14 +27,14 @@ function create(walletPercent: number) {
 
 beforeEach(() => {
   scheduler.bots = [];
-  scheduler.startBot.mockClear();
+  scheduler.createBot.mockClear();
 });
 
 describe("POST /api/bots wallet %", () => {
   it("accepts 100% when no other bot uses the wallet (scheduler caps it to the safe share)", async () => {
     const res = await create(100);
     expect(res.status).toBe(200);
-    expect(scheduler.startBot).toHaveBeenCalledOnce();
+    expect(scheduler.createBot).toHaveBeenCalledOnce();
   });
 
   it("accepts exactly the remaining share", async () => {
@@ -47,7 +47,7 @@ describe("POST /api/bots wallet %", () => {
     const res = await create(70);
     expect(res.status).toBe(400);
     expect((await res.json()).message).toMatch(/at most 60% is left/);
-    expect(scheduler.startBot).not.toHaveBeenCalled();
+    expect(scheduler.createBot).not.toHaveBeenCalled();
   });
 
   it("rejects when other bots already use the whole wallet", async () => {

@@ -11,6 +11,7 @@
  */
 
 import https from "node:https";
+import { isPaperContext } from "@/automation/paper/mode";
 
 const BOT_API_BASE = "https://api.telegram.org";
 
@@ -135,6 +136,9 @@ function buildPayload(text: string, html = true): Record<string, unknown> {
  * `ok` flag is exposed for the optional test endpoint/probe.
  */
 export async function sendTelegram(text: string): Promise<{ ok: boolean; error?: string }> {
+  // Paper-bot alerts are labelled so they are never mistaken for real trades.
+  if (isPaperContext() && !text.startsWith("🧪")) text = `🧪 PAPER TRADE (simulated)
+${text}`;
   const { token } = readConfig();
   if (!isTelegramConfigured() || !token) {
     console.warn("[telegram] not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing). Skipping send.");

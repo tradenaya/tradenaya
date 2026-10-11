@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest, paperFetch } from "@/app/api/coinswitch/_helpers";
 import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/orders/open", payload, keys?.apiKey, keys?.apiSecret);
 
-    const res = await fetch(url, {
+    const res = (await paperFetch(req as any, "POST", "/futures/orders/open", payload)) ?? await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),

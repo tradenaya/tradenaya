@@ -5,6 +5,7 @@ import { fetchData } from "@/lib/api-client"
 export interface AnalyticsFilterState {
   botId: number | null
   symbol: string | null
+  strategy: string | null
   side: "BUY" | "SELL" | null
   startTime: number | null
   endTime: number | null
@@ -14,6 +15,7 @@ export interface AnalyticsFilterState {
 export const DEFAULT_FILTERS: AnalyticsFilterState = {
   botId: null,
   symbol: null,
+  strategy: null,
   side: null,
   startTime: null,
   endTime: null,
@@ -24,6 +26,7 @@ export function filtersEqual(a: AnalyticsFilterState, b: AnalyticsFilterState): 
   return (
     a.botId === b.botId &&
     a.symbol === b.symbol &&
+    a.strategy === b.strategy &&
     a.side === b.side &&
     a.startTime === b.startTime &&
     a.endTime === b.endTime &&
@@ -35,6 +38,7 @@ export function toQuery(filters: AnalyticsFilterState): Record<string, string> {
   const query: Record<string, string> = {}
   if (filters.botId != null) query.botId = String(filters.botId)
   if (filters.symbol) query.symbol = filters.symbol
+  if (filters.strategy) query.strategy = filters.strategy
   if (filters.side) query.side = filters.side
   if (filters.startTime != null) query.startTime = String(filters.startTime)
   if (filters.endTime != null) query.endTime = String(filters.endTime)

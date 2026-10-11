@@ -29,6 +29,8 @@ import { fmtMoney } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
 import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { strategyLabel } from "@/automation/strategy/catalog";
+import { getTradingMode } from "@/lib/trading-mode/store";
 
 interface BotRecord {
   id: number;
@@ -214,7 +216,8 @@ export function BehindTheScenes() {
     const interval = setInterval(load, POLL_MS);
     const clock = setInterval(() => setTick((t) => t + 1), 15000);
 
-    const es = new EventSource("/api/bots/live");
+    // EventSource cannot send headers, so the paper view asks via ?mode=.
+    const es = new EventSource(`/api/bots/live?mode=${getTradingMode()}`);
     es.onopen = () => setStreamUp(true);
     es.onmessage = (ev) => {
       if (!ev.data || ev.data.startsWith(":")) return;
@@ -292,7 +295,7 @@ export function BehindTheScenes() {
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {cfg.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
                       </span>
                     </div>
                     <Badge

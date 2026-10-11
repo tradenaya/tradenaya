@@ -9,6 +9,7 @@ import type {
   PositionState,
 } from "./PositionManagerTypes";
 import { OrderHistoryRepository, type OrderHistoryInsert } from "@/automation/order-history";
+import { currentTradingMode } from "@/automation/paper/mode";
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
@@ -425,8 +426,11 @@ export class PositionStore {
       `SELECT COALESCE(SUM(realized_pnl), 0) AS realized_pnl,
               COUNT(CASE WHEN exit_reason <> 'ENTRY_CANCELLED' THEN 1 END) AS trade_count
         FROM automation_closed_trades
-        WHERE user_id = ? AND DATE(closed_at) = ?;`,
-      [userId, date],
+        WHERE user_id = ? AND DATE(closed_at) = ?
+          AND bot_id IN (SELECT id FROM automation_bots WHERE trading_mode = ?);`,
+      // Daily loss / trade limits are per trading mode: paper results never
+      // block live trading and vice versa.
+      [userId, date, currentTradingMode()],
     );
     type StatsRow = { realized_pnl?: number; trade_count?: number };
     const row = (rows as StatsRow[])[0];

@@ -20,6 +20,7 @@ import type {
 } from "./types";
 import { parseCandleMessage, parseTickerPayload, validateSnapshot } from "./validator";
 import type { DesiredBotStatus } from "@/automation/service/bot-lifecycle";
+import { runWithTradingMode } from "@/automation/paper/mode";
 
 export interface ServerMarketDataServiceOptions {
   socket?: MarketDataSocketLike;
@@ -102,6 +103,13 @@ export class ServerMarketDataService {
   // ---- lifecycle ----
 
   async start(): Promise<void> {
+    // Background loops (timers created below) must always start in LIVE mode,
+    // never inherit the mode of whichever web request happened to start them;
+    // paper bots/positions switch to PAPER per bot inside the loop.
+    return runWithTradingMode("LIVE", () => this.startLive());
+  }
+
+  private async startLive(): Promise<void> {
     if (this.started) return;
     this.started = true;
     await this.seedUserIdsFromRecoverySources();

@@ -29,11 +29,15 @@ import type {
   Paged,
   PnlAnalytics,
   StrategyPerformance,
+  StrategyComparison,
+  StrategyComparisonRow,
   SymbolPerformance,
   TradeDetail,
   TradeStatistics,
 } from "./types";
 import { classifyOutcome } from "./types";
+import { strategyLabel } from "@/automation/strategy/catalog";
+import { currentTradingMode } from "@/automation/paper/mode";
 
 const DAY_MS = 86_400_000;
 const WEEK_MS = 7 * DAY_MS;
@@ -64,6 +68,7 @@ class TtlCache<V> {
 
 function filtersCacheKey(filters: AnalyticsFilters): string {
   return JSON.stringify({
+    mode: currentTradingMode(),
     botId: filters.botId ?? null,
     symbol: filters.symbol ?? null,
     strategy: filters.strategy ?? null,
@@ -86,8 +91,20 @@ function defaultFilters(filters?: AnalyticsFilters): AnalyticsFilters {
   };
 }
 
+/** Bots running `strategy` (all bots when no strategy filter is set). */
+function byStrategy(bots: BotRow[], strategy: string | null | undefined): BotRow[] {
+  return strategy ? bots.filter((b) => b.strategy === strategy) : bots;
+}
+
+/** Open positions belonging to the given bots when a strategy filter is set. */
+function positionsOf<T extends { botId: number }>(positions: T[], bots: BotRow[], strategy: string | null | undefined): T[] {
+  if (!strategy) return positions;
+  const ids = new Set(bots.map((b) => b.id));
+  return positions.filter((p) => ids.has(p.botId));
+}
+
 function botName(bot: Pick<BotRow, "id" | "symbol" | "strategy">): string {
-  return `${bot.symbol} · ${bot.strategy}`;
+  return `${bot.symbol} · ${strategyLabel(bot.strategy)}`;
 }
 
 function formatTrade(trade: ClosedTradeRow, bots: Map<number, BotRow>): ClosedTradeSummary {
@@ -193,12 +210,14 @@ export class BotAnalyticsService {
     if (cached) return cached;
 
     const f = defaultFilters(filters);
-    const [trades, positions, bots, counts] = await Promise.all([
+    const [trades, allPositions, allBots, counts] = await Promise.all([
       this.repo.getClosedTrades(userId, f),
       this.repo.getOpenPositions(userId, f.botId ?? undefined),
       this.repo.getBots(userId),
       this.repo.countBots(userId),
     ]);
+    const bots = byStrategy(allBots, f.strategy);
+    const positions = positionsOf(allPositions, bots, f.strategy);
 
     const now = Date.now();
     const todayStart = startOfDay(now);
@@ -255,13 +274,14 @@ export class BotAnalyticsService {
 
   async getBotSummaries(userId: number, filters?: AnalyticsFilters): Promise<BotSummary[]> {
     const f = defaultFilters(filters);
-    const [bots, positions, trades, activityFeed] = await Promise.all([
+    const [allBots, positions, trades, activityFeed] = await Promise.all([
       this.repo.getBots(userId),
       this.repo.getOpenPositions(userId),
       this.repo.getClosedTrades(userId, f),
       this.repo.getActivity(userId, { limit: 500 }),
     ]);
 
+    const bots = byStrategy(allBots, f.strategy);
     const latestActivity = new Map<number, BotSummary["lastActivity"]>();
     for (const item of activityFeed.items) {
       if (item.botId == null || latestActivity.has(item.botId)) continue;
@@ -349,11 +369,13 @@ export class BotAnalyticsService {
     const cached = this.cache.get(key) as EquityAnalytics | undefined;
     if (cached) return cached;
 
-    const [trades, bots, positions] = await Promise.all([
+    const [trades, allBots, allPositions] = await Promise.all([
       this.repo.getClosedTrades(userId, f),
       this.repo.getBots(userId),
       this.repo.getOpenPositions(userId, f.botId ?? undefined),
     ]);
+    const bots = byStrategy(allBots, f.strategy);
+    const positions = positionsOf(allPositions, bots, f.strategy);
     const baseline = this.options.baselineCapital ?? bots.reduce((sum, b) => sum + b.capital, 0);
     const unrealized = positions.reduce((sum, p) => sum + unrealizedOfPosition(p), 0);
     const equity = buildEquityCurve({
@@ -382,10 +404,12 @@ export class BotAnalyticsService {
     const cached = this.cache.get(key) as PnlAnalytics | undefined;
     if (cached) return cached;
 
-    const [trades, positions] = await Promise.all([
+    const [trades, allPositions, allBots] = await Promise.all([
       this.repo.getClosedTrades(userId, f),
       this.repo.getOpenPositions(userId, f.botId ?? undefined),
+      f.strategy ? this.repo.getBots(userId) : Promise.resolve([] as BotRow[]),
     ]);
+    const positions = positionsOf(allPositions, byStrategy(allBots, f.strategy), f.strategy);
     const unrealized = positions.reduce((sum, p) => sum + unrealizedOfPosition(p), 0);
     const series = buildPnlSeries({
       trades,
@@ -406,21 +430,23 @@ export class BotAnalyticsService {
     return result;
   }
 
-  async getPositions(userId: number, botId?: number): Promise<OpenPositionAnalytics[]> {
-    const [positions, bots] = await Promise.all([
+  async getPositions(userId: number, botId?: number, strategy?: string | null): Promise<OpenPositionAnalytics[]> {
+    const [allPositions, bots] = await Promise.all([
       this.repo.getOpenPositions(userId, botId),
       this.repo.getBots(userId),
     ]);
     const botsById = new Map(bots.map((b) => [b.id, b]));
+    const positions = positionsOf(allPositions, byStrategy(bots, strategy), strategy);
     return positions.map((p) => formatPosition(p, botsById));
   }
 
-  async getOrders(userId: number, botId?: number): Promise<ActiveOrderAnalytics[]> {
-    const [executions, bots] = await Promise.all([
+  async getOrders(userId: number, botId?: number, strategy?: string | null): Promise<ActiveOrderAnalytics[]> {
+    const [allExecutions, bots] = await Promise.all([
       this.repo.getActiveExecutions(userId, botId),
       this.repo.getBots(userId),
     ]);
     const botsById = new Map(bots.map((b) => [b.id, b]));
+    const executions = positionsOf(allExecutions, byStrategy(bots, strategy), strategy);
     return executions.map((execution) => {
       const bot = botsById.get(execution.botId);
       const kind: ActiveOrderAnalytics["kind"] = execution.positionId
@@ -524,6 +550,53 @@ export class BotAnalyticsService {
     const result = aggregateBySymbol(trades);
     this.cache.set(key, result);
     return result;
+  }
+
+  /**
+   * Side-by-side live results of the given strategies over one time window
+   * (closed trades only, same netting as every other analytics card).
+   */
+  async getStrategyComparison(userId: number, strategies: string[], startTime: number | null, endTime: number | null): Promise<StrategyComparison> {
+    const ids = [...new Set(strategies.filter(Boolean))].slice(0, 6);
+    const bots = await this.repo.getBots(userId);
+    const rows = await Promise.all(
+      ids.map(async (strategy): Promise<StrategyComparisonRow> => {
+        const trades = await this.repo.getClosedTrades(userId, defaultFilters({ strategy, startTime, endTime }));
+        const stats = computeTradeStatistics(trades);
+        const ordered = [...trades].sort((a, b) => new Date(a.closedAt).getTime() - new Date(b.closedAt).getTime());
+        let cumulative = 0;
+        let peak = 0;
+        let maxDrawdown = 0;
+        const curve = ordered.map((t) => {
+          cumulative += netPnl(t);
+          peak = Math.max(peak, cumulative);
+          maxDrawdown = Math.max(maxDrawdown, peak - cumulative);
+          return { timestamp: new Date(t.closedAt).getTime(), cumulativePnl: cumulative };
+        });
+        return {
+          strategy,
+          label: strategyLabel(strategy),
+          bots: bots.filter((b) => b.strategy === strategy).length,
+          trades: stats.totalTrades,
+          wins: stats.winningTrades,
+          losses: stats.losingTrades,
+          winRate: stats.winRate,
+          netPnl: cumulative,
+          averageTradePnl: stats.averageTradePnl,
+          averageWin: stats.averageProfit,
+          averageLoss: stats.averageLoss,
+          profitFactor: stats.profitFactor,
+          largestWin: stats.largestWin,
+          largestLoss: stats.largestLoss,
+          maxConsecutiveLosses: stats.maxConsecutiveLosses,
+          maxDrawdown,
+          fees: stats.totalFees,
+          averageDurationMs: stats.averageTradeDurationMs,
+          curve,
+        };
+      }),
+    );
+    return { startTime, endTime, rows };
   }
 
   async getStrategies(userId: number, filters?: AnalyticsFilters): Promise<StrategyPerformance[]> {

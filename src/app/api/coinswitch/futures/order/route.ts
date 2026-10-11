@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest, paperFetch } from "@/app/api/coinswitch/_helpers";
 import { errorResponse } from "@/lib/api-error";
 
 interface PlaceOrderBody {
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const keys = await requireKeysFromRequest(req as any);
     const { url, headers } = buildSignedRequest("POST", "/futures/order", orderPayload, keys?.apiKey, keys?.apiSecret);
 
-    const res = await fetch(url, {
+    const res = (await paperFetch(req as any, "POST", "/futures/order", orderPayload)) ?? await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(orderPayload),

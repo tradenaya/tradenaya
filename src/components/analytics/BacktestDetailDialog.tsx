@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table"
 import type { BacktestDetail } from "@/automation/analytics/types"
 import { apiGet } from "./api"
+import { strategyLabel } from "@/automation/strategy/catalog"
 import { formatDate, formatMoney, formatPercent, formatPrice, formatShortDate, pnlText, signClass } from "./format"
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
@@ -123,6 +124,7 @@ export function BacktestDetailDialog({
                 const cfg = ((data as { config?: Record<string, unknown> | null }).config ?? {}) as Record<string, unknown>
                 return (
                   <>
+                    <Badge className="bg-muted text-foreground">{strategyLabel(typeof cfg.strategy === "string" ? cfg.strategy : null) === "Unknown" ? "Tradenaya Smart" : strategyLabel(cfg.strategy as string)}</Badge>
                     <Badge className={cfg.momentumEntriesOnly === true ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"}>
                       {cfg.momentumEntriesOnly === true ? "Strong-momentum entries only" : "All strategy entries"}
                     </Badge>

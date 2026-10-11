@@ -20,6 +20,8 @@ import { TradeStatsCard } from "./TradeStatsCard";
 import { TradeOutcomesCard } from "./TradeOutcomesCard";
 import { DEFAULT_FILTERS, type AnalyticsFilterState } from "./api";
 import { cn } from "@/lib/utils";
+import { StrategyComparisonCard } from "./StrategyComparisonCard";
+import { strategyLabel } from "@/automation/strategy/catalog";
 
 interface Props {
   title?: string;
@@ -31,6 +33,7 @@ const MOBILE_TABS = [
   { id: "charts", label: "Charts" },
   { id: "open", label: "Open Positions" },
   { id: "performance", label: "Performance" },
+  { id: "compare", label: "Compare" },
   { id: "trades", label: "Trades" },
   { id: "backtests", label: "Backtests" },
   { id: "activity", label: "Activity" },
@@ -41,18 +44,19 @@ type MobileTabId = (typeof MOBILE_TABS)[number]["id"];
 function ActiveFilters({ filters }: { filters: AnalyticsFilterState }) {
   const parts: { label: string; value: string }[] = [];
   if (filters.botId != null) parts.push({ label: "Bot", value: `#${filters.botId}` });
+  if (filters.strategy) parts.push({ label: "Strategy", value: strategyLabel(filters.strategy) });
   if (filters.symbol) parts.push({ label: "Symbol", value: filters.symbol });
   if (filters.side) parts.push({ label: "Side", value: filters.side === "BUY" ? "Long" : "Short" });
   if (filters.startTime) parts.push({ label: "From", value: formatShortDate(filters.startTime) });
   if (filters.endTime) parts.push({ label: "To", value: formatShortDate(filters.endTime) });
 
-  const cleared = !filters.botId && !filters.symbol && !filters.side && !filters.startTime && !filters.endTime;
+  const cleared = !filters.botId && !filters.symbol && !filters.strategy && !filters.side && !filters.startTime && !filters.endTime;
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
       <span className="text-xs font-medium text-muted-foreground">Showing:</span>
       {cleared ? (
-        <span className="text-xs text-muted-foreground">all bots, all symbols, all time</span>
+        <span className="text-xs text-muted-foreground">all bots, all strategies, all symbols, all time</span>
       ) : (
         parts.map((p) => (
           <span
@@ -141,6 +145,10 @@ export function AnalyticsView({ title = "Analytics", description }: Props) {
             <StrategyPerformanceCard filters={filters} />
             <SymbolPerformanceCard filters={filters} />
           </div>
+        </section>
+
+        <section className={sectionCls("compare")}>
+          <StrategyComparisonCard />
         </section>
 
         <section className={sectionCls("trades")}>

@@ -99,6 +99,39 @@ export class TrailingStopManager {
   }
 
   /**
+   * Move the stop to an explicit level (e.g. a candle-channel trail). Only ever
+   * tightens it, keeps it on the protective side of the live price, and goes
+   * through the same liquidation gate + place-then-cancel replacement as
+   * update().
+   */
+  async moveStopTo(snapshot: PositionSnapshot, level: number): Promise<TrailingUpdateResult> {
+    const { position } = snapshot;
+    const current = position.stopLoss;
+    const price = snapshot.currentPrice;
+    if (!current || !(level > 0) || !price || price <= 0) return { moved: false, newStopLoss: current ?? null };
+
+    const isLong = position.side === "BUY";
+    const candidate = this.roundPrice(level, isLong, price);
+    const tighter = isLong ? candidate > current : candidate < current;
+    const protective = isLong ? candidate < price : candidate > price;
+    const movedFarEnough = Math.abs(candidate - current) / current >= 0.0001;
+    if (!tighter || !protective || !movedFarEnough) return { moved: false, newStopLoss: current };
+
+    const gate = validateStopLossBoundary({
+      side: position.side,
+      stopLoss: candidate,
+      liquidationPrice: snapshot.exchangePosition?.liquidationPrice ?? null,
+      entryPrice: snapshot.exchangePosition?.entryPrice ?? position.entryPrice,
+    });
+    if (!gate.determinable || !gate.ok) return { moved: false, newStopLoss: current };
+
+    const placed = await this.replaceStopOrder(position, candidate);
+    if (!placed) return { moved: false, newStopLoss: current };
+    await this.store.updateTrailing(position.id, candidate, position.highestPrice ?? price, position.lowestPrice ?? price);
+    return { moved: true, newStopLoss: candidate };
+  }
+
+  /**
    * Move the trailing stop safely.
    *
    * The previous implementation CANCELLED the existing SL and then placed the

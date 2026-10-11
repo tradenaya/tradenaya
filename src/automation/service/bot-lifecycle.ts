@@ -46,6 +46,8 @@ export interface BotRuntimeState {
   leaseExpiresAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  /** LIVE (real account) or PAPER (simulated account). */
+  tradingMode?: "LIVE" | "PAPER";
 }
 
 const SCHEDULER_COLUMNS: Array<[string, string]> = [
@@ -58,6 +60,8 @@ const SCHEDULER_COLUMNS: Array<[string, string]> = [
   ["heartbeat_at", "TIMESTAMP NULL"],
   ["lease_owner", "VARCHAR(64) NULL"],
   ["lease_expires_at", "TIMESTAMP NULL"],
+  // NEW (paper trading): LIVE = real CoinSwitch account, PAPER = simulated account.
+  ["trading_mode", "VARCHAR(10) NOT NULL DEFAULT 'LIVE'"],
 ];
 
 export class BotLifecycleService {
@@ -111,8 +115,8 @@ export class BotLifecycleService {
     await this.ensureSchedulerSchema();
     const [result] = await db.query(
       `INSERT INTO automation_bots (
-        user_id, symbol, strategy, leverage, capital, capital_mode, wallet_percent, name, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        user_id, symbol, strategy, leverage, capital, capital_mode, wallet_percent, name, status, trading_mode
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         input.userId,
         input.symbol,
@@ -123,6 +127,7 @@ export class BotLifecycleService {
         input.walletPercent ?? null,
         input.name ?? null,
         input.status ?? "RUNNING",
+        input.tradingMode === "PAPER" ? "PAPER" : "LIVE",
       ],
     ) as any;
 
@@ -169,15 +174,16 @@ export class BotLifecycleService {
 
   async updateConfig(
     id: number,
-    input: { leverage: number; capital: number; capitalMode: "fixed" | "percent"; walletPercent?: number; name?: string | null; configJson: string },
+    input: { leverage: number; capital: number; capitalMode: "fixed" | "percent"; walletPercent?: number; name?: string | null; strategy?: string; configJson: string },
   ) {
     await this.ensureSchedulerSchema();
     await db.query(
       `UPDATE automation_bots SET
         leverage = ?, capital = ?, capital_mode = ?, wallet_percent = ?, name = ?, config_json = ?,
+        strategy = COALESCE(?, strategy),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?;`,
-      [input.leverage, input.capital, input.capitalMode, input.walletPercent ?? null, input.name ?? null, input.configJson, id],
+      [input.leverage, input.capital, input.capitalMode, input.walletPercent ?? null, input.name ?? null, input.configJson, input.strategy ?? null, id],
     );
   }
 
@@ -302,11 +308,12 @@ export class BotLifecycleService {
     return (rows as any[])[0] ? this.mapRow((rows as any[])[0]) : null;
   }
 
-  async countActiveBotsForUser(userId: number): Promise<number> {
+  /** Running bots of one trading mode (paper bots never count toward the live limit). */
+  async countActiveBotsForUser(userId: number, mode: "LIVE" | "PAPER" = "LIVE"): Promise<number> {
     await this.ensureSchedulerSchema();
     const [rows] = await db.query(
-      `SELECT COUNT(*) AS count FROM automation_bots WHERE user_id = ? AND desired_status = 'RUNNING';`,
-      [userId],
+      `SELECT COUNT(*) AS count FROM automation_bots WHERE user_id = ? AND desired_status = 'RUNNING' AND trading_mode = ?;`,
+      [userId, mode],
     );
     return Number((rows as any[])[0]?.count ?? 0);
   }
@@ -342,6 +349,7 @@ export class BotLifecycleService {
       lastExecutionAt: row.last_execution_at ?? null,
       configJson: row.config_json ?? null,
       lastError: row.last_error ?? null,
+      tradingMode: String(row.trading_mode ?? "LIVE").toUpperCase() === "PAPER" ? "PAPER" : "LIVE",
       retryCount: Number(row.retry_count ?? 0),
       nextRunAt: row.next_run_at ?? null,
       heartbeatAt: row.heartbeat_at ?? null,

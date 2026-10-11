@@ -1,5 +1,7 @@
 import type { MarketCandle } from "@/automation/types";
 import { AutomationEngine } from "@/automation/engine/automation-engine";
+import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
+import { EXIT_LOOKBACK } from "@/automation/strategy/trend-breakout";
 import { TechnicalIndicatorEngine } from "@/automation/indicators/indicator-engine";
 import { StrategyRegistry } from "@/automation/strategy/strategy-registry";
 import { DefaultTradePlanner } from "@/automation/planner/trade-planner";
@@ -243,6 +245,7 @@ export class BacktestingEngine {
     const risk = this.riskManager.evaluate(this.buildRiskInput(config, plan, portfolio, candle));
     if (!risk.approved || !(risk.positionSize > 0)) return;
 
+    const breakout = config.strategy === TREND_BREAKOUT_ID;
     const createdAt = candle.timestamp;
     // Same lifetime rule as live (one candle of the timeframe, min 30 min),
     // counted from when the live bot would place the order: the signal candle's close.
@@ -262,9 +265,11 @@ export class BacktestingEngine {
       createdAt,
       expiresAt: placedAt + expiryMinutes * 60_000,
       reason: plan.reason,
-      trailingEnabled: config.enableTrailingStop,
+      // Trend Breakout positions trail the 10-candle channel instead of a % distance.
+      trailingEnabled: breakout ? false : config.enableTrailingStop,
       trailingDistancePct: config.trailingDistancePercent ?? 1,
       trailingActivationPct: 0,
+      channelTrailLookback: breakout ? EXIT_LOOKBACK : undefined,
     });
   }
 
@@ -288,7 +293,10 @@ export class BacktestingEngine {
       wallet: { balance: wallet.balance },
       capital: {
         mode: config.capitalMode,
-        amount: config.capitalMode === "fixed" ? config.initialCapital : undefined,
+        // A fixed allocation can never exceed what is left in the wallet: after a
+        // loss the full initial amount no longer exists, and asking for it made
+        // the allocation check reject every later trade.
+        amount: config.capitalMode === "fixed" ? Math.min(config.initialCapital, wallet.balance) : undefined,
         percent: config.capitalMode === "percent" ? config.walletPercent : undefined,
         leverage: config.leverage,
       },

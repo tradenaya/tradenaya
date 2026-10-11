@@ -5,6 +5,7 @@ import { AutoBestSelector } from "@/automation/coinauto/auto-best-selector";
 import { coinswitchClient } from "@/automation/executor/client";
 import { serverMarketDataService } from "@/automation/market/service";
 import { errorResponse } from "@/lib/api-error";
+import { DEFAULT_STRATEGY_ID, isKnownStrategy, strategyInfo } from "@/automation/strategy/catalog";
 
 const DEFAULT_AUTO_SELECTION_TIMEOUT_MS = 90_000;
 
@@ -53,9 +54,12 @@ export async function GET(req: NextRequest) {
       };
     }
 
+    const strategy = isKnownStrategy(base.strategy) ? base.strategy : DEFAULT_STRATEGY_ID;
+    const info = strategyInfo(strategy);
     const config: AutomationConfig = {
       symbol: "AUTO",
-      timeframe: String(base.timeframe ?? "1h"),
+      strategy,
+      timeframe: info.fixedTimeframe ?? String(base.timeframe ?? "1h"),
       leverage: Number(base.leverage) || 5,
       leverageMode: base.leverageMode === "auto" ? "auto" : "manual",
       leveragePercent: Number(base.leveragePercent) || 50,
@@ -69,7 +73,8 @@ export async function GET(req: NextRequest) {
       maxRiskPerTrade: Number(base.maxRiskPerTrade) || 1,
       dailyLossLimit: Number(base.dailyLossLimit) || 5,
       enableTrailingStop: Boolean(base.enableTrailingStop),
-      momentumEntriesOnly: base.momentumEntriesOnly === true,
+      momentumEntriesOnly: info.supportsMomentumFilter && base.momentumEntriesOnly === true,
+      coinUniverse: base.coinUniverse === "MAJORS" ? "MAJORS" : "TOP_VOLUME",
       trailingDistancePercent:
         base.trailingDistancePercent != null
           ? Number(base.trailingDistancePercent)

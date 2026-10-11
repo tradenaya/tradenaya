@@ -9,6 +9,7 @@ import type {
   OpenPositionRow,
   Paged,
 } from "./types";
+import { currentTradingMode } from "@/automation/paper/mode";
 
 function isMissingTable(error: unknown): boolean {
   const message =
@@ -92,9 +93,22 @@ interface ClosedTradeRowDb {
   take_profit: number | null;
 }
 
+/**
+ * Rows of the current trading mode only (live view vs paper view), through the
+ * bot that owns them. Rows without a bot belong to the live account.
+ */
+function modeClause(column: string): { sql: string; params: unknown[] } {
+  const mode = currentTradingMode();
+  return {
+    sql: `(${column} IN (SELECT id FROM automation_bots WHERE trading_mode = ?)${mode === "LIVE" ? ` OR ${column} IS NULL` : ""})`,
+    params: [mode],
+  };
+}
+
 function buildWhere(filters: AnalyticsFilters, prefix = "ct."): { sql: string; params: unknown[] } {
-  const clauses: string[] = [];
-  const params: unknown[] = [];
+  const mode = modeClause(`${prefix}bot_id`);
+  const clauses: string[] = [mode.sql];
+  const params: unknown[] = [...mode.params];
   if (filters.botId != null) {
     clauses.push(`${prefix}bot_id = ?`);
     params.push(filters.botId);
@@ -102,6 +116,11 @@ function buildWhere(filters: AnalyticsFilters, prefix = "ct."): { sql: string; p
   if (filters.symbol) {
     clauses.push(`${prefix}symbol = ?`);
     params.push(filters.symbol);
+  }
+  if (filters.strategy) {
+    // Trades belong to a strategy through the bot that took them.
+    clauses.push(`${prefix}bot_id IN (SELECT id FROM automation_bots WHERE strategy = ?)`);
+    params.push(filters.strategy);
   }
   if (filters.side) {
     clauses.push(`${prefix}side = ?`);
@@ -285,8 +304,8 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
   async getBots(userId: number): Promise<BotRow[]> {
     await this.ensureSchema();
     const [rows] = await db.query(
-      `SELECT * FROM automation_bots WHERE user_id = ? ORDER BY id DESC;`,
-      [userId],
+      `SELECT * FROM automation_bots WHERE user_id = ? AND trading_mode = ? ORDER BY id DESC;`,
+      [userId, currentTradingMode()],
     );
     return (rows as any[]).map(mapBot);
   }
@@ -307,8 +326,8 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
          COUNT(*) AS total,
          SUM(CASE WHEN desired_status = 'RUNNING' THEN 1 ELSE 0 END) AS active
        FROM automation_bots
-       WHERE user_id = ?;`,
-      [userId],
+       WHERE user_id = ? AND trading_mode = ?;`,
+      [userId, currentTradingMode()],
     );
     const row = (rows as any[])[0];
     return { active: Number(row?.active ?? 0), total: Number(row?.total ?? 0) };
@@ -421,9 +440,10 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
          ON automation_executions.id = automation_positions.execution_id
          AND automation_executions.user_id = automation_positions.user_id
        WHERE automation_positions.user_id = ? AND automation_positions.state NOT IN ('CLOSED', 'ERROR')
+         AND ${modeClause("automation_positions.bot_id").sql}
          ${botId != null ? "AND automation_positions.bot_id = ?" : ""}
        ORDER BY automation_positions.id DESC;`,
-      botId != null ? [userId, botId] : [userId],
+      botId != null ? [userId, currentTradingMode(), botId] : [userId, currentTradingMode()],
     );
     return (rows as any[]).map(mapPosition);
   }
@@ -434,9 +454,10 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
       const [rows] = await db.query(
         `SELECT * FROM automation_executions
          WHERE user_id = ? AND state NOT IN ('CANCELLED', 'FAILED', 'CLOSED')
+           AND ${modeClause("bot_id").sql}
            ${botId != null ? "AND bot_id = ?" : ""}
          ORDER BY id DESC;`,
-        botId != null ? [userId, botId] : [userId],
+        botId != null ? [userId, currentTradingMode(), botId] : [userId, currentTradingMode()],
       );
       return (rows as any[]).map(mapExecution);
     } catch (error) {
@@ -452,8 +473,9 @@ export class BotAnalyticsRepository implements IAnalyticsRepository {
     await this.ensureSchema();
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
     const offset = opts.offset ?? 0;
-    const botClause = opts.botId != null ? " AND bot_id = ?" : "";
-    const botParams = opts.botId != null ? [opts.botId] : [];
+    const mode = modeClause("bot_id");
+    const botClause = ` AND ${mode.sql}` + (opts.botId != null ? " AND bot_id = ?" : "");
+    const botParams = [...mode.params, ...(opts.botId != null ? [opts.botId] : [])];
 
     const [[countRows], [rows]] = (await Promise.all([
       db.query(

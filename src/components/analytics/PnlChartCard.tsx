@@ -24,7 +24,7 @@ const GRID_STROKE = "rgba(168,152,128,0.15)"
 export function PnlChartCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<PnlAnalytics>(
     () => apiGet("/api/analytics/pnl", { ...toQuery(filters), granularity: filters.granularity }),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime, filters.granularity],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime, filters.granularity],
   )
 
   return (

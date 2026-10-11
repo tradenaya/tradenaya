@@ -19,7 +19,7 @@ import { formatMoney, formatPercent, pnlText, signClass } from "./format"
 export function SymbolPerformanceCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<SymbolPerformance[]>(
     () => apiGet("/api/analytics/symbols", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   const symbols = data ?? []

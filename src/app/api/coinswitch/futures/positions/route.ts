@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest, paperFetch } from "@/app/api/coinswitch/_helpers";
 import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     console.log("=== POSITIONS DEBUG START ===");
     console.log("POSITIONS URL:", url);
 
-    const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
+    const res = (await paperFetch(req as any, "GET", "/futures/positions", { exchange: "EXCHANGE_2", symbol: symbol.toLowerCase() })) ?? await fetch(url, { method: "GET", headers, cache: "no-store" });
     const raw = await res.text();
 
     console.log("POSITIONS STATUS:", res.status);
