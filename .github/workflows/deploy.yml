@@ -9,6 +9,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch: # "Run workflow" button in the Actions tab, for a manual redeploy
+    inputs:
+      force:
+        description: "Rebuild and restart even if the live build is already the latest commit"
+        type: boolean
+        default: false
 
 # Never run two deploys at once; a newer merge waits for the running deploy.
 concurrency:
@@ -43,8 +48,23 @@ jobs:
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           PM2_APP: ${{ vars.PM2_APP || 'tradenaya' }}
           APP_PORT: ${{ vars.APP_PORT || '3000' }}
+          FORCE: ${{ inputs.force && '1' || '0' }}
         run: |
-          # Run the deploy script as it is on origin/main (not the server's
+          # Runs the deploy script as it is on origin/main (not the server's
           # older copy), so changes to the script itself apply immediately.
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 "$SSH_USER@$SSH_HOST" \
-            "cd ~/tradenaya && git fetch --quiet origin main && git show origin/main:scripts/deploy.sh | PM2_APP='$PM2_APP' PORT='$APP_PORT' bash -s"
+          #
+          # The script runs DETACHED on the server (setsid + nohup) and this job
+          # only streams its log. Cancelling the job or losing the connection
+          # therefore never kills a deploy halfway — it finishes (or rolls back)
+          # on its own; the result is in ~/tradenaya/.deploy.log.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          set -e
+          cd ~/tradenaya
+          git fetch --quiet origin main
+          git show origin/main:scripts/deploy.sh > .deploy-run.sh
+          : > .deploy.log
+          PM2_APP='$PM2_APP' PORT='$APP_PORT' FORCE='$FORCE' setsid nohup bash .deploy-run.sh > .deploy.log 2>&1 < /dev/null &
+          pid=\$!
+          tail -n +1 -f --pid=\$pid .deploy.log
+          wait \$pid
+          EOF

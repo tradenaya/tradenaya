@@ -56,14 +56,28 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   fail "The server copy has uncommitted changes to tracked files (listed above). Commit or discard them on the server, then deploy again."
 fi
 
-PREV="$(git rev-parse HEAD)"
+# The commit the LIVE build was made from, recorded after each successful
+# deploy. The checkout's HEAD alone isn't enough: a deploy interrupted after
+# the pull but before the build would leave new code with the old build, and
+# "HEAD is up to date" would then wrongly skip the rebuild.
+MARKER=".next/.deployed-commit"
+DEPLOYED=""
+if [ -f "$MARKER" ] && git cat-file -e "$(cat "$MARKER")^{commit}" 2>/dev/null; then
+  DEPLOYED="$(cat "$MARKER")"
+fi
+# Roll back to what is actually live (falls back to HEAD the first time).
+PREV="${DEPLOYED:-$(git rev-parse HEAD)}"
+
 log "Fetching origin/$BRANCH"
 git fetch --quiet origin "$BRANCH"
 NEXT="$(git rev-parse "origin/$BRANCH")"
 
-if [ "$PREV" = "$NEXT" ] && [ "${FORCE:-0}" != "1" ]; then
+if [ "$DEPLOYED" = "$NEXT" ] && [ "${FORCE:-0}" != "1" ]; then
   log "Already running $(git log -1 --format='%h %s') — nothing to deploy."
   exit 0
+fi
+if [ -z "$DEPLOYED" ]; then
+  log "No record of which commit is live yet — doing a full build to be safe."
 fi
 
 log "Updating $(git log -1 --format='%h' "$PREV") → $(git log -1 --format='%h %s' "$NEXT")"
@@ -123,6 +137,7 @@ pm2 restart "$PM2_APP" --update-env >/dev/null
 
 log "Checking $HEALTH_URL"
 if healthy; then
+  git rev-parse HEAD > "$MARKER"
   pm2 save >/dev/null 2>&1 || true
   pm2 status "$PM2_APP" || true
   log "Deployed $(git log -1 --format='%h %s') ✓"
