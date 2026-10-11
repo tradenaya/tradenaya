@@ -66,7 +66,7 @@ export class DefaultRiskValidator implements RiskValidator {
       checks.push({
         name: "min-wallet-balance",
         passed: false,
-        message: `Wallet balance ${Number(wallet.balance).toFixed(2)} is below the required minimum of ${config.minWalletBalance}.`,
+        message: `Wallet balance ${Number(wallet.balance).toFixed(2)} USDT is below the required minimum of ${config.minWalletBalance} USDT.`,
       });
     } else {
       checks.push({

@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { ListSkeleton } from "@/components/ui/skeletons";
 import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
 import { orderTypeLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms";
+import { formatUsdtAmount } from "@/lib/currency/store";
 
 interface OpenOrder {
   order_id: string;
@@ -102,7 +103,7 @@ export default function OpenOrdersPanel({ symbol }: { symbol: string }) {
                     <span className="text-xs text-muted-foreground">{order.status}</span>
                   </div>
                   <div className="text-foreground">
-                    {order.quantity} {symbol.replace("USDT", "")} @ {order.price} USDT
+                    {order.quantity} {symbol.replace("USDT", "")} @ {formatUsdtAmount(Number(order.price), 4)}
                   </div>
                   {Number(order.exec_quantity) > 0 && (
                     <div className="mt-0.5 text-xs text-muted-foreground">

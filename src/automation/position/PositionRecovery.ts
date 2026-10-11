@@ -6,6 +6,7 @@ import type { CoinSwitchClientLike, ExitReason, PositionManagerConfig, PositionR
 import { detectExecutedClose, detectClosedOrderClose, confirmExternalClose, detectLiquidation } from "./executed-close";
 import { reconcileClose } from "./close-accounting";
 import { classifyStatus } from "@/automation/executor/order-status";
+import { usdt } from "@/lib/currency/usdt-text";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 
@@ -302,7 +303,7 @@ export class PositionRecovery {
     });
     await this.executionStore.updateState(position.executionId, "CLOSED");
     if (reason !== "LIQUIDATION") {
-      await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${reason} (recovery: position missing from exchange, close confirmed) at ${exitPrice ?? "n/a"} pnl=${accounting.realizedPnl ?? "unknown"}`);
+      await this.saveEvent(position, "RECOVERY_CLOSED", `${position.symbol} closed via ${reason} (recovery: position missing from exchange, close confirmed) at ${usdt(exitPrice)} pnl=${accounting.realizedPnl != null ? usdt(accounting.realizedPnl) : "unknown"}`);
     }
     await this.releaseBot(position);
   }

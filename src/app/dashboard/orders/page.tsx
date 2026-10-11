@@ -176,7 +176,7 @@ export default function OrdersPage() {
                             <div className="mt-1 text-xs text-muted-foreground">{orderTypeLabel(order.orderType)}</div>
                           </TableCell>
                           <TableCell>{statusBadge(order.status)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatPrice(order.quantity)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{order.quantity != null ? Number(order.quantity).toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(order.price)}</TableCell>
                           <TableCell className="text-right tabular-nums hidden md:table-cell">
                             {formatPrice(order.triggerPrice)}

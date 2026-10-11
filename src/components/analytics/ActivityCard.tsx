@@ -8,6 +8,8 @@ import type { ActivityFeed } from "@/automation/analytics/types"
 import { apiGet, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatDate } from "./format"
+import { localizeUsdtText } from "@/lib/currency/store"
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 function SeverityBadge({ severity }: { severity: "INFO" | "WARNING" | "ERROR" }) {
   if (severity === "ERROR") return <Badge className="bg-red-500/15 text-red-400">Error</Badge>
@@ -16,6 +18,7 @@ function SeverityBadge({ severity }: { severity: "INFO" | "WARNING" | "ERROR" })
 }
 
 export function ActivityCard({ filters }: { filters: AnalyticsFilterState }) {
+  useDisplayCurrency() // re-render when the display currency / INR rate changes
   const { data, loading, errorInfo, refresh } = useAsyncData<ActivityFeed>(
     () => apiGet("/api/analytics/activity", { limit: 80 }),
     [filters.botId],
@@ -49,7 +52,7 @@ export function ActivityCard({ filters }: { filters: AnalyticsFilterState }) {
                   </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">{formatDate(item.timestamp)}</span>
                 </div>
-                <p className="mt-1 text-sm text-foreground">{item.message}</p>
+                <p className="mt-1 text-sm text-foreground">{localizeUsdtText(item.message)}</p>
               </li>
             ))}
           </ul>

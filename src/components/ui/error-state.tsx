@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { errorMessage, technicalLines } from "@/lib/api-client";
+import { errorMessage, rawErrorMessage, technicalLines } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 interface ErrorStateProps {
@@ -27,7 +27,7 @@ export function ErrorState({ error, title = "Something went wrong", onRetry, com
   const [copied, setCopied] = useState(false);
   const message = errorMessage(error);
   const lines = technicalLines(error);
-  const technical = [`${title}: ${message}`, ...lines].join("\n");
+  const technical = [`${title}: ${rawErrorMessage(error)}`, ...lines].join("\n");
 
   async function copy() {
     try {

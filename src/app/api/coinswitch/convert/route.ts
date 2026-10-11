@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getKeysFromRequest } from "@/app/api/coinswitch/_helpers";
-import { convertInrToUsdt, CoinSwitchAccessError } from "@/lib/coinswitch/convert";
+import { convertInrToUsdt, convertUsdtToInr, CoinSwitchAccessError } from "@/lib/coinswitch/convert";
 import { db } from "@/lib/db";
 import { getCustomerFromRequest } from "@/lib/auth";
 import { errorResponse } from "@/lib/api-error";
@@ -69,7 +69,126 @@ async function saveConversionRecord(payload: {
   }
 }
 
+async function saveSellRecord(payload: {
+  userId: number | null;
+  userEmail: string | null;
+  amountUsdt: number;
+  usdtSold: number | null;
+  inrReceived: number | null;
+  rate: number | null;
+  fee: number | null;
+  status: string;
+  message: string | null;
+  exchangeOrderId: string | null;
+  rawResponse: string | null;
+}) {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS usdt_to_inr_conversions (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        user_id INT NULL,
+        user_email VARCHAR(255) NULL,
+        amount_usdt DECIMAL(18, 8) NOT NULL,
+        usdt_sold DECIMAL(18, 8) NULL,
+        inr_received DECIMAL(18, 8) NULL,
+        rate DECIMAL(18, 8) NULL,
+        fee DECIMAL(18, 8) NULL,
+        status VARCHAR(40) NOT NULL,
+        message TEXT NULL,
+        exchange_order_id VARCHAR(255) NULL,
+        raw_response JSON NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_user_created (user_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await db.query(
+      `INSERT INTO usdt_to_inr_conversions (
+        user_id, user_email, amount_usdt, usdt_sold, inr_received, rate, fee,
+        status, message, exchange_order_id, raw_response
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      [
+        payload.userId,
+        payload.userEmail,
+        payload.amountUsdt,
+        payload.usdtSold,
+        payload.inrReceived,
+        payload.rate,
+        payload.fee,
+        payload.status,
+        payload.message,
+        payload.exchangeOrderId,
+        payload.rawResponse,
+      ],
+    );
+  } catch (error) {
+    console.error("FAILED TO SAVE USDT→INR CONVERSION", error);
+  }
+}
+
+/** USDT → INR: spot SELL of USDT/INR. */
+async function sellUsdt(
+  keys: { apiKey: string; apiSecret: string },
+  amountUsdt: number,
+  customer: { customerId: number; email: string | null } | null,
+) {
+  try {
+    const result = await convertUsdtToInr(keys, amountUsdt);
+    await saveSellRecord({
+      userId: customer?.customerId ?? null,
+      userEmail: customer?.email ?? null,
+      amountUsdt,
+      usdtSold: result.usdtSold,
+      inrReceived: result.inrReceived,
+      rate: result.rate,
+      fee: result.fee,
+      status: result.status,
+      message: null,
+      exchangeOrderId: result.orderId,
+      rawResponse: JSON.stringify(result),
+    });
+    return NextResponse.json({
+      success: true,
+      data: {
+        direction: "USDT_TO_INR",
+        ...result,
+        note: "INR is credited to your CoinSwitch wallet.",
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.message ? error.message : "Failed to convert USDT to INR — please try again.";
+    const status = error instanceof CoinSwitchAccessError && error.status ? error.status : 400;
+    await saveSellRecord({
+      userId: customer?.customerId ?? null,
+      userEmail: customer?.email ?? null,
+      amountUsdt,
+      usdtSold: null,
+      inrReceived: null,
+      rate: null,
+      fee: null,
+      status: "FAILED",
+      message,
+      exchangeOrderId: null,
+      rawResponse: JSON.stringify({ error: message }),
+    });
+    return errorResponse(error, status, message, "/api/coinswitch/convert");
+  }
+}
+
+/**
+ * Anything thrown outside the conversion's own error handling (e.g. the
+ * database being unreachable while loading the user's API keys) becomes a
+ * readable JSON error instead of Next.js's empty 500.
+ */
 export async function POST(req: NextRequest) {
+  try {
+    return await handleConvert(req);
+  } catch (error) {
+    return errorResponse(error, 500, "Conversion failed before reaching CoinSwitch — no money was moved.", "/api/coinswitch/convert");
+  }
+}
+
+async function handleConvert(req: NextRequest) {
   let customer: { customerId: number; email: string | null } | null = null;
   try {
     customer = getCustomerFromRequest(req);
@@ -77,11 +196,28 @@ export async function POST(req: NextRequest) {
     customer = null;
   }
 
-  let body: { amountInr?: number };
+  let body: { amountInr?: number; amountUsdt?: number; direction?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, message: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const direction = body.direction === "USDT_TO_INR" ? "USDT_TO_INR" : "INR_TO_USDT";
+
+  if (direction === "USDT_TO_INR") {
+    const amountUsdt = Number(body.amountUsdt);
+    if (!Number.isFinite(amountUsdt) || amountUsdt <= 0) {
+      return NextResponse.json({ success: false, message: "Enter how much USDT you want to convert (a number greater than zero)." }, { status: 400 });
+    }
+    const sellKeys = await getKeysFromRequest(req);
+    if (!sellKeys?.apiKey || !sellKeys?.apiSecret) {
+      return NextResponse.json(
+        { success: false, message: "Not authenticated — please sign in and reconnect your CoinSwitch account." },
+        { status: 401 },
+      );
+    }
+    return sellUsdt({ apiKey: sellKeys.apiKey, apiSecret: sellKeys.apiSecret }, amountUsdt, customer);
   }
 
   const amountInr = Number(body.amountInr);
@@ -118,6 +254,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
+        direction: "INR_TO_USDT",
         amountInr,
         inrSpent: result.inrSpent,
         usdtReceived: result.usdtReceived,

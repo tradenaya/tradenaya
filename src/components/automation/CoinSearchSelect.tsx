@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { formatPrice, formatSignedPercent } from "@/components/analytics/format";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchData } from "@/lib/api-client";
+import { formatCompactAmount } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface CoinOption {
   symbol: string;
@@ -32,14 +34,11 @@ interface CoinSearchSelectProps {
 }
 
 function compactNumber(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${value.toFixed(0)}`;
+  return formatCompactAmount(value);
 }
 
 export function CoinSearchSelect({ value, onChange, disabled }: CoinSearchSelectProps) {
+  useDisplayCurrency(); // re-render when the display currency / INR rate changes
   const [coins, setCoins] = useState<CoinOption[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [open, setOpen] = useState(false);

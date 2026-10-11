@@ -1,6 +1,7 @@
 "use client";
 
 import type { ApiErrorDetails } from "@/lib/api-error";
+import { localizeUsdtText } from "@/lib/currency/store";
 
 /**
  * Error thrown by every client-side API call. Keeps the readable message for
@@ -64,10 +65,16 @@ export function technicalLines(error: unknown): string[] {
 }
 
 /** Readable message for any thrown value. */
-export function errorMessage(error: unknown, fallback = "Something went wrong"): string {
+/** The error's own message, untouched (for technical details / copy). */
+export function rawErrorMessage(error: unknown, fallback = "Something went wrong"): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error) return error;
   return fallback;
+}
+
+/** User-facing error text, with USDT amounts shown in the chosen display currency. */
+export function errorMessage(error: unknown, fallback = "Something went wrong"): string {
+  return localizeUsdtText(rawErrorMessage(error, fallback));
 }
 
 function messageFromBody(body: Record<string, unknown> | null): string | null {

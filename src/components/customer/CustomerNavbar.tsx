@@ -3,10 +3,13 @@
 import { Menu, User, LogOut, Plug, KeyRound, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { customerLogout } from "@/store/slices/customerAuthSlice";
 import { clearTenant } from "@/store/slices/tenantSlice";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { setDisplayCurrency } from "@/lib/currency/store";
 
 interface Props {
   onMenuClick: () => void;
@@ -17,6 +20,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
   const dispatch = useAppDispatch();
   const customerAuth = useAppSelector((state) => state.customerAuth);
   const tenant = useAppSelector((state) => state.tenant);
+  const displayCurrency = useDisplayCurrency();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -31,10 +35,29 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  /**
+   * Only clear the local session once the server has cleared the login cookie.
+   * If the request fails (e.g. no network) the cookie is still valid, so
+   * clearing local state would leave a half-logged-out screen — stay signed
+   * in and say why instead.
+   */
   async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
-      await fetch("/api/auth/signout", { method: "POST" });
-    } catch {}
+      const res = await fetch("/api/auth/signout", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      setLoggingOut(false);
+      toast.error("Couldn't log you out", {
+        description: navigator.onLine
+          ? "The server didn't respond. You're still signed in — please try again."
+          : "You're offline. You're still signed in — reconnect to the internet and try again.",
+      });
+      return;
+    }
 
     dispatch(customerLogout());
     dispatch(clearTenant());
@@ -68,14 +91,6 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
 
       {!mounted ? (
         <div className="w-32" />
-      ) : !customerAuth.isAuthenticated ? (
-        <button
-          onClick={() => router.push("/signin")}
-          className="px-5 py-2 rounded-lg font-medium hover:opacity-90 transition cursor-pointer"
-          style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground, #fff)" }}
-        >
-          Sign In
-        </button>
       ) : (
         <div className="flex items-center gap-2">
           <div ref={ref} className="relative">
@@ -92,7 +107,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
               >
                 <User size={18} />
               </div>
-              <span className="font-medium">{customerAuth.firstName}</span>
+              <span className="font-medium">{customerAuth.firstName || "Account"}</span>
               <ChevronDown size={16} style={{ color: "var(--muted-foreground)" }} />
             </button>
 
@@ -103,10 +118,48 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
               >
                 <div className="p-4 border-b" style={{ borderColor: "var(--border)" }}>
                   <div className="font-semibold">
-                    {customerAuth.firstName} {customerAuth.lastName}
+                    {[customerAuth.firstName, customerAuth.lastName].filter(Boolean).join(" ") || "Your account"}
                   </div>
                   <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>{customerAuth.email}</div>
                   <div className="text-xs mt-1" style={{ color: "var(--primary)" }}>{customerAuth.role}</div>
+                </div>
+                <div className="px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm">Currency</span>
+                    <div
+                      role="radiogroup"
+                      aria-label="Display currency"
+                      className="inline-flex rounded-lg border p-0.5"
+                      style={{ borderColor: "var(--border)" }}
+                    >
+                      {(["USDT", "INR"] as const).map((code) => {
+                        const active = displayCurrency.currency === code;
+                        return (
+                          <button
+                            key={code}
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setDisplayCurrency(code)}
+                            className="px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                            style={
+                              active
+                                ? { backgroundColor: "var(--primary)", color: "var(--primary-foreground, #fff)" }
+                                : { color: "var(--muted-foreground)" }
+                            }
+                          >
+                            {code === "INR" ? "₹ INR" : "$ USDT"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                    {displayCurrency.currency === "USDT"
+                      ? "Prices, PnL and logs shown in USDT."
+                      : displayCurrency.inrRate != null
+                        ? `Live rate ₹${displayCurrency.inrRate.toFixed(2)} / USDT${displayCurrency.rateStale ? " (last known)" : ""}. Orders still settle in USDT.`
+                        : "Fetching live rate… showing USDT until it loads."}
+                  </p>
                 </div>
                 <button
                   onClick={() => { setOpen(false); router.push("/coinswitch/connect"); }}
@@ -134,7 +187,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
                 >
                   <LogOut size={18} />
-                  Logout
+                  {loggingOut ? "Logging out…" : "Logout"}
                 </button>
               </div>
             )}

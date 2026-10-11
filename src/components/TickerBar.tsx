@@ -3,6 +3,7 @@
 import { TickerData } from "@/lib/coinswitch/futuresTickerSocket";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { currencyLabel, formatCompactAmount, formatDisplayPrice } from "@/lib/currency/store";
 
 export default function TickerBar({ ticker }: { ticker: TickerData | null }) {
   if (!ticker) {
@@ -25,18 +26,18 @@ export default function TickerBar({ ticker }: { ticker: TickerData | null }) {
   return (
     <Card className="mb-5 bg-card">
       <CardContent className="grid grid-cols-2 gap-4 py-4 text-sm md:grid-cols-4">
-        <Stat label="Last Price" value={ticker.c} highlight={isUp ? "up" : "down"} />
+        <Stat label="Last Price" value={formatDisplayPrice(ticker.c, 6)} highlight={isUp ? "up" : "down"} />
         <Stat label="24h Change" value={`${isUp ? "+" : ""}${changePct.toFixed(2)}%`} highlight={isUp ? "up" : "down"} />
-        <Stat label="24h High" value={ticker.h} />
-        <Stat label="24h Low" value={ticker.l} />
-        <Stat label="Mark Price" value={ticker.p?.toFixed(6)} />
-        <Stat label="Index Price" value={ticker.i?.toFixed(6)} />
+        <Stat label="24h High" value={formatDisplayPrice(ticker.h, 6)} />
+        <Stat label="24h Low" value={formatDisplayPrice(ticker.l, 6)} />
+        <Stat label="Mark Price" value={formatDisplayPrice(ticker.p, 6)} />
+        <Stat label="Index Price" value={formatDisplayPrice(ticker.i, 6)} />
         <Stat label="Funding Rate" value={`${(ticker.r * 100).toFixed(4)}%`} />
         <Stat label="Next Funding" value={`${hours}h ${mins}m`} />
         <Stat label="24h Volume (Base)" value={ticker.bv} />
-        <Stat label="24h Volume (USDT)" value={Number(ticker.qv).toLocaleString()} />
-        <Stat label="Best Bid" value={ticker.b} />
-        <Stat label="Best Ask" value={ticker.a} />
+        <Stat label={`24h Volume (${currencyLabel()})`} value={formatCompactAmount(Number(ticker.qv))} />
+        <Stat label="Best Bid" value={formatDisplayPrice(ticker.b, 6)} />
+        <Stat label="Best Ask" value={formatDisplayPrice(ticker.a, 6)} />
       </CardContent>
     </Card>
   );

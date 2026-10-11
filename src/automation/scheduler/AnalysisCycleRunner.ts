@@ -384,7 +384,7 @@ export class AnalysisCycleRunner {
     const plan = engineResult.plan;
     await this.deps.stateManager.transition(bot.id, "ANALYZING", "TRADE_PLANNED");
     const entry = plan.limitPrice ?? plan.entryPrice ?? engineResult.analysis?.price;
-    const priceText = entry != null && Number.isFinite(entry) ? `@ ${entry}` : "";
+    const priceText = entry != null && Number.isFinite(entry) ? `@ ${entry} USDT` : "";
     const confidenceText = plan.confidence != null ? `, confidence ${Math.round(plan.confidence * 100)}%` : "";
     await this.deps.events.emit({ type: "TRADE_PLANNED", botId: bot.id, userId: bot.userId, message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, data: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence, analysis: engineResult.analysis } });
     liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "plan", message: `${plan.side ?? plan.action} ${cycleSymbol} ${priceText}${confidenceText}`, detail: { side: plan.side ?? plan.action, limitPrice: plan.limitPrice, confidence: plan.confidence } });

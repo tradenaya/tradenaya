@@ -12,6 +12,7 @@ import { closedCandles } from "@/automation/indicators/candle-resampler";
 import { MOMENTUM_RSI_THRESHOLD, passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
 import { summarizeDecision } from "@/automation/strategy/tradenaya/humanize";
 import type { AnalysisPhase } from "@/automation/scheduler/LiveActivityHub";
+import { usdt } from "@/lib/currency/usdt-text";
 
 export type EngineStep = { phase: AnalysisPhase; message: string; detail?: Record<string, unknown> };
 export type EngineStepHandler = (step: EngineStep) => void;
@@ -125,7 +126,7 @@ export class AutomationEngine {
       return { signal: "WAIT", analysis };
     }
 
-    step("plan", `Plan ready — ${plan.action} ${config.symbol} @ ${plan.limitPrice ?? market.price} | SL ${plan.stopLoss} · TP ${plan.takeProfit} | R:R ${plan.riskRewardRatio}`);
+    step("plan", `Plan ready — ${plan.action} ${config.symbol} @ ${usdt(plan.limitPrice ?? market.price)} | SL ${usdt(plan.stopLoss)} · TP ${usdt(plan.takeProfit)} | R:R ${plan.riskRewardRatio}`);
     const risk = this.riskManager.assess(
       {
         capital: config.capital,

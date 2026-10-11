@@ -16,7 +16,7 @@ import { futuresTickerSocket, TickerData } from "@/lib/coinswitch/futuresTickerS
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
 import { cn } from "@/lib/utils";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { convertUsdt, currencyLabel, getCurrencyState, formatDisplayPrice } from "@/lib/currency/store";
 
 interface Position {
   position_id: string;
@@ -43,11 +43,17 @@ interface OpenOrder {
   trigger_price?: string;
 }
 
-function money(value: string | number | null | undefined): string {
+/** Quantity in coin units — never currency-converted. */
+function qty(value: string | number | null | undefined): string {
   if (value == null) return "—";
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
   return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/** USDT price/amount in the chosen display currency. */
+function money(value: string | number | null | undefined): string {
+  return formatDisplayPrice(value);
 }
 
 function balance(value: string | number | null | undefined): string {
@@ -224,7 +230,7 @@ function CompactPositionCard({ symbol }: { symbol: string }) {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Size</span>
-              <span className="text-foreground">{money(pos.position_size)} {symbol.replace(/USDT$/, "")}</span>
+              <span className="text-foreground">{qty(pos.position_size)} {symbol.replace(/USDT$/, "")}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Entry</span>
@@ -276,7 +282,7 @@ function CompactOrdersCard({ symbol }: { symbol: string }) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Qty</span>
-                  <span className="text-foreground">{money(order.quantity)} {symbol.replace(/USDT$/, "")}</span>
+                  <span className="text-foreground">{qty(order.quantity)} {symbol.replace(/USDT$/, "")}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Price</span>

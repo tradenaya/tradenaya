@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/table"
 import type { BacktestDetail } from "@/automation/analytics/types"
 import { apiGet } from "./api"
-import { formatDate, formatMoney, formatPercent, formatShortDate, pnlText, signClass } from "./format"
+import { formatDate, formatMoney, formatPercent, formatPrice, formatShortDate, pnlText, signClass } from "./format"
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 const AXIS_STROKE = "#9aa4b6"
 const GRID_STROKE = "rgba(154,164,182,0.15)"
@@ -61,6 +62,7 @@ export function BacktestDetailDialog({
   onOpenChange: (open: boolean) => void
   backtestId: number | null
 }) {
+  useDisplayCurrency() // re-render when the display currency / INR rate changes
   const [data, setData] = useState<BacktestDetail | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [attempt, setAttempt] = useState(0)
@@ -201,8 +203,8 @@ export function BacktestDetailDialog({
                                 {trade.side}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right tabular-nums">{trade.entryPrice.toFixed(2)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{trade.exitPrice.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatPrice(trade.entryPrice)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatPrice(trade.exitPrice)}</TableCell>
                             <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.netPnl)}`}>{pnlText(trade.netPnl)}</TableCell>
                             <TableCell className="text-right tabular-nums">{formatPercent(trade.returnPct)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">{trade.exitReason}</TableCell>

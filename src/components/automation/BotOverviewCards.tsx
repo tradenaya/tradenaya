@@ -11,9 +11,11 @@ import { fetchJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
-import { currencyLabel } from "@/lib/currency/store";
+import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 export function BotOverviewCards() {
+  useDisplayCurrency(); // re-render when the display currency / INR rate changes
   const router = useRouter();
   const [bots, setBots] = useState<BotView[] | null>(null);
   const [schedulerActive, setSchedulerActive] = useState<boolean | null>(null);
@@ -120,7 +122,7 @@ export function BotOverviewCards() {
                     )}
                   </div>
 
-                  {lastError && <div className="mt-2 truncate text-[11px] text-red-400">{lastError}</div>}
+                  {lastError && <div className="mt-2 truncate text-[11px] text-red-400">{localizeUsdtText(lastError)}</div>}
 
                   <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
                     <span className="flex items-center gap-1">

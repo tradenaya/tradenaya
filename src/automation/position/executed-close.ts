@@ -316,7 +316,7 @@ export async function detectLiquidation(
       return {
         suspected: true,
         boundary,
-        reasoning: `current price ${currentPrice} is on the liquidated side of the estimated boundary ${boundary} (${sideUp === "BUY" ? "at/below" : "at/above"}) at ${leverage}x — no resting SL/TP could have filled`,
+        reasoning: `current price ${currentPrice} USDT is on the liquidated side of the estimated boundary ${boundary} USDT (${sideUp === "BUY" ? "at/below" : "at/above"}) at ${leverage}x — no resting SL/TP could have filled`,
         realizedPnl: null,
         fees: null,
         closedAtMs: null,
@@ -352,7 +352,7 @@ export async function detectLiquidation(
       return {
         suspected: true,
         boundary,
-        reasoning: `realized P&L ${realizedPnl} ≈ full lost margin ~${fullMarginLoss} at ${leverage}x — liquidation wiped the position`,
+        reasoning: `realized P&L ${realizedPnl} USDT ≈ full lost margin ~${fullMarginLoss} USDT at ${leverage}x — liquidation wiped the position`,
         realizedPnl,
         fees,
         closedAtMs,
@@ -365,7 +365,7 @@ export async function detectLiquidation(
     boundary,
     reasoning: currentPrice == null
       ? `no price evidence beyond boundary ${boundary} and realized P&L does not wipe the full margin — treating as normal close`
-      : `current price ${currentPrice} is not beyond boundary ${boundary} and realized P&L does not wipe the full margin — treating as normal close`,
+      : `current price ${currentPrice} USDT is not beyond boundary ${boundary} USDT and realized P&L does not wipe the full margin — treating as normal close`,
     realizedPnl,
     fees,
     closedAtMs,

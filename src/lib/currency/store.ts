@@ -133,3 +133,71 @@ export function formatUsdtAmount(
   });
   return withSymbol ? `${sym}${body}` : body;
 }
+/** Display decimals for a converted price: more precision for sub-unit prices. */
+function priceDecimals(abs: number, maxDecimals: number): number {
+  if (abs >= 1000) return Math.min(2, maxDecimals);
+  if (abs >= 1) return Math.min(4, maxDecimals);
+  return Math.max(maxDecimals, 6);
+}
+
+/**
+ * Format a USDT-quoted market price (entry, mark, SL, TP, liquidation…) in the
+ * active currency. USDT keeps the bare number the trading screens always
+ * showed; INR gets a ₹ prefix. Falls back to USDT until the live rate loads.
+ */
+export function formatDisplayPrice(value: number | string | null | undefined, maxDecimals = 4): string {
+  if (value == null || value === "") return "—";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const conv = convertUsdt(num);
+  const isInr = state.currency === "INR" && conv != null;
+  const shown = isInr ? (conv as number) : num;
+  const decimals = isInr ? priceDecimals(Math.abs(shown), maxDecimals) : maxDecimals;
+  const body = shown.toLocaleString(isInr ? INR_LOCALE : USDT_LOCALE, { maximumFractionDigits: decimals });
+  return isInr ? `₹${body}` : body;
+}
+
+/** Compact money for large figures such as 24h volume: $1.2B / ₹10.4B. */
+export function formatCompactAmount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const conv = convertUsdt(value);
+  const isInr = state.currency === "INR" && conv != null;
+  const shown = isInr ? (conv as number) : value;
+  const sym = isInr ? "₹" : "$";
+  const abs = Math.abs(shown);
+  if (abs >= 1_000_000_000) return `${sym}${(shown / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sym}${(shown / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sym}${(shown / 1_000).toFixed(1)}K`;
+  return `${sym}${shown.toFixed(0)}`;
+}
+
+/** A USDT amount converted for text: "12.34 USDT" or "₹1,030.25". */
+function amountForText(value: number, sourceDecimals: number): string {
+  const conv = convertUsdt(value) as number;
+  const abs = Math.abs(conv);
+  const decimals = abs >= 1 ? 2 : Math.max(sourceDecimals, 4);
+  const body = abs.toLocaleString(INR_LOCALE, { minimumFractionDigits: abs >= 1 ? 2 : 0, maximumFractionDigits: decimals });
+  return `${conv < 0 ? "-" : ""}₹${body}`;
+}
+
+// "<number> USDT" (not part of a symbol like BTCUSDT) or "$<number>".
+const USDT_AMOUNT_RE = /(?<![A-Za-z0-9.])(-?)(?:\$(\d[\d,]*(?:\.\d+)?)|(\d[\d,]*(?:\.\d+)?(?:e-?\d+)?) ?USDT\b(?!\/))/g;
+
+/**
+ * Rewrite the USDT amounts and prices inside server-written text (activity
+ * logs, live trace, error messages) into the active display currency. Server
+ * messages always tag money as "<number> USDT", so only those figures change —
+ * percentages, RSI, quantities and symbols are left alone. A no-op in USDT mode
+ * or before the live rate is known.
+ */
+export function localizeUsdtText(text: string | null | undefined): string {
+  if (!text) return text ?? "";
+  if (state.currency !== "INR" || state.inrRate == null || state.inrRate <= 0) return text;
+  return text.replace(USDT_AMOUNT_RE, (match, sign: string, dollar?: string, plain?: string) => {
+    const raw = (dollar ?? plain ?? "").replace(/,/g, "");
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return match;
+    const decimals = raw.includes(".") ? raw.split(".")[1].length : 0;
+    return amountForText(sign === "-" ? -value : value, decimals);
+  });
+}

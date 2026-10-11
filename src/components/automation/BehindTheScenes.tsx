@@ -27,7 +27,8 @@ import { parseBotConfig, type BotView } from "./bot-config";
 import { displaySymbol, sideLabel, botName } from "./bot-config";
 import { fmtMoney } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
-import { currencyLabel } from "@/lib/currency/store";
+import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface BotRecord {
   id: number;
@@ -186,6 +187,7 @@ function StepPipeline({ status }: { status: string }) {
 }
 
 export function BehindTheScenes() {
+  useDisplayCurrency(); // re-render when the display currency / INR rate changes
   const [bots, setBots] = useState<BotRecord[] | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [steps, setSteps] = useState<LiveStep[]>([]);
@@ -312,7 +314,7 @@ export function BehindTheScenes() {
                   </div>
                   {bot.lastError && (
                     <div className="mt-2 flex items-center gap-1.5 rounded-md bg-red-500/10 px-2 py-1.5 text-xs text-red-400">
-                      <XCircle size={12} /> {bot.lastError}
+                      <XCircle size={12} /> {localizeUsdtText(bot.lastError)}
                     </div>
                   )}
                 </div>
@@ -357,7 +359,7 @@ function Feed({ activity }: { activity: ActivityEntry[] }) {
                     {item.symbol && <span className="text-muted-foreground">{item.symbol}</span>}
                     <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{relativeTime(item.timestamp)}</span>
                   </div>
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">{item.message}</p>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">{localizeUsdtText(item.message)}</p>
                 </div>
               </li>
             );
@@ -405,7 +407,7 @@ function LiveSteps({ steps, streamUp }: { steps: LiveStep[]; streamUp: boolean }
                       {step.symbol && <span className="text-muted-foreground">{step.symbol}</span>}
                       <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{relativeTime(step.at)}</span>
                     </div>
-                    <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground">{step.message}</p>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground">{localizeUsdtText(step.message)}</p>
                   </div>
                 </li>
               );

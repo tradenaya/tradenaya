@@ -13,7 +13,7 @@ import { errorMessage, fetchData, fetchJson } from "@/lib/api-client";
 import { defaultEntryExpiryMinutes } from "@/automation/planner/entry-expiry";
 import { effectiveAllocation, MARGIN_FEE_BUFFER, MARGIN_HEADROOM } from "@/automation/risk/allocation-headroom";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { convertUsdt, currencyLabel, formatUsdtAmount, getCurrencyState, localizeUsdtText } from "@/lib/currency/store";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -301,7 +301,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       const cap = num(settings.capital);
       if (cap == null) errs.capital = "Enter a capital amount (USDT).";
       else if (cap <= 0) errs.capital = "Capital must be greater than 0.";
-      else if (wallet != null && cap - wallet > 1e-9) errs.capital = `Exceeds available balance of ${wallet.toFixed(4)} USDT.`;
+      else if (wallet != null && cap - wallet > 1e-9) errs.capital = localizeUsdtText(`Exceeds available balance of ${wallet.toFixed(4)} USDT.`);
     } else {
       const pct = num(walletPercent);
       if (pct == null) errs.walletPercent = "Enter a percentage.";
@@ -317,7 +317,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         const safeMax = wallet * (1 - MARGIN_HEADROOM) - MARGIN_FEE_BUFFER;
         if (allocatedAmt > safeMax + 1e-9) {
           const safePct = Math.max(0, (safeMax / wallet) * 100);
-          errs.capital = `Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`;
+          errs.capital = localizeUsdtText(`Leaves no headroom — the margin would consume nearly all of the ${wallet.toFixed(2)} USDT free balance and the exchange rejects with "Insufficient balance". Use ~${safePct.toFixed(0)}% or less of the available balance (or lower leverage).`);
         }
       }
     }
@@ -420,7 +420,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       const minNotional = minQty * price;
       const required = minNotional / lev;
       const symbol = autoPreview.symbol.trim().toUpperCase();
-      return `Minimum order is ${minQty} ${symbol} (~${minNotional.toFixed(4)} USDT). Your ${alloc.toFixed(4)} USDT at ${lev}x only buys ${Math.max(floored, 0).toFixed(4)} ${symbol}. Raise capital to at least ${required.toFixed(4)} USDT or increase leverage.`;
+      return localizeUsdtText(`Minimum order is ${minQty} ${symbol} (~${minNotional.toFixed(4)} USDT). Your ${alloc.toFixed(4)} USDT at ${lev}x only buys ${Math.max(floored, 0).toFixed(4)} ${symbol}. Raise capital to at least ${required.toFixed(4)} USDT or increase leverage.`);
     }
 
     if (!instrument || price == null || !(price > 0)) return null;
@@ -435,7 +435,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     const minNotional = minQty * price;
     const required = minNotional / lev;
     const symbol = settings.symbol.trim().toUpperCase();
-    return `Minimum order is ${minQty} ${symbol} (~${minNotional.toFixed(4)} USDT). Your ${alloc.toFixed(4)} USDT at ${lev}x only buys ${Math.max(floored, 0).toFixed(4)} ${symbol}. Raise capital to at least ${required.toFixed(4)} USDT or increase leverage.`;
+    return localizeUsdtText(`Minimum order is ${minQty} ${symbol} (~${minNotional.toFixed(4)} USDT). Your ${alloc.toFixed(4)} USDT at ${lev}x only buys ${Math.max(floored, 0).toFixed(4)} ${symbol}. Raise capital to at least ${required.toFixed(4)} USDT or increase leverage.`);
   })();
 
   const notActiveIssue = (() => {
@@ -484,7 +484,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       const alloc = effectiveCapital();
       const EXCESS_TOLERANCE = 1e-9;
       if (alloc != null && alloc - wallet > EXCESS_TOLERANCE) {
-        return `Insufficient wallet balance. You need ${alloc.toFixed(2)} USDT but only ${wallet.toFixed(2)} USDT is available (including ${(wallet - alloc).toFixed(2)} USDT short).`;
+        return localizeUsdtText(`Insufficient wallet balance. You need ${alloc.toFixed(2)} USDT but only ${wallet.toFixed(2)} USDT is available (including ${(wallet - alloc).toFixed(2)} USDT short).`);
       }
     }
 
@@ -497,7 +497,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     }
 
     if (tradePreview.status === "error" && tradePreview.allocatedCapital > 0 && tradePreview.maxRiskPct > 0 && !tradePreview.riskCompatible) {
-      return `Configuration exceeds maximum risk. The estimated SL loss (~${tradePreview.estimatedLoss.toFixed(2)} USDT) exceeds your max risk limit of ${tradePreview.maxRiskUsdt.toFixed(2)} USDT. Reduce your capital allocation, increase max risk %, or let the bot's dynamic SL adapt at runtime.`;
+      return localizeUsdtText(`Configuration exceeds maximum risk. The estimated SL loss (~${tradePreview.estimatedLoss.toFixed(2)} USDT) exceeds your max risk limit of ${tradePreview.maxRiskUsdt.toFixed(2)} USDT. Reduce your capital allocation, increase max risk %, or let the bot's dynamic SL adapt at runtime.`);
     }
 
     return null;
@@ -1266,7 +1266,7 @@ export function InstrumentStatusBadge({
       )}
       {instrument.min_base_quantity != null && price != null && price > 0 && (
         <span className="text-muted-foreground">
-          Min order {Number(instrument.min_base_quantity).toLocaleString()} {symbol.trim().toUpperCase()} (~{(Number(instrument.min_base_quantity) * price).toFixed(4)} USDT)
+          Min order {Number(instrument.min_base_quantity).toLocaleString()} {symbol.trim().toUpperCase()} (~{formatUsdtAmount(Number(instrument.min_base_quantity) * price, 4)})
         </span>
       )}
     </div>

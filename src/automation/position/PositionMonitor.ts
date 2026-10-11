@@ -28,6 +28,7 @@ import {
   telegramPositionClosed,
   telegramUnprotected,
 } from "@/lib/telegram";
+import { usdt } from "@/lib/currency/usdt-text";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 const ENTRY_VISIBILITY_GRACE_MS = 10 * 60_000;
@@ -443,7 +444,7 @@ export class PositionMonitor {
     const runAwayPct = driftBand != null ? (driftBand / limitPrice) * 100 : null;
     const direction = position.side === "BUY" ? "rises" : "falls";
     const parts = [
-      `Waiting for entry to fill — ${position.side} ${position.symbol} at ${limitPrice}, market ${marketPrice} (${awayPct.toFixed(2)}% away).`,
+      `Waiting for entry to fill — ${position.side} ${position.symbol} at ${limitPrice} USDT, market ${marketPrice} USDT (${awayPct.toFixed(2)}% away).`,
       minutesLeft != null ? `Cancelled in ~${minutesLeft} min if not filled` : "Cancelled at expiry if not filled",
       runAwayPct != null ? `, or sooner if price ${direction} more than ${runAwayPct.toFixed(2)}% beyond the entry (setup missed).` : ".",
       " A new scan starts right after a cancel.",
@@ -717,7 +718,7 @@ export class PositionMonitor {
 
     await this.executionStore.updateState(current.executionId, "CLOSED");
 
-    await this.log(current, "POSITION_CLOSED", `${current.symbol} closed via ${close.reason} at ${exitPrice ?? "n/a"} pnl=${pnl.realizedPnl ?? 0}`);
+    await this.log(current, "POSITION_CLOSED", `${current.symbol} closed via ${close.reason} at ${usdt(exitPrice)} pnl=${usdt(pnl.realizedPnl ?? 0)}`);
 
     const typeMap: Record<string, ExecutionNotification["type"]> = {
       TAKE_PROFIT: "POSITION_TAKE_PROFIT",
@@ -725,7 +726,7 @@ export class PositionMonitor {
       MANUAL_CLOSE: "POSITION_MANUAL_CLOSE",
       ENTRY_CANCELLED: "ENTRY_CANCELLED",
     };
-    await this.notify(current, typeMap[close.reason] ?? "POSITION_CLOSED", `${current.symbol} closed via ${close.reason} at ${exitPrice ?? "n/a"} pnl=${pnl.realizedPnl ?? 0}`);
+    await this.notify(current, typeMap[close.reason] ?? "POSITION_CLOSED", `${current.symbol} closed via ${close.reason} at ${usdt(exitPrice)} pnl=${usdt(pnl.realizedPnl ?? 0)}`);
 
     // Telegram: use the existing reconciled accounting (gross profit, entry+exit
     // commission, funding, net P&L) so the message matches what the app reports.
@@ -792,7 +793,7 @@ export class PositionMonitor {
 
     const result = await this.trailing.update(snapshot);
     if (result.moved) {
-      await this.log(position, "TRAILING_MOVED", `stop loss moved to ${result.newStopLoss}`);
+      await this.log(position, "TRAILING_MOVED", `stop loss moved to ${usdt(result.newStopLoss)}`);
       if (position.state === "PROTECTED") {
         await this.stateManager.transition(position.id, "PROTECTED", "TRAILING");
       }

@@ -15,7 +15,8 @@ import { errorMessage, fetchJson } from "@/lib/api-client";
 import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { fmtMoney } from "@/components/automation/bot-config";
 import { AutoBadge } from "@/components/automation/AutoBadge";
-import { currencyLabel } from "@/lib/currency/store";
+import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface BotRecord {
   id: number;
@@ -34,6 +35,7 @@ interface BotRecord {
 const runningStates = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
 
 export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
+  useDisplayCurrency(); // re-render when the display currency / INR rate changes
   const [bots, setBots] = useState<BotRecord[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -290,7 +292,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
                   <div className="text-xs text-muted-foreground">
                     {bot.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
                   </div>
-                  {bot.lastError && <div className="mt-1 text-xs text-red-400">{bot.lastError}</div>}
+                  {bot.lastError && <div className="mt-1 text-xs text-red-400">{localizeUsdtText(bot.lastError)}</div>}
                 </div>
               );
             })}

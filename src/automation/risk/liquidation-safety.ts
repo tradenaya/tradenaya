@@ -186,8 +186,8 @@ export function validateStopLossBoundary(input: StopLossBoundaryInput): Liquidat
     minSafeStopLoss,
     maxSafeStopLoss,
     reason: safe
-      ? `Stop Loss (${stopLoss}) stays safely ${sideUp === "BUY" ? "above" : "below"} the exchange liquidation price (${real}) with the system safety buffer.`
-      : `Stop Loss (${stopLoss}) is BEYOND the exchange liquidation price (${real}) — the stop could never fill before liquidation. Rejecting.`,
+      ? `Stop Loss (${stopLoss} USDT) stays safely ${sideUp === "BUY" ? "above" : "below"} the exchange liquidation price (${real} USDT) with the system safety buffer.`
+      : `Stop Loss (${stopLoss} USDT) is BEYOND the exchange liquidation price (${real} USDT) — the stop could never fill before liquidation. Rejecting.`,
   };
 }
 
@@ -246,7 +246,7 @@ export function evaluateLiquidationSafety(input: LiquidationSafetyInput): Liquid
     sideUp === "BUY" ? stopLoss - (boundary + bufferPrice) : (boundary - bufferPrice) - stopLoss;
   const safe = marginOfSafety > 1e-12;
 
-  const boundaryLabel = boundarySource === "EXCHANGE" ? `${boundary} (exchange)` : `${boundary} (estimated)`;
+  const boundaryLabel = boundarySource === "EXCHANGE" ? `${boundary} USDT (exchange)` : `${boundary} USDT (estimated)`;
 
   return {
     ok: safe,
@@ -257,8 +257,8 @@ export function evaluateLiquidationSafety(input: LiquidationSafetyInput): Liquid
     minSafeStopLoss,
     maxSafeStopLoss,
     reason: safe
-      ? `Stop Loss (${stopLoss}) is safely reachable before the liquidation price (~${boundaryLabel}) at ${leverage}x leverage (stop distance ${(stopDistanceFraction * 100).toFixed(2)}%).`
-      : `Stop Loss would be beyond the liquidation price (~${boundaryLabel}) at the selected ${leverage}x leverage — the stop (${stopLoss}) cannot be reached before liquidation. Rejecting the trade.`,
+      ? `Stop Loss (${stopLoss} USDT) is safely reachable before the liquidation price (~${boundaryLabel}) at ${leverage}x leverage (stop distance ${(stopDistanceFraction * 100).toFixed(2)}%).`
+      : `Stop Loss would be beyond the liquidation price (~${boundaryLabel}) at the selected ${leverage}x leverage — the stop (${stopLoss} USDT) cannot be reached before liquidation. Rejecting the trade.`,
   };
 }
 

@@ -16,6 +16,7 @@ import type { BotSummary } from "@/automation/analytics/types"
 import { apiGet, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatDate, formatMoney, formatPercent, pnlText, signClass } from "./format"
+import { localizeUsdtText } from "@/lib/currency/store"
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
@@ -75,7 +76,7 @@ export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState
                     <div className="text-xs text-muted-foreground">
                       #{bot.id} · {bot.leverage}x · {bot.capitalMode}
                     </div>
-                    {bot.lastError && <div className="mt-0.5 max-w-[220px] truncate text-xs text-red-400">{bot.lastError}</div>}
+                    {bot.lastError && <div className="mt-0.5 max-w-[220px] truncate text-xs text-red-400">{localizeUsdtText(bot.lastError)}</div>}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">

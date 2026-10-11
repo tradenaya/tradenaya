@@ -17,6 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatPrice, formatSignedPercent } from "@/components/analytics/format";
+import { formatCompactAmount } from "@/lib/currency/store";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface TickerEntry {
   last_price?: unknown;
@@ -36,11 +38,7 @@ interface Coin {
 const COINS_PER_PAGE = 50;
 
 function compactNumber(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${value.toFixed(0)}`;
+  return formatCompactAmount(value);
 }
 
 function toNumber(value: unknown): number | null {
@@ -49,6 +47,7 @@ function toNumber(value: unknown): number | null {
 }
 
 export default function MarketPage() {
+  useDisplayCurrency(); // re-render when the display currency / INR rate changes
   const router = useRouter();
   const [coins, setCoins] = useState<Coin[] | null>(null);
   const [search, setSearch] = useState("");

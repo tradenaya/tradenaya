@@ -430,7 +430,7 @@ export class BotScheduler {
     if (config.capitalMode !== "percent" && allocated > balance * (1 - headroom) + MARGIN_FEE_BUFFER + EXCESS_TOLERANCE) {
       const safePct = maxSafeAllocationPct(balance, headroom, MARGIN_FEE_BUFFER);
       throw new Error(
-        `Leaving no headroom at $${allocated.toFixed(2)} allocation. ` +
+        `Leaving no headroom at ${allocated.toFixed(2)} USDT allocation. ` +
         `The order margin would consume nearly all of your ${balance.toFixed(2)} USDT free balance, which the exchange rejects (` +
         `"Insufficient balance") once fees/rounding push it over. Reduce the allocation to ~${safePct.toFixed(0)}% of the available balance ` +
         `(or lower leverage) so the order does not use up the whole free balance.`,

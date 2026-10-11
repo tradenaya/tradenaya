@@ -16,6 +16,8 @@ import { futuresSocket, Candle } from "@/lib/coinswitch/futuresSocket";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchData } from "@/lib/api-client";
+import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
+import { formatDisplayPrice } from "@/lib/currency/store";
 
 // Available candle intervals, in minutes, as supported by the KLines API
 const INTERVALS = [
@@ -28,6 +30,13 @@ const INTERVALS = [
   { label: "1D", value: "1440" },
 ];
 
+/** Price axis / last-value labels follow the display currency (USDT or ₹). */
+const PRICE_FORMAT = {
+  type: "custom" as const,
+  minMove: 0.000001,
+  formatter: (price: number) => formatDisplayPrice(price, 6),
+};
+
 export default function TradingChart({ symbol }: { symbol: string }) {
   const chartContainer = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -37,6 +46,12 @@ export default function TradingChart({ symbol }: { symbol: string }) {
   const [candleState, setCandleState] = useState<"loading" | "ready" | "error">("loading");
   const [candleError, setCandleError] = useState<unknown>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const currency = useDisplayCurrency();
+
+  // Re-label the axis when the user switches currency or the INR rate updates.
+  useEffect(() => {
+    seriesRef.current?.applyOptions({ priceFormat: PRICE_FORMAT });
+  }, [currency.currency, currency.inrRate]);
 
   useEffect(() => {
     if (!chartContainer.current) return;
@@ -65,7 +80,7 @@ export default function TradingChart({ symbol }: { symbol: string }) {
     chartRef.current = chart;
 
     const candlestick = chart.addSeries(CandlestickSeries, {
-      priceFormat: { type: "price", precision: 6, minMove: 0.000001 },
+      priceFormat: PRICE_FORMAT,
       // Give the *series* the "LIVE" title so the built-in, genuinely-live
       // last-value price line carries the label — instead of a separate
       // static manual price line that never updates.

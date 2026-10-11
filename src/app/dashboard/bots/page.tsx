@@ -26,7 +26,7 @@ import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 import { fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { currencyLabel } from "@/lib/currency/store";
+import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
 
@@ -559,7 +559,7 @@ export default function AutomationPage() {
                         {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
                       </div>
                       {bot.lastError && !live && (
-                        <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{bot.lastError}</div>
+                        <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{localizeUsdtText(bot.lastError)}</div>
                       )}
                     </div>
 
