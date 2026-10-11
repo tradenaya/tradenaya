@@ -42,3 +42,9 @@ dev-restart.log
 *.tsbuildinfo
 next-env.d.ts
 /src/generated/prisma
+
+# deploy script (scripts/deploy.sh)
+/.next-build/
+/.next-prev/
+/.next-failed/
+/.deploy.lock
