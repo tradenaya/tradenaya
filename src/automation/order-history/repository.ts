@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import type { OrderHistoryInsert, OrderHistoryQuery, OrderHistoryRow, Paged } from "./types";
+import { isPaperContext } from "@/automation/paper/mode";
 
 function ms(value: unknown): string | null {
   if (value == null) return null;
@@ -129,7 +130,8 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
         input.userId,
         input.userEmail,
         input.userCode,
-        input.exchange ?? "EXCHANGE_2",
+        // Paper orders are tagged so live and paper history never mix.
+        isPaperContext() ? "PAPER" : input.exchange ?? "EXCHANGE_2",
         input.symbol,
         input.side,
         input.orderType,
@@ -179,7 +181,11 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
     const page = Math.max(1, query.page || 1);
     const pageSize = Math.min(Math.max(query.pageSize || 25, 1), 100);
     const offset = (page - 1) * pageSize;
-    const { sql, params } = buildSearch(query.search ?? "");
+    const search = buildSearch(query.search ?? "");
+    // Live view excludes paper orders; paper view shows only paper orders.
+    const modeSql = isPaperContext() ? " AND o.exchange = 'PAPER'" : " AND (o.exchange IS NULL OR o.exchange <> 'PAPER')";
+    const sql = modeSql + search.sql;
+    const params = search.params;
 
     const results = await Promise.all([
       db.query(

@@ -420,6 +420,37 @@ export interface SymbolPerformance {
   fees: number;
 }
 
+/** One strategy's live results in a comparison window. */
+export interface StrategyComparisonRow {
+  strategy: string;
+  label: string;
+  bots: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netPnl: number;
+  averageTradePnl: number;
+  averageWin: number;
+  averageLoss: number;
+  profitFactor: number | null;
+  largestWin: number;
+  largestLoss: number;
+  maxConsecutiveLosses: number;
+  /** Peak-to-trough drop of the cumulative PnL in the window (USDT). */
+  maxDrawdown: number;
+  fees: number;
+  averageDurationMs: number;
+  /** Cumulative net PnL after each closed trade, oldest first. */
+  curve: { timestamp: number; cumulativePnl: number }[];
+}
+
+export interface StrategyComparison {
+  startTime: number | null;
+  endTime: number | null;
+  rows: StrategyComparisonRow[];
+}
+
 export interface StrategyPerformance {
   strategy: string;
   bots: number;

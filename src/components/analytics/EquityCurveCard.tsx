@@ -23,7 +23,7 @@ const GRID_STROKE = "rgba(168,152,128,0.15)"
 export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<EquityAnalytics>(
     () => apiGet("/api/analytics/equity", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   return (

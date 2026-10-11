@@ -33,8 +33,8 @@ function StatusBadge({ status }: { status: string }) {
 
 export function BotPerformanceTable({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<BotSummary[]>(
-    () => apiGet("/api/analytics/bots"),
-    [filters.botId],
+    () => apiGet("/api/analytics/bots", { strategy: filters.strategy }),
+    [filters.botId, filters.strategy],
     { pollMs: 15_000 },
   )
 

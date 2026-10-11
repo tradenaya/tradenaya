@@ -1,6 +1,7 @@
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
 import { getKeysForUser } from "@/lib/coinswitch.store";
 import { isUuid } from "./order-id";
+import { isPaperContext } from "@/automation/paper/mode";
 
 function extractErrorMessage(data: any): string {
   if (typeof data === "string") return data;
@@ -219,6 +220,17 @@ export class CoinSwitchClient {
     params: Record<string, any>,
     userId: number,
   ) {
+    // Paper trading: account endpoints are answered by the simulated exchange
+    // (same response shape); market-data endpoints fall through to CoinSwitch.
+    if (isPaperContext()) {
+      const { paperExchange } = await import("@/automation/paper/exchange");
+      const paper = await (await paperExchange()).handle(method, endpoint, params, userId);
+      if (paper) {
+        if (paper.status >= 400) throw new Error(extractErrorMessage(paper.body));
+        return paper.body as any;
+      }
+    }
+
     const budget = rateBudget(method, endpoint);
     if (budget) {
       const intervalMs = this.options.rateLimitOverrides?.[budget.key] ?? budget.intervalMs;

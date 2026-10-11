@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import jwt from "jsonwebtoken";
+import { enterRequestTradingMode } from "@/automation/paper/mode";
 
 const JWT_SECRET = process.env.TRADENAYA_AUTH_SECRET || process.env.JWT_SECRET || "tradenaya-local-dev-secret";
 const JWT_EXPIRES_IN = "7d" as const;
@@ -40,6 +41,9 @@ export function getAdminFromRequest(request: NextRequest): AdminPayload | null {
 }
 
 export function getCustomerFromRequest(request: NextRequest): CustomerPayload | null {
+  // Every signed-in API route starts here, so this is where the request's
+  // live / paper mode (Paper toggle -> x-trading-mode header) is applied.
+  enterRequestTradingMode(request);
   const token = request.cookies.get("tradenaya_user_token")?.value;
   if (!token) return null;
 

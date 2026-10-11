@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest, paperFetch } from "@/app/api/coinswitch/_helpers";
 import { errorResponse } from "@/lib/api-error";
 
 export async function GET(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     console.log("LEVERAGE GET URL:", url);
 
-    const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
+    const res = (await paperFetch(req as any, "GET", "/futures/leverage", { symbol: symbol.toLowerCase(), exchange: "EXCHANGE_2" })) ?? await fetch(url, { method: "GET", headers, cache: "no-store" });
     const raw = await res.text();
 
     console.log("LEVERAGE GET STATUS:", res.status);
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     console.log("LEVERAGE POST URL:", url);
     console.log("LEVERAGE POST PAYLOAD:", payload);
 
-    const res = await fetch(url, {
+    const res = (await paperFetch(req as any, "POST", "/futures/leverage", payload)) ?? await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),

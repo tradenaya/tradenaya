@@ -6,6 +6,8 @@ import { serverMarketDataService } from "@/automation/market/service";
 import { AutoBestSelector } from "@/automation/coinauto/auto-best-selector";
 import { DefaultRiskManager } from "@/automation/risk/risk-manager";
 import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
+import { DEFAULT_STRATEGY_ID, strategyLabel } from "@/automation/strategy/catalog";
+import { rememberBotMode, runWithTradingMode } from "@/automation/paper/mode";
 import { BotLifecycleService, type BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import type { AutomationConfig } from "@/automation/types";
 import { SchedulerStore } from "./SchedulerStore";
@@ -74,6 +76,13 @@ export class BotScheduler {
   }
 
   async start(): Promise<void> {
+    // Background loops (timers created below) must always start in LIVE mode,
+    // never inherit the mode of whichever web request happened to start them;
+    // paper bots/positions switch to PAPER per bot inside the loop.
+    return runWithTradingMode("LIVE", () => this.startLive());
+  }
+
+  private async startLive(): Promise<void> {
     if (this.started) return;
     this.started = true;
     // Start ticking first so a failure below (schema, market data, recovery)
@@ -157,7 +166,7 @@ export class BotScheduler {
 
   private async runBotCycle(bot: BotRuntimeState): Promise<void> {
     try {
-      await this.cycles.runCycle(bot.id);
+      await runWithTradingMode(bot.tradingMode === "PAPER" ? "PAPER" : "LIVE", () => this.cycles.runCycle(bot.id));
     } catch (error) {
       console.error(`BotScheduler: unexpected error in cycle for bot ${bot.id}`, error);
       const fresh = await this.store.getBot(bot.id).catch(() => null);
@@ -186,6 +195,7 @@ export class BotScheduler {
       capitalMode: config.capitalMode,
       walletPercent: config.walletPercent,
       name: config.name,
+      strategy: config.strategy,
       configJson: JSON.stringify(config),
     });
     // Keep the DB symbol column in sync when a fixed-symbol bot's market changes.
@@ -226,6 +236,45 @@ export class BotScheduler {
     return "AUTO";
   }
 
+  /**
+   * Save a new bot WITHOUT starting it. Same validation as starting, so a
+   * config that could never trade is rejected up front; the user turns it on
+   * later (resumeBot), which re-checks the live constraints at that moment.
+   */
+  async createBot(userId: number, config: AutomationConfig): Promise<{ botId: number }> {
+    const mode = config.tradingMode === "PAPER" ? "PAPER" : "LIVE";
+    return runWithTradingMode(mode, () => this.createBotInMode(userId, { ...config, tradingMode: mode }));
+  }
+
+  private async createBotInMode(userId: number, config: AutomationConfig): Promise<{ botId: number }> {
+    await this.ensureStarted();
+    const keys = await getKeysForUser(userId);
+    if (!keys || keys.status !== "A") {
+      throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your CoinSwitch account.");
+    }
+    this.validateConfig(config);
+    await this.validateLiveConstraints(userId, config);
+
+    const botId = await this.lifecycle.createBot({
+      userId,
+      symbol: config.autoSelect ? "AUTO" : config.symbol,
+      strategy: config.strategy ?? DEFAULT_STRATEGY_ID,
+      leverage: config.leverage,
+      capital: config.capital,
+      capitalMode: config.capitalMode,
+      walletPercent: config.walletPercent,
+      name: config.name,
+      status: "STOPPED",
+      tradingMode: config.tradingMode,
+    });
+    rememberBotMode(botId, config.tradingMode === "PAPER" ? "PAPER" : "LIVE");
+    await this.lifecycle.setConfig(botId, JSON.stringify(config));
+    await this.lifecycle.updateDesiredStatus(botId, "STOPPED");
+    await this.lifecycle.setRetryCount(botId, 0);
+    await this.lifecycle.setRuntimeError(botId, null);
+    return { botId };
+  }
+
   async startBot(userId: number, config: AutomationConfig): Promise<{ botId: number }> {
     await this.ensureStarted();
     const keys = await getKeysForUser(userId);
@@ -257,7 +306,7 @@ export class BotScheduler {
     const botId = await this.lifecycle.createBot({
       userId,
       symbol: initialSymbol,
-      strategy: "TradenayaSmartV1",
+      strategy: config.strategy ?? DEFAULT_STRATEGY_ID,
       leverage: config.leverage,
       capital: config.capital,
       capitalMode: config.capitalMode,
@@ -279,7 +328,7 @@ export class BotScheduler {
       timeframe: config.timeframe,
       leverage: config.leverage,
       capital: config.capital,
-      strategy: bot?.strategy ?? "TradenayaSmartV1",
+      strategy: strategyLabel(bot?.strategy ?? config.strategy ?? DEFAULT_STRATEGY_ID),
       name: bot?.name ?? config.name,
     }));
     if (bot) {
@@ -328,17 +377,41 @@ export class BotScheduler {
     await this.ensureStarted();
     const bot = await this.lifecycle.getBotByUserAndId(userId, botId);
     if (!bot) throw new Error("Bot not found");
+
+    // A bot is created stopped, so starting it must run the same checks that
+    // creating-and-starting used to: keys, the 3-bot limit, live constraints.
+    const mode = bot.tradingMode === "PAPER" ? "PAPER" : "LIVE";
+    if ((bot.desiredStatus ?? "STOPPED") !== "RUNNING") await runWithTradingMode(mode, async () => {
+      const keys = await getKeysForUser(userId);
+      if (!keys || keys.status !== "A") {
+        throw new Error("CoinSwitch credentials are missing or inactive. Please reconnect your CoinSwitch account.");
+      }
+      const runningCount = await this.lifecycle.countActiveBotsForUser(userId, mode);
+      if (runningCount >= 3) {
+        throw new Error(
+          `Maximum of 3 running ${mode === "PAPER" ? "paper " : ""}bots allowed per user. You currently have ${runningCount} running. Stop a bot before starting another one.`,
+        );
+      }
+      if (bot.configJson) {
+        const config = JSON.parse(bot.configJson) as AutomationConfig;
+        if (!config.strategy && bot.strategy) config.strategy = bot.strategy;
+        this.validateConfig(config);
+        await this.validateLiveConstraints(userId, config);
+      }
+    });
+
     await this.lifecycle.updateDesiredStatus(botId, "RUNNING");
     await this.lifecycle.setRetryCount(botId, 0);
     await this.lifecycle.setRuntimeError(botId, null);
-    await this.events.emit({ type: "BOT_RESUMED", botId, userId, message: "Bot resumed" });
+    await this.lifecycle.scheduleNextRun(botId, new Date());
+    await this.events.emit({ type: "BOT_RESUMED", botId, userId, message: "Bot started" });
     const fresh = await this.lifecycle.getBotById(botId);
     sendTelegramAsync(telegramBotStarted({
       symbol: fresh?.symbol ?? bot.symbol,
       timeframe: this.timeframeOf(fresh?.configJson ?? bot.configJson),
       leverage: fresh?.leverage ?? bot.leverage,
       capital: fresh?.capital ?? bot.capital,
-      strategy: fresh?.strategy ?? bot.strategy,
+      strategy: strategyLabel(fresh?.strategy ?? bot.strategy),
       name: fresh?.name ?? bot.name,
     }));
     if (fresh) await this.recovery.recoverBot(fresh);

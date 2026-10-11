@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
+import { STRATEGIES } from "@/automation/strategy/catalog"
 
 const labelClass = "text-xs font-medium text-muted-foreground"
 
@@ -63,6 +64,26 @@ export function FilterBar({ filters, onChange, onRefresh, showGranularity = fals
             {botOptions.map((bot) => (
               <SelectItem key={bot.id} value={String(bot.id)}>
                 {bot.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className={labelClass}>Strategy</label>
+        <Select
+          value={filters.strategy ?? "all"}
+          onValueChange={(v) => update({ strategy: v === "all" ? null : v })}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All strategies</SelectItem>
+            {STRATEGIES.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.label}
               </SelectItem>
             ))}
           </SelectContent>

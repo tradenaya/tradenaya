@@ -44,6 +44,9 @@ import {
   FactorChip,
   leverageRange,
 } from "./CreateBotDialog";
+import { StrategyPicker } from "./StrategyPicker";
+import { DEFAULT_STRATEGY_ID, strategyInfo } from "@/automation/strategy/catalog";
+import { CoinUniversePicker, type CoinUniverse } from "./CoinUniversePicker";
 
 interface AutoSelectionPreview {
   symbol: string;
@@ -513,7 +516,9 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       const body: Record<string, unknown> = {
         symbol: cfg.autoSelect ? cfg.symbol : cfg.symbol.trim().toUpperCase(),
         name: cfg.name?.trim() || undefined,
-        timeframe: cfg.timeframe,
+        strategy: cfg.strategy,
+        coinUniverse: cfg.coinUniverse,
+        timeframe: strategyInfo(cfg.strategy).fixedTimeframe ?? cfg.timeframe,
         leverage: Number(cfg.leverage),
         autoSelect: cfg.autoSelect,
         leverageMode: cfg.leverageMode,
@@ -638,6 +643,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
 
           {cfg.autoSelect && (
             <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-3 md:col-span-2">
+              <CoinUniversePicker value={cfg.coinUniverse} onChange={(v) => update("coinUniverse", v)} />
               <div className="space-y-1.5">
                 <Label>Leverage mode</Label>
                 <div className="grid grid-cols-2 gap-2">
@@ -844,9 +850,17 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           )}
 
+          <div className="md:col-span-2">
+            <StrategyPicker
+              id="edit-strategy"
+              value={cfg.strategy}
+              onChange={(id) => setCfg((prev) => ({ ...prev, strategy: id, timeframe: strategyInfo(id).fixedTimeframe ?? prev.timeframe }))}
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label>Timeframe</Label>
-            <Select value={cfg.timeframe ?? "1h"} onValueChange={(v) => update("timeframe", v)}>
+            <Select value={strategyInfo(cfg.strategy).fixedTimeframe ?? (cfg.timeframe ?? "1h")} onValueChange={(v) => update("timeframe", v)} disabled={Boolean(strategyInfo(cfg.strategy).fixedTimeframe)}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -1071,6 +1085,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             {fieldErrors.hardCap && <FieldError>{fieldErrors.hardCap}</FieldError>}
           </div>
 
+          {strategyInfo(cfg.strategy).supportsMomentumFilter && (
           <div className="md:col-span-2">
             <div className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
@@ -1089,6 +1104,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
               </p>
             </div>
           </div>
+          )}
 
           <div className="md:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">

@@ -79,6 +79,8 @@ export interface BacktestConfig {
   orderExpiryMinutes?: number;
   /** Same as the live bot option: only take entries with strong momentum (RSI >= 80 / <= 20). */
   momentumEntriesOnly?: boolean;
+  /** Strategy id from automation/strategy/catalog (default TradenayaSmartV1). */
+  strategy?: string;
 
   /** Maximum concurrent simulated positions (maps to the risk exposure check). */
   maxConcurrentPositions?: number;
@@ -130,6 +132,8 @@ export interface SimulatedOrder {
   trailingEnabled: boolean;
   trailingDistancePct: number;
   trailingActivationPct: number;
+  /** When set the stop trails the low/high of this many prior candles (Trend Breakout). */
+  channelTrailLookback?: number;
 }
 
 export interface SimulatedPosition {
@@ -148,6 +152,7 @@ export interface SimulatedPosition {
   trailingDistancePct: number;
   trailingActivationPct: number;
   trailingActivated: boolean;
+  channelTrailLookback?: number;
   highestPrice: number;
   lowestPrice: number;
   currentPrice: number | null;
@@ -292,6 +297,7 @@ export function toAutomationConfig(config: BacktestConfig): AutomationConfig {
     minConfidence: config.minConfidence,
     orderExpiryMinutes: config.orderExpiryMinutes,
     momentumEntriesOnly: config.momentumEntriesOnly === true,
+    strategy: config.strategy,
   };
 }
 
@@ -317,6 +323,7 @@ export function fingerprintConfig(config: BacktestConfig): string {
     minConfidence: config.minConfidence ?? null,
     orderExpiryMinutes: config.orderExpiryMinutes ?? null,
     momentumEntriesOnly: config.momentumEntriesOnly === true,
+    strategy: config.strategy ?? null,
     maxConcurrentPositions: config.maxConcurrentPositions ?? null,
     feeRateBps: config.feeRateBps ?? null,
     slippageBps: config.slippageBps ?? null,

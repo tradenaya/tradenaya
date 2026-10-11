@@ -29,10 +29,19 @@ import {
   telegramUnprotected,
 } from "@/lib/telegram";
 import { usdt } from "@/lib/currency/usdt-text";
+import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
+import { channelStop } from "@/automation/strategy/trend-breakout";
+import { closedCandles } from "@/automation/indicators/candle-resampler";
+import { withBotMode } from "@/automation/paper/mode";
+import { runWithTradingMode } from "@/automation/paper/mode";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
 const ENTRY_VISIBILITY_GRACE_MS = 10 * 60_000;
 const ENTRY_VALIDITY_INTERVAL_MS = 60_000;
+/** How often a Trend Breakout position re-checks its candle-channel trailing stop. */
+const CHANNEL_TRAIL_INTERVAL_MS = 5 * 60_000;
+/** Bot strategy/timeframe lookups are cached this long (configs only change while paused). */
+const BOT_PROFILE_TTL_MS = 10 * 60_000;
 /** How often the "waiting for entry to fill" status is published to the live trace. */
 const WAITING_STATUS_INTERVAL_MS = 5 * 60_000;
 
@@ -50,6 +59,8 @@ export class PositionMonitor {
   private readonly config: PositionManagerConfig;
   private readonly protective: ProtectiveOrdersService;
   private readonly lastValidityCheck = new Map<number, number>();
+  private readonly lastChannelTrail = new Map<number, number>();
+  private readonly botProfiles = new Map<number, { strategy: string | null; timeframeMinutes: number; at: number }>();
   private readonly lastWaitingPublish = new Map<number, number>();
 
   private timer: NodeJS.Timeout | null = null;
@@ -75,6 +86,13 @@ export class PositionMonitor {
   }
 
   async start(): Promise<void> {
+    // Background loops (timers created below) must always start in LIVE mode,
+    // never inherit the mode of whichever web request happened to start them;
+    // paper bots/positions switch to PAPER per bot inside the loop.
+    return runWithTradingMode("LIVE", () => this.startLive());
+  }
+
+  private async startLive(): Promise<void> {
     if (this.running) return;
     this.running = true;
     await this.recovery.recoverAllActive();
@@ -136,6 +154,12 @@ export class PositionMonitor {
 
   private async process(position: PositionRecord): Promise<void> {
     if (!ACTIVE_STATES.has(position.state)) return;
+    // Each position is managed in its bot's mode: paper positions only ever
+    // talk to the paper exchange (orders, fills, stops), live ones to CoinSwitch.
+    return withBotMode(position.botId, () => this.processInMode(position));
+  }
+
+  private async processInMode(position: PositionRecord): Promise<void> {
 
     try {
       const snapshot = await this.buildSnapshot(position);
@@ -383,6 +407,11 @@ export class PositionMonitor {
       } catch {
         // keep the 5m default / undefined
       }
+    }
+
+    if (bot?.strategy === TREND_BREAKOUT_ID) {
+      if (marketPrice != null) this.publishWaitingForFill(position, limitPrice, marketPrice, execution?.expiresAt ?? null, null, now);
+      return null;
     }
 
     const candles = await serverMarketDataService
@@ -786,10 +815,60 @@ export class PositionMonitor {
     }
   }
 
+  /** Strategy + timeframe of the bot that owns a position (cached). */
+  private async botProfile(botId: number): Promise<{ strategy: string | null; timeframeMinutes: number }> {
+    const cached = this.botProfiles.get(botId);
+    if (cached && Date.now() - cached.at < BOT_PROFILE_TTL_MS) return cached;
+    const bot = await this.botState.getBotById(botId).catch(() => null);
+    let timeframeMinutes = 5;
+    try {
+      const parsed = bot?.configJson ? (JSON.parse(bot.configJson) as { timeframe?: string | number }) : null;
+      const minutes = normalizeInterval((parsed?.timeframe ?? "5m") as string | number);
+      if (minutes != null && minutes > 0) timeframeMinutes = minutes;
+    } catch {
+      // keep the default
+    }
+    const profile = { strategy: bot?.strategy ?? null, timeframeMinutes, at: Date.now() };
+    if (bot) this.botProfiles.set(botId, profile);
+    return profile;
+  }
+
+  /**
+   * Trend Breakout exits: the stop trails the low (long) / high (short) of the
+   * last 10 closed candles, so winners keep running and the trade closes when
+   * the trend breaks. Replaces the %-distance trailing for these positions.
+   */
+  private async syncChannelTrailing(snapshot: PositionSnapshot, timeframeMinutes: number): Promise<void> {
+    const { position } = snapshot;
+    const now = Date.now();
+    if (now - (this.lastChannelTrail.get(position.id) ?? 0) < CHANNEL_TRAIL_INTERVAL_MS) return;
+    this.lastChannelTrail.set(position.id, now);
+
+    const candles = await serverMarketDataService
+      .getCandles(position.userId, position.symbol, String(timeframeMinutes), { limit: 30 })
+      .catch(() => []);
+    const closed = closedCandles(candles, timeframeMinutes, now);
+    const level = channelStop(position.side === "BUY" ? "BUY" : "SELL", closed, null);
+    if (level == null) return;
+
+    const result = await this.trailing.moveStopTo(snapshot, level);
+    if (result.moved) {
+      await this.log(position, "TRAILING_MOVED", `stop loss trailed to the 10-candle ${position.side === "BUY" ? "low" : "high"} ${usdt(result.newStopLoss)}`);
+      if (position.state === "PROTECTED") {
+        await this.stateManager.transition(position.id, "PROTECTED", "TRAILING");
+      }
+    }
+  }
+
   private async syncTrailing(snapshot: PositionSnapshot): Promise<void> {
     const { position } = snapshot;
-    if (!position.trailingEnabled) return;
     if (position.state !== "PROTECTED" && position.state !== "TRAILING") return;
+    const profile = await this.botProfile(position.botId);
+    if (profile.strategy === TREND_BREAKOUT_ID) {
+      await this.syncChannelTrailing(snapshot, profile.timeframeMinutes);
+      return;
+    }
+    if (!position.trailingEnabled) return;
 
     const result = await this.trailing.update(snapshot);
     if (result.moved) {

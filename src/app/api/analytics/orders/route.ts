@@ -6,8 +6,8 @@ export async function GET(req: NextRequest) {
   const userId = requireUserId(req);
   if (!userId) return fail(401, "Unauthorized");
   try {
-    const { botId } = parseFilters(new URL(req.url));
-    const data = await getAnalyticsService().getOrders(userId, botId ?? undefined);
+    const { botId, strategy } = parseFilters(new URL(req.url));
+    const data = await getAnalyticsService().getOrders(userId, botId ?? undefined, strategy);
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/orders]", error);

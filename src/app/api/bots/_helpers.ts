@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getCustomerFromRequest } from "@/lib/auth";
 import type { AutomationConfig } from "@/automation/types";
+import { DEFAULT_STRATEGY_ID, isKnownStrategy, strategyInfo } from "@/automation/strategy/catalog";
 
 export function requireUserId(req: NextRequest): number | null {
   const customer = getCustomerFromRequest(req);
@@ -27,9 +28,13 @@ const n = (v: unknown): number | undefined =>
 
 export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig {
   const capitalMode = body.capitalMode === "percent" ? "percent" : "fixed";
+  const strategy = isKnownStrategy(body.strategy) ? body.strategy : DEFAULT_STRATEGY_ID;
+  const info = strategyInfo(strategy);
   return {
     symbol: body.symbol as string,
-    timeframe: body.timeframe as string,
+    // A strategy designed for one timeframe always runs on it.
+    timeframe: info.fixedTimeframe ?? (body.timeframe as string),
+    strategy,
     leverage: n(body.leverage) as number,
     name: typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 100) : undefined,
     autoSelect: body.autoSelect === true,
@@ -49,6 +54,7 @@ export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig 
     maxCandles: n(body.maxCandles),
     hardCapCandles: n(body.hardCapCandles),
     regimeTolerancePct: n(body.regimeTolerancePct),
-    momentumEntriesOnly: body.momentumEntriesOnly === true,
+    momentumEntriesOnly: info.supportsMomentumFilter && body.momentumEntriesOnly === true,
+    coinUniverse: body.coinUniverse === "MAJORS" ? "MAJORS" : "TOP_VOLUME",
   };
 }

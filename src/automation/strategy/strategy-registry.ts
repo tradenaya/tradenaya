@@ -1,4 +1,5 @@
 import { TradenayaSmartV1Strategy } from "./tradenaya";
+import { TrendBreakoutStrategy } from "./trend-breakout";
 import type { BaseStrategy } from "./types";
 
 export class StrategyRegistry {
@@ -6,6 +7,7 @@ export class StrategyRegistry {
 
   constructor() {
     this.register(new TradenayaSmartV1Strategy());
+    this.register(new TrendBreakoutStrategy());
   }
 
   register(strategy: BaseStrategy) {

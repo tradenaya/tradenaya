@@ -11,11 +11,20 @@ import { TRADENAYA_CONFIG } from "@/automation/strategy/tradenaya/config";
 import { normalizeInterval } from "@/automation/market/normalizer";
 import { closedCandles } from "@/automation/indicators/candle-resampler";
 import { passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
+import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
+import { STOP_ATR, analyzeBreakout } from "@/automation/strategy/trend-breakout";
 import {
   LEVERAGE_UNSAFE,
   resolveLeverage,
   type InstrumentInfo,
 } from "@/automation/coinauto/leverage";
+
+/**
+ * "Major coins only" universe: the large, liquid coins the Trend Breakout
+ * strategy was tested on. Auto-select scans only these when the bot's
+ * coinUniverse is MAJORS (otherwise: top coins by 24h volume).
+ */
+export const MAJOR_COINS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT"];
 
 /** Only this many top-liquidity symbols are ever scanned for AUTO selection. */
 export const AUTO_SELECTION_UNIVERSE_SIZE = 10;
@@ -238,7 +247,9 @@ export class AutoBestSelector {
       return done();
     }
 
-    const universe = eligible.slice(0, AUTO_SELECTION_UNIVERSE_SIZE);
+    const universe = (
+      config.coinUniverse === "MAJORS" ? eligible.filter((c) => MAJOR_COINS.includes(c.symbol.toUpperCase())) : eligible
+    ).slice(0, AUTO_SELECTION_UNIVERSE_SIZE);
     for (const coin of universe) {
       console.log(
         `[AUTO BEST] UNIVERSE symbol=${coin.symbol} quoteVolume24h=${coin.quoteVolume24h}`,
@@ -252,7 +263,10 @@ export class AutoBestSelector {
     const scannedResults = await mapConcurrently(
       universe,
       AUTO_SELECTION_CONCURRENCY,
-      async (coin) => this.scanOne(coin, adapter, timeframe, candlesKey, Boolean(config.momentumEntriesOnly), summary),
+      async (coin) =>
+        config.strategy === TREND_BREAKOUT_ID
+          ? this.scanBreakout(coin, adapter, timeframe, candlesKey, summary)
+          : this.scanOne(coin, adapter, timeframe, candlesKey, Boolean(config.momentumEntriesOnly), summary),
     );
     summary.scanned = universe.length;
     const scanned = scannedResults.filter((s): s is ScannedOpportunity => s !== null);
@@ -316,6 +330,73 @@ export class AutoBestSelector {
         : `[AUTO BEST] COMPLETE symbol=none reason=no-safe-leverage`,
     );
     return done();
+  }
+
+  /**
+   * Trend Breakout scan for one symbol: a coin qualifies only when its last
+   * closed candle breaks the 20-candle range with the 200-EMA trend. Ranked by
+   * how far the close cleared the range (in ATRs). Failures are isolated.
+   */
+  private async scanBreakout(
+    coin: EligibleCoin,
+    adapter: { getSnapshot(symbol: string, timeframe: string): Promise<MarketSnapshot> },
+    timeframe: string,
+    candlesKey: string,
+    summary?: AutoScanSummary,
+  ): Promise<ScannedOpportunity | null> {
+    try {
+      const snapshot = await adapter.getSnapshot(coin.symbol, timeframe);
+      if (snapshot.isFresh === "STALE" || snapshot.isFresh === "UNAVAILABLE") {
+        if (summary) summary.dataUnavailable += 1;
+        return null;
+      }
+      const candles = closedCandles(
+        snapshot.candles[timeframe] ?? snapshot.candles[candlesKey] ?? Object.values(snapshot.candles ?? {})[0] ?? [],
+        normalizeInterval(timeframe),
+      );
+      const result = analyzeBreakout(candles);
+      console.log(`[AUTO BEST] BREAKOUT symbol=${coin.symbol} signal=${result?.signal ?? "none"} strength=${result?.strength?.toFixed(2) ?? "n/a"}`);
+      if (!result || !result.signal || result.atr == null) {
+        if (summary) summary.noSetup += 1;
+        return null;
+      }
+      const side = result.signal === "BUY" ? "LONG" : "SHORT";
+      const score = Math.round(Math.min(100, 50 + result.strength * 25));
+      // The leverage resolver estimates the stop as ~1.35 ATR; this strategy's
+      // stop is STOP_ATR ATRs, so scale the volatility it sees to match.
+      const atrPct = (result.atr / result.close) * 100 * (STOP_ATR / 1.35);
+      const zero = { regime: 0, trend: 0, structure: 0, momentum: 0, participation: 0, volatility: 0, entryLocation: 0, riskReward: 0, flow: 0 };
+      const opportunity: CoinOpportunity = {
+        symbol: coin.symbol,
+        timeframe,
+        price: result.close,
+        signal: result.signal,
+        side,
+        confidence: 0.7,
+        score,
+        trend: side === "LONG" ? "UP" : "DOWN",
+        regime: side === "LONG" ? "UP" : "DOWN",
+        factors: zero as CoinOpportunityFactors,
+        vetoes: [],
+        reasons: [side === "LONG" ? "breakout-up" : "breakout-down"],
+        reasonsText: `${side === "LONG" ? "Upside" : "Downside"} breakout with the 200-EMA trend`,
+        atrPct,
+        rsi: null,
+        adx: null,
+        volumeRatio: null,
+        netScore: score,
+        longNetScore: side === "LONG" ? score : 0,
+        shortNetScore: side === "SHORT" ? score : 0,
+        entryZone: result.close,
+        tradable: true,
+        quoteVolume24h: coin.quoteVolume24h,
+      };
+      return { coin, opportunity, side, strategyScore: score };
+    } catch (error) {
+      console.error(`[AUTO BEST] breakout scan failed symbol=${coin?.symbol ?? "unknown"}`, error);
+      if (summary) summary.dataUnavailable += 1;
+      return null;
+    }
   }
 
   /** Fetch one symbol's snapshot and run the strategy. Failures are isolated. */

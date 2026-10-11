@@ -1,13 +1,13 @@
 import { NextResponse, NextRequest } from "next/server";
 import { buildSignedRequest } from "@/lib/coinswitch/reference-client";
-import { requireKeysFromRequest } from "@/app/api/coinswitch/_helpers";
+import { requireKeysFromRequest, paperFetch } from "@/app/api/coinswitch/_helpers";
 import { errorResponse } from "@/lib/api-error";
 
 async function callSigned(req: NextRequest, method: "GET" | "POST", endpoint: string, payload?: Record<string, any>) {
   const keys = await requireKeysFromRequest(req as any);
   const { url, headers } = buildSignedRequest(method, endpoint, method === "GET" ? payload : undefined, keys?.apiKey, keys?.apiSecret);
 
-  const res = await fetch(url, { method, headers, ...(method === "POST" && payload ? { body: JSON.stringify(payload) } : {}) });
+  const res = (await paperFetch(req as any, method, endpoint, payload)) ?? await fetch(url, { method, headers, ...(method === "POST" && payload ? { body: JSON.stringify(payload) } : {}) });
 
   const raw = await res.text();
   const data = JSON.parse(raw);

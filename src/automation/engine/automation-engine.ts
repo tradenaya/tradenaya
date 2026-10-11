@@ -13,6 +13,9 @@ import { MOMENTUM_RSI_THRESHOLD, passesMomentumFilter } from "@/automation/strat
 import { summarizeDecision } from "@/automation/strategy/tradenaya/humanize";
 import type { AnalysisPhase } from "@/automation/scheduler/LiveActivityHub";
 import { usdt } from "@/lib/currency/usdt-text";
+import { DEFAULT_STRATEGY_ID, TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
+import { TrendBreakoutPlanner, summarizeBreakout } from "@/automation/strategy/trend-breakout";
+import type { TradePlanner } from "@/automation/planner/trade-planner";
 
 export type EngineStep = { phase: AnalysisPhase; message: string; detail?: Record<string, unknown> };
 export type EngineStepHandler = (step: EngineStep) => void;
@@ -36,8 +39,9 @@ export class AutomationEngine {
     private readonly marketDataService: MarketDataService = new CoinSwitchMarketDataService(),
     private readonly indicatorEngine = new TechnicalIndicatorEngine(),
     private readonly strategies = new StrategyRegistry(),
-    private readonly planner = new DefaultTradePlanner(),
+    private readonly planner: TradePlanner = new DefaultTradePlanner(),
     private readonly riskManager = new DefaultRiskManager(),
+    private readonly breakoutPlanner: TradePlanner = new TrendBreakoutPlanner(),
   ) {}
 
   async run(config: AutomationConfig, onStep?: EngineStepHandler): Promise<EngineResult> {
@@ -59,7 +63,9 @@ export class AutomationEngine {
     step("indicators", "Computing indicators (EMA, RSI, MACD, ATR, ADX, Bollinger, VWAP, SuperTrend)…");
     const indicators = this.indicatorEngine.compute(candles);
 
-    const strategy = this.strategies.getStrategy("TradenayaSmartV1") ?? this.strategies.getStrategies()[0];
+    const strategyId = config.strategy ?? DEFAULT_STRATEGY_ID;
+    const isBreakout = strategyId === TREND_BREAKOUT_ID;
+    const strategy = this.strategies.getStrategy(strategyId) ?? this.strategies.getStrategy(DEFAULT_STRATEGY_ID) ?? this.strategies.getStrategies()[0];
     if (!strategy) {
       return { signal: "WAIT", analysis: { trend: "SIDEWAYS", confidence: 0, reasons: ["no strategy configured"], price: null, summary: `No trade for ${config.symbol} — no strategy configured` } };
     }
@@ -75,7 +81,9 @@ export class AutomationEngine {
     };
 
     const decision: StrategyDecision = await strategy.analyze(strategyContext);
-    const analysis = this.buildAnalysis(config, market.price, decision);
+    const analysis = isBreakout
+      ? { trend: decision.trend, confidence: decision.confidence, reasons: decision.reasons, price: market.price, summary: summarizeBreakout(config.symbol, decision) }
+      : this.buildAnalysis(config, market.price, decision);
 
     step("strategy", `Decision: ${decision.signal} — ${analysis.summary}`);
 
@@ -83,7 +91,7 @@ export class AutomationEngine {
       return { signal: "WAIT", analysis };
     }
 
-    if (config.momentumEntriesOnly && !passesMomentumFilter(decision.signal, Number(decision.indicators?.rsi))) {
+    if (!isBreakout && config.momentumEntriesOnly && !passesMomentumFilter(decision.signal, Number(decision.indicators?.rsi))) {
       const rsi = Number(decision.indicators?.rsi);
       const summary = `No trade for ${config.symbol} — ${decision.signal} signal skipped: strong-momentum entries only (RSI ${Number.isFinite(rsi) ? rsi.toFixed(1) : "n/a"}, needs ${decision.signal === "BUY" ? `≥ ${MOMENTUM_RSI_THRESHOLD}` : `≤ ${100 - MOMENTUM_RSI_THRESHOLD}`})`;
       step("strategy", summary);
@@ -91,7 +99,7 @@ export class AutomationEngine {
     }
 
     step("plan", `Planning ${decision.signal} trade for ${config.symbol}…`);
-    const plan = this.planner.plan({
+    const plan = (isBreakout ? this.breakoutPlanner : this.planner).plan({
       strategyDecision: decision,
       currentPrice: market.price,
       indicators,

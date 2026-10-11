@@ -20,7 +20,7 @@ function Stat({ label, value, valueClass }: { label: string; value: string; valu
 export function TradeStatsCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<TradeStatistics>(
     () => apiGet("/api/analytics/statistics", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   return (

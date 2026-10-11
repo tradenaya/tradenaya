@@ -11,6 +11,7 @@ import { BacktestOrderSimulator, applyExitSlippage } from "./order-simulator";
 import { BacktestTrailingStop } from "./trailing-stop";
 import { BacktestPositionManager } from "./position-manager";
 import type { BacktestPortfolio } from "./portfolio";
+import { channelStop } from "@/automation/strategy/trend-breakout";
 
 export interface PlaceOrderInput {
   symbol: string;
@@ -27,6 +28,8 @@ export interface PlaceOrderInput {
   trailingEnabled: boolean;
   trailingDistancePct: number;
   trailingActivationPct: number;
+  /** Trail the stop to the low/high of this many prior candles (Trend Breakout). */
+  channelTrailLookback?: number;
 }
 
 export interface CandleProcessingResult {
@@ -65,6 +68,8 @@ export class BacktestExecutionEngine {
   private readonly positions = new BacktestPositionManager();
   private readonly backtestId: number;
   private readonly trailingActivationPct: number;
+  /** Recently processed (closed) candles, for candle-channel trailing stops. */
+  private readonly recent: MarketCandle[] = [];
 
   constructor(
     private readonly options: ExecutionEngineOptions,
@@ -110,6 +115,7 @@ export class BacktestExecutionEngine {
       trailingEnabled: input.trailingEnabled,
       trailingDistancePct: input.trailingDistancePct,
       trailingActivationPct: input.trailingActivationPct,
+      channelTrailLookback: input.channelTrailLookback,
     };
   }
 
@@ -122,9 +128,14 @@ export class BacktestExecutionEngine {
    * for a fill; an open position is evaluated for TP/SL and trailing updates.
    */
   processCandle(candle: MarketCandle): CandleProcessingResult {
-    if (this.openPosition) return this.processOpenPosition(candle);
-    if (this.activeOrder) return this.processPendingOrder(candle);
-    return { orderFilled: false, positionClosed: false };
+    const result = this.openPosition
+      ? this.processOpenPosition(candle)
+      : this.activeOrder
+        ? this.processPendingOrder(candle)
+        : { orderFilled: false, positionClosed: false };
+    this.recent.push(candle);
+    if (this.recent.length > 60) this.recent.shift();
+    return result;
   }
 
   /** Close any still-open position at the final available price (END_OF_BACKTEST). */
@@ -146,6 +157,12 @@ export class BacktestExecutionEngine {
 
   private processOpenPosition(candle: MarketCandle): CandleProcessingResult {
     const position = this.openPosition as SimulatedPosition;
+    // Candle-channel trail uses only candles that closed BEFORE this one, the
+    // same levels a live stop order would be resting at during this candle.
+    if (position.channelTrailLookback) {
+      const level = channelStop(position.side === "LONG" ? "BUY" : "SELL", this.recent.slice(-position.channelTrailLookback), position.stopLoss);
+      if (level != null && level !== position.stopLoss) this.positions.applyTrailing(position, level, true);
+    }
     this.positions.observe(position, candle);
 
     const exit = this.orderSimulator.checkExit(position, candle);

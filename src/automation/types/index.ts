@@ -42,6 +42,12 @@ export interface AutomationConfig {
    * Fewer trades; off when absent so existing bots keep their behaviour.
    */
   momentumEntriesOnly?: boolean;
+  /** Strategy id from automation/strategy/catalog (default: TradenayaSmartV1). */
+  strategy?: string;
+  /** LIVE (real CoinSwitch account, default) or PAPER (simulated account, real prices). Fixed at creation. */
+  tradingMode?: "LIVE" | "PAPER";
+  /** Auto-select scans: MAJORS (BTC, ETH, SOL, XRP, BNB, DOGE) or TOP_VOLUME (top 10 by 24h volume). */
+  coinUniverse?: "MAJORS" | "TOP_VOLUME";
   /** User-assigned display name for this bot (optional). */
   name?: string;
 }

@@ -10,6 +10,8 @@ import CustomerThemeProvider
   from "@/components/providers/CustomerThemeProvider";
 import CurrencyProvider
   from "@/lib/currency/CurrencyProvider";
+import TradingModeProvider
+  from "@/lib/trading-mode/TradingModeProvider";
 import AuthHydrator
   from "@/components/auth/AuthHydrator";
 
@@ -24,9 +26,11 @@ export default function Providers({
         <AuthHydrator>
           <AdminThemeProvider>
             <CustomerThemeProvider>
-              <CurrencyProvider>
-                {children}
-              </CurrencyProvider>
+              <TradingModeProvider>
+                <CurrencyProvider>
+                  {children}
+                </CurrencyProvider>
+              </TradingModeProvider>
             </CustomerThemeProvider>
           </AdminThemeProvider>
         </AuthHydrator>

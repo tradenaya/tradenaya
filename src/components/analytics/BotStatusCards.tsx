@@ -20,15 +20,15 @@ function Chip({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 export function BotStatusCards({ filters }: { filters: AnalyticsFilterState }) {
-  const bots = useAsyncData<BotSummary[]>(() => apiGet("/api/analytics/bots"), [filters.botId], { pollMs: 15_000 })
+  const bots = useAsyncData<BotSummary[]>(() => apiGet("/api/analytics/bots", { strategy: filters.strategy }), [filters.botId, filters.strategy], { pollMs: 15_000 })
   const positions = useAsyncData<OpenPositionAnalytics[]>(
-    () => apiGet("/api/analytics/positions", { botId: filters.botId ?? null }),
-    [filters.botId],
+    () => apiGet("/api/analytics/positions", { botId: filters.botId ?? null, strategy: filters.strategy }),
+    [filters.botId, filters.strategy],
     { pollMs: 15_000 },
   )
   const orders = useAsyncData<ActiveOrderAnalytics[]>(
-    () => apiGet("/api/analytics/orders", { botId: filters.botId ?? null }),
-    [filters.botId],
+    () => apiGet("/api/analytics/orders", { botId: filters.botId ?? null, strategy: filters.strategy }),
+    [filters.botId, filters.strategy],
     { pollMs: 15_000 },
   )
 

@@ -20,6 +20,7 @@ import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
 import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
 import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
+import { currentTradingMode } from "@/automation/paper/mode";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
 
@@ -668,7 +669,7 @@ export class AnalysisCycleRunner {
       this.deps.store.getDailyStats(bot.userId),
     ]);
 
-    const runningBots = await this.deps.lifecycle.countActiveBotsForUser(bot.userId);
+    const runningBots = await this.deps.lifecycle.countActiveBotsForUser(bot.userId, currentTradingMode());
     const isPercent = config.capitalMode === "percent";
     const fixedCapital = Number(config.capital) || 0;
     const walletAvailable = wallet?.available ?? null;
@@ -810,6 +811,7 @@ export class AnalysisCycleRunner {
       throw new Error(`Bot ${bot.id} has no saved configuration`);
     }
     const config = JSON.parse(bot.configJson) as AutomationConfig;
+    if (!config.strategy && bot.strategy) config.strategy = bot.strategy;
     if (!config.symbol || !config.timeframe || !config.leverage || !config.capital || !config.maxRiskPerTrade || config.dailyLossLimit == null) {
       throw new Error(`Bot ${bot.id} configuration is incomplete`);
     }

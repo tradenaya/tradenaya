@@ -43,6 +43,7 @@ export class BacktestPositionManager {
       trailingDistancePct: input.order.trailingDistancePct,
       trailingActivationPct: input.order.trailingActivationPct,
       trailingActivated: false,
+      channelTrailLookback: input.order.channelTrailLookback,
       highestPrice: long ? Math.max(input.fillPrice, input.candle.high) : input.fillPrice,
       lowestPrice: long ? input.fillPrice : Math.min(input.fillPrice, input.candle.low),
       currentPrice: input.candle.close,

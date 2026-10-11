@@ -1,11 +1,20 @@
 import { NextRequest } from "next/server";
 import { liveActivityHub, type LiveAnalysisStep } from "@/automation/scheduler/LiveActivityHub";
 import { requireUserId } from "../_helpers";
+import { currentTradingMode, tradingModeOfBot, type TradingMode } from "@/automation/paper/mode";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const userId = requireUserId(req);
+  // EventSource can't send headers, so the Paper view connects with ?mode=PAPER.
+  const viewMode = currentTradingMode();
+  const botModes = new Map<number, TradingMode>();
+  const modeOf = async (botId: number | null | undefined): Promise<TradingMode> => {
+    if (!botId) return "LIVE";
+    if (!botModes.has(botId)) botModes.set(botId, await tradingModeOfBot(botId));
+    return botModes.get(botId) as TradingMode;
+  };
 
   const url = new URL(req.url);
   const botIdParam = url.searchParams.get("botId");
@@ -16,7 +25,7 @@ export async function GET(req: NextRequest) {
   let closed = false;
 
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
+    async start(controller) {
       const send = (step: LiveAnalysisStep) => {
         if (closed) return;
         try {
@@ -46,13 +55,16 @@ export async function GET(req: NextRequest) {
       // Replay recent history so the UI is populated immediately on connect.
       for (const step of liveActivityHub.history(userId)) {
         if (botIdValid != null && step.botId !== botIdValid) continue;
+        if ((await modeOf(step.botId)) !== viewMode) continue;
         send(step);
       }
 
       const unsubscribe = liveActivityHub.subscribe((step) => {
         if (step.userId !== userId) return;
         if (botIdValid != null && step.botId !== botIdValid) return;
-        send(step);
+        void modeOf(step.botId).then((mode) => {
+          if (mode === viewMode) send(step);
+        });
       });
 
       const keepAlive = setInterval(() => {

@@ -27,6 +27,7 @@ import { fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automa
 import { formatDate } from "@/components/analytics/format";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { strategyLabel } from "@/automation/strategy/catalog";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
 
@@ -182,7 +183,7 @@ function LiveBotCard({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">
-              {cfg.timeframe} · {cfg.strategy} · {cfg.leverage}x
+              {cfg.timeframe} · {strategyLabel(cfg.strategy)} · {cfg.leverage}x
             </span>
             <Button
               size="sm"
@@ -347,7 +348,7 @@ export default function AutomationPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      toast.success(json.message || `Bot ${action === "start" ? "resumed" : action === "pause" ? "paused" : "stopped"}`);
+      toast.success(json.message || `Bot ${action === "start" ? "started" : action === "pause" ? "paused" : "stopped"}`);
       await loadBots();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : `Failed to ${action} bot`);
@@ -556,7 +557,7 @@ export default function AutomationPage() {
                         {offline && <span className="shrink-0 text-[10px] font-normal text-amber-400">offline</span>}
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground">
-                        {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
                       </div>
                       {bot.lastError && !live && (
                         <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{localizeUsdtText(bot.lastError)}</div>

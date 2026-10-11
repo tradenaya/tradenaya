@@ -34,6 +34,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StrategyPicker } from "./StrategyPicker";
+import { DEFAULT_STRATEGY_ID, strategyInfo } from "@/automation/strategy/catalog";
+import { CoinUniversePicker, type CoinUniverse } from "./CoinUniversePicker";
+import { useTradingMode } from "@/lib/trading-mode/TradingModeProvider";
 
 export interface InstrumentInfo {
   min_leverage: string;
@@ -76,10 +80,12 @@ export interface CoinAnalysis {
 
 const DEFAULT_SETTINGS = {
   name: "",
+  strategy: DEFAULT_STRATEGY_ID as string,
   symbol: "BTCUSDT",
   timeframe: "1h",
   leverage: "5",
   autoSelect: false,
+  coinUniverse: "TOP_VOLUME" as CoinUniverse,
   leverageMode: "auto" as "auto" | "manual",
   leveragePercent: "50",
   capital: "100",
@@ -127,6 +133,9 @@ function fmtWallet(value: number): string {
 export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDialogProps) {
   useDisplayCurrency();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [showMore, setShowMore] = useState(false);
+  const tradingMode = useTradingMode();
+  const strategyMeta = strategyInfo(settings.strategy);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -156,6 +165,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       capital: String(Number(settings.capital) || 0),
       maxRiskPerTrade: String(Number(settings.maxRiskPerTrade) || 1),
       config: JSON.stringify({
+        strategy: settings.strategy,
+        coinUniverse: settings.coinUniverse,
         timeframe: settings.timeframe,
         leverage: Number(settings.leverage) || 5,
         leverageMode: settings.leverageMode,
@@ -177,7 +188,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       }),
     });
     return `/api/bots/auto-selection?${params.toString()}`;
-  }, [settings.autoSelect, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade, settings.leverage, settings.dailyLossLimit, settings.enableTrailingStop, settings.trailingDistancePercent, settings.momentumEntriesOnly, settings.driftAtr, settings.regimeTolerancePct, settings.maxCandles, settings.hardCapCandles, settings.orderExpiryMinutes, settings.minConfidence, capitalMode, walletPercent]);
+  }, [settings.autoSelect, settings.strategy, settings.coinUniverse, settings.timeframe, settings.leverageMode, settings.leveragePercent, settings.capital, settings.maxRiskPerTrade, settings.leverage, settings.dailyLossLimit, settings.enableTrailingStop, settings.trailingDistancePercent, settings.momentumEntriesOnly, settings.driftAtr, settings.regimeTolerancePct, settings.maxCandles, settings.hardCapCandles, settings.orderExpiryMinutes, settings.minConfidence, capitalMode, walletPercent]);
 
   useEffect(() => {
     if (!settings.autoSelect || !open) return;
@@ -509,6 +520,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
     const body: Record<string, unknown> = {
       symbol,
       name: settings.name.trim() || undefined,
+      strategy: settings.strategy,
+      coinUniverse: settings.coinUniverse,
       timeframe: settings.timeframe,
       leverage: Number(settings.leverage),
       autoSelect: settings.autoSelect,
@@ -546,11 +559,11 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
         return;
       }
       await createBot();
-      toast.success("Automated trading started");
+      toast.success("Bot created — it is stopped. Turn it on when you're ready.");
       onOpenChange(false);
       onCreated?.();
     } catch (err: unknown) {
-      const message = errorMessage(err, "Failed to start automated trading");
+      const message = errorMessage(err, "Failed to create the bot");
       setError(err);
       toast.error(message);
     } finally {
@@ -578,6 +591,11 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               ? "Tradenaya continuously analyzes eligible coins and trades the strongest current opportunity (LONG or SHORT), rotating as the market changes."
               : `Tradenaya trades ${settings.symbol} using your strategy with fixed SL and TP protection. You can adjust this later.`}
           </DialogDescription>
+          {tradingMode === "PAPER" && (
+            <p className="rounded-md px-2.5 py-1.5 text-xs font-medium text-black" style={{ backgroundColor: "#d97706" }}>
+              Paper bot — trades the simulated paper wallet with real prices. No real orders are placed.
+            </p>
+          )}
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto grid gap-4 md:grid-cols-2 py-2">
@@ -647,6 +665,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
 
           {settings.autoSelect && (
             <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-3 md:col-span-2">
+              <CoinUniversePicker value={settings.coinUniverse} onChange={(v) => setSettings((s) => ({ ...s, coinUniverse: v }))} />
               <div className="space-y-1.5">
                 <Label>Leverage mode</Label>
                 <div className="grid grid-cols-2 gap-2">
@@ -857,9 +876,33 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
           </div>
           )}
 
+          <div className="md:col-span-2">
+            <StrategyPicker
+              id="create-strategy"
+              value={settings.strategy}
+              onChange={(id) => {
+                const d = strategyInfo(id).defaults;
+                setSettings((s) => ({
+                  ...s,
+                  strategy: id,
+                  timeframe: d.timeframe,
+                  maxRiskPerTrade: String(d.maxRiskPerTrade),
+                  dailyLossLimit: String(d.dailyLossLimit),
+                  leverageMode: d.leverageMode,
+                  momentumEntriesOnly: d.momentumEntriesOnly,
+                  enableTrailingStop: d.enableTrailingStop,
+                  coinUniverse: d.coinUniverse,
+                }));
+              }}
+            />
+            <p className="mt-1 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              Recommended settings applied: {strategyMeta.defaults.note} You can still change them below.
+            </p>
+          </div>
+
           <div className="space-y-1.5">
             <Label>Timeframe</Label>
-            <Select value={settings.timeframe} onValueChange={(v) => setSettings((s) => ({ ...s, timeframe: v }))}>
+            <Select value={strategyInfo(settings.strategy).fixedTimeframe ?? settings.timeframe} onValueChange={(v) => setSettings((s) => ({ ...s, timeframe: v }))} disabled={Boolean(strategyInfo(settings.strategy).fixedTimeframe)}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -971,7 +1014,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
 
           <div className="md:col-span-2">
             <div className="border-t border-border pt-4 mt-2">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Advanced Settings</p>
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">Risk</p>
             </div>
           </div>
 
@@ -1006,6 +1049,19 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             {fieldErrors.dailyLoss && <FieldError>{fieldErrors.dailyLoss}</FieldError>}
           </div>
 
+          <div className="md:col-span-2">
+            <button
+              type="button"
+              onClick={() => setShowMore((v) => !v)}
+              aria-expanded={showMore}
+              className="text-xs font-medium text-amber-400 underline underline-offset-2 hover:text-amber-300"
+            >
+              {showMore ? "Hide more options" : "More options (order expiry, confidence…)"}
+            </button>
+          </div>
+
+          {showMore && (
+          <>
           <div className="space-y-1.5">
             <Label htmlFor="auto-order-expiry">Order expiry (min)</Label>
             <Input
@@ -1036,6 +1092,8 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             {fieldErrors.minConfidence && <FieldError>{fieldErrors.minConfidence}</FieldError>}
           </div>
 
+          {strategyMeta.usesPullbackTuning && (
+          <>
           <div className="space-y-1.5">
             <Label htmlFor="auto-drift">Drift tolerance (×ATR)</Label>
             <Input
@@ -1089,7 +1147,10 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             />
             {fieldErrors.hardCap && <FieldError>{fieldErrors.hardCap}</FieldError>}
           </div>
+          </>
+          )}
 
+          {strategyInfo(settings.strategy).supportsMomentumFilter && (
           <div className="md:col-span-2">
             <div className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
@@ -1108,7 +1169,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
               </p>
             </div>
           </div>
+          )}
 
+          {strategyMeta.usesPullbackTuning && (
           <div className="md:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
               <div className="flex items-center gap-2">
@@ -1138,9 +1201,15 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             </div>
           </div>
 
+          )}
+
+          {strategyMeta.usesPullbackTuning && (
           <p className="md:col-span-2 text-[11px] text-muted-foreground">
             Drift tolerance: how far price (in ATRs) can drift past your resting entry before being cancelled. Regime tolerance: ignore EMA flips smaller than this % so you are not cancelled on noise.
           </p>
+          )}
+          </>
+          )}
 
           <div className="md:col-span-2">
             <div className="border-t border-border pt-4 mt-2">
@@ -1149,7 +1218,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             </div>
           </div>
 
-          {error != null && <ErrorState error={error} title="Couldn't start automated trading" className="md:col-span-2" />}
+          {error != null && <ErrorState error={error} title="Couldn't create the bot" className="md:col-span-2" />}
         </div>
 
         <DialogFooter>
@@ -1157,7 +1226,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             Cancel
           </Button>
           <Button type="button" disabled={submitting} onClick={submitSettings}>
-            {submitting ? "Starting…" : "Start automated trading"}
+            {submitting ? "Creating…" : "Create bot"}
           </Button>
         </DialogFooter>
       </DialogContent>

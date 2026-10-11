@@ -327,3 +327,53 @@ describe("BotAnalyticsService", () => {
     expect(repo.closedTradeCalls).toBe(1);
   });
 });
+
+describe("BotAnalyticsService strategy filter & comparison", () => {
+  /** Fake that honours the strategy filter the way the SQL does (via the trade's bot). */
+  class StrategyRepository extends FakeRepository {
+    async getClosedTrades(_userId?: number, filters?: AnalyticsFilters): Promise<ClosedTradeRow[]> {
+      const ids = filters?.strategy ? new Set(this.bots.filter((b) => b.strategy === filters.strategy).map((b) => b.id)) : null;
+      return this.trades.filter((t) => (!ids || ids.has(t.botId)) && (filters?.startTime == null || new Date(t.closedAt).getTime() >= filters.startTime));
+    }
+  }
+
+  function setup() {
+    const repo = new StrategyRepository();
+    repo.bots = [bot({ id: 1, strategy: "TradenayaSmartV1" }), bot({ id: 2, strategy: "TrendBreakoutV1" })];
+    repo.trades = [
+      trade({ id: 1, botId: 1, realizedPnl: 10, fees: 0, closedAt: new Date(DAY_1).toISOString() }),
+      trade({ id: 2, botId: 1, realizedPnl: -20, fees: 0, exitReason: "STOP_LOSS", closedAt: new Date(DAY_1 + DAY_MS).toISOString() }),
+      trade({ id: 3, botId: 2, realizedPnl: -5, fees: 0, exitReason: "STOP_LOSS", closedAt: new Date(DAY_1).toISOString() }),
+      trade({ id: 4, botId: 2, realizedPnl: 30, fees: 0, closedAt: new Date(DAY_1 + 2 * DAY_MS).toISOString() }),
+    ];
+    repo.positions = [position({ botId: 1 }), position({ id: 101, botId: 2, unrealizedPnl: 5 })];
+    return { repo, service: new BotAnalyticsService(repo) };
+  }
+
+  it("filters summary trades and open positions by strategy", async () => {
+    const { service } = setup();
+    const summary = await service.getAccountSummary(1, { strategy: "TrendBreakoutV1" });
+    expect(summary.totalTrades).toBe(2);
+    expect(summary.openPositions).toBe(1);
+    const positions = await service.getPositions(1, undefined, "TrendBreakoutV1");
+    expect(positions.map((p) => p.botId)).toEqual([2]);
+  });
+
+  it("compares strategies side by side over the same window", async () => {
+    const { service } = setup();
+    const result = await service.getStrategyComparison(1, ["TradenayaSmartV1", "TrendBreakoutV1"], null, null);
+    const [smart, breakout] = result.rows;
+    expect(smart).toMatchObject({ strategy: "TradenayaSmartV1", label: "Tradenaya Smart", trades: 2, bots: 1 });
+    expect(smart.netPnl).toBeCloseTo(-10);
+    expect(smart.maxDrawdown).toBeCloseTo(20);
+    expect(breakout).toMatchObject({ strategy: "TrendBreakoutV1", label: "Trend Breakout (4h)", trades: 2 });
+    expect(breakout.netPnl).toBeCloseTo(25);
+    expect(breakout.curve.map((p) => p.cumulativePnl)).toEqual([-5, 25]);
+  });
+
+  it("applies the comparison window", async () => {
+    const { service } = setup();
+    const result = await service.getStrategyComparison(1, ["TrendBreakoutV1"], DAY_1 + DAY_MS, null);
+    expect(result.rows[0].trades).toBe(1);
+  });
+});

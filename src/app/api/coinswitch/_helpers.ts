@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getCustomerFromRequest } from "@/lib/auth";
 import { getKeysForUser } from "@/lib/coinswitch.store";
 import { HttpError } from "@/lib/api-error";
+import { isPaperContext } from "@/automation/paper/mode";
 
 export async function getKeysFromRequest(req: NextRequest) {
   const customer = getCustomerFromRequest(req as any as NextRequest);
@@ -36,4 +37,20 @@ export async function requireKeysFromRequest(
     "Your CoinSwitch account is not connected — no API keys are saved for this user. Connect it on the CoinSwitch connect page.",
     "COINSWITCH_NOT_CONNECTED",
   );
+}
+
+/**
+ * Paper trading: when the request is in PAPER mode (Paper toggle on), answer a
+ * CoinSwitch account endpoint from the simulated exchange as a Response with
+ * the same JSON CoinSwitch returns, so the route's own parsing stays unchanged.
+ * Returns null in LIVE mode (the route calls CoinSwitch as before).
+ */
+export async function paperFetch(req: NextRequest, method: "GET" | "POST" | "DELETE", endpoint: string, params?: Record<string, unknown>): Promise<Response | null> {
+  if (!isPaperContext()) return null;
+  const customer = getCustomerFromRequest(req);
+  if (!customer) return null;
+  const { paperExchange } = await import("@/automation/paper/exchange");
+  const result = await (await paperExchange()).handle(method, endpoint, (params ?? {}) as Record<string, any>, customer.customerId);
+  if (!result) return null;
+  return new Response(JSON.stringify(result.body), { status: result.status, headers: { "Content-Type": "application/json" } });
 }

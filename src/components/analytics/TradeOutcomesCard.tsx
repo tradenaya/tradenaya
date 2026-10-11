@@ -21,7 +21,7 @@ const STATUS_ORDER: TradeOutcome[] = ["WIN", "LOSS", "BREAKEVEN", "CANCELLED"]
 export function TradeOutcomesCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<OutcomeAnalytics>(
     () => apiGet("/api/analytics/outcomes", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   const pieData = (data?.statuses ?? [])

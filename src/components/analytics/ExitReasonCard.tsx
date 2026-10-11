@@ -22,7 +22,7 @@ const COLORS: Record<string, string> = {
 export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<ExitAnalytics>(
     () => apiGet("/api/analytics/exits", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   const pieData = data?.reasons

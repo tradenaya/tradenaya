@@ -29,6 +29,10 @@ export interface BotConfig {
   strategy: string;
   leverage: number;
   autoSelect: boolean;
+  /** Auto-select scan universe. */
+  coinUniverse: "MAJORS" | "TOP_VOLUME";
+  /** LIVE or PAPER (fixed at creation). */
+  tradingMode: "LIVE" | "PAPER";
   /** User-assigned display name for this bot (optional). */
   name?: string;
   /** Last selected direction for an auto-select bot (LONG/SHORT). */
@@ -109,6 +113,8 @@ export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "lev
     strategy: String(raw.strategy ?? bot.strategy ?? "TradenayaSmartV1"),
     leverage: Number(raw.leverage ?? bot.leverage),
     autoSelect: Boolean(raw.autoSelect),
+    coinUniverse: raw.coinUniverse === "MAJORS" ? "MAJORS" : "TOP_VOLUME",
+    tradingMode: raw.tradingMode === "PAPER" ? "PAPER" : "LIVE",
     side: raw.side === "SHORT" || raw.side === "SELL" ? "SHORT" : raw.side === "LONG" || raw.side === "BUY" ? "LONG" : undefined,
     leverageMode: raw.leverageMode === "auto" ? "auto" : "manual",
     leveragePercent: raw.leveragePercent != null ? Number(raw.leveragePercent) : 50,

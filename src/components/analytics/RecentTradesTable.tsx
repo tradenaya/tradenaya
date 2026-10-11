@@ -38,7 +38,7 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
         sortBy,
         sortDir,
       }),
-    [page, sortBy, sortDir, filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [page, sortBy, sortDir, filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   const trades = data?.items ?? []

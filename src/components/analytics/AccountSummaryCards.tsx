@@ -33,7 +33,7 @@ function StatCard({
 export function AccountSummaryCards({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<AccountSummary>(
     () => apiGet("/api/analytics/summary", toQuery(filters)),
-    [filters.botId, filters.symbol, filters.side, filters.startTime, filters.endTime],
+    [filters.botId, filters.symbol, filters.strategy, filters.side, filters.startTime, filters.endTime],
   )
 
   if (errorInfo && !data) {
