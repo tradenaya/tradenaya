@@ -22,11 +22,27 @@ import { MySqlPaperStore } from "./store";
  *    estimated liquidation price before its stop.
  *  - When a position goes flat its remaining reduce-only orders are cancelled.
  *
- * Fees match CoinSwitch futures: maker 0.024%, taker 0.065%. No funding.
+ * Fees match CoinSwitch futures: maker 0.024%, taker 0.065%.
+ *
+ * Deliberately a little STRICTER than the real exchange, so a strategy can't
+ * look better on paper than it will live:
+ *  - Funding: every 8 hours an open position pays/receives funding at the
+ *    coin's live CoinSwitch funding rate (ledger type FUNDING_FEE).
+ *  - Slippage: every taker fill (stop, take-profit, market, marketable limit)
+ *    fills TAKER_SLIPPAGE worse; a stop that price gapped through fills at
+ *    the worse candle price, not at the stop.
+ *  - Limits need a trade-through: a resting limit fills only when price trades
+ *    LIMIT_TRADE_THROUGH past it (a touch is not a fill — queue risk).
  */
 export const MAKER_FEE = 0.00024;
 export const TAKER_FEE = 0.00065;
 export const DEFAULT_PAPER_BALANCE = 100;
+/** Adverse slippage on every taker fill (0.05%). */
+export const TAKER_SLIPPAGE = 0.0005;
+/** How far price must trade past a resting limit before it counts as filled (0.01%). */
+export const LIMIT_TRADE_THROUGH = 0.0001;
+/** Funding is settled every 8 hours (00:00 / 08:00 / 16:00 UTC unless the exchange reports its own schedule). */
+export const FUNDING_INTERVAL_MS = 8 * 60 * 60_000;
 /** Maintenance-margin rate used for the liquidation estimate. */
 const MMR = 0.005;
 const MINUTE = 60_000;
@@ -44,6 +60,8 @@ export interface PaperMarket {
   /** Closed + forming 1-minute candles with start >= sinceMs, oldest first. */
   candles(userId: number, symbol: string, sinceMs: number): Promise<Candle1m[]>;
   price(userId: number, symbol: string): Promise<number | null>;
+  /** Live funding rate (per 8h, e.g. 0.0001 = 0.01%) and the exchange's next funding time if known. */
+  funding?(userId: number, symbol: string): Promise<{ rate: number; nextFundingTime: number | null } | null>;
 }
 
 export interface PaperResponse {
@@ -279,7 +297,8 @@ export class PaperExchange {
       const marketable =
         orderType === "MARKET" || (orderType === "LIMIT" && (side === "BUY" ? (order.price as number) >= price : (order.price as number) <= price));
       if (marketable) {
-        await this.fill(order, orderType === "MARKET" ? price : side === "BUY" ? Math.min(price, order.price as number) : Math.max(price, order.price as number), TAKER_FEE, ts);
+        const base = orderType === "MARKET" ? price : side === "BUY" ? Math.min(price, order.price as number) : Math.max(price, order.price as number);
+        await this.fill(order, slip(base, side), TAKER_FEE, ts);
       }
       return (await this.store.getOrder(userId, order.orderId)) as PaperOrder;
     });
@@ -324,6 +343,7 @@ export class PaperExchange {
     for (const step of steps) {
       await this.processCandle(userId, symbol, step.candle, step.live);
     }
+    await this.settleFunding(userId, symbol, now);
     this.lastMatched.set(key, now);
   }
 
@@ -337,7 +357,8 @@ export class PaperExchange {
       if (order.reduceOnly || order.orderType !== "LIMIT") continue;
       if (!counts(order)) continue;
       const limit = order.price as number;
-      if (order.side === "BUY" ? c.low <= limit : c.high >= limit) await this.fill(order, limit, MAKER_FEE, at);
+      const through = order.side === "BUY" ? c.low <= limit * (1 - LIMIT_TRADE_THROUGH) : c.high >= limit * (1 + LIMIT_TRADE_THROUGH);
+      if (through) await this.fill(order, limit, MAKER_FEE, at);
     }
 
     // 2) Exits for the open position: stop first, then target, then liquidation.
@@ -365,7 +386,36 @@ export class PaperExchange {
     for (const order of hits) {
       position = (await this.store.listPositions(userId)).find((p) => p.symbol === symbol) ?? null;
       if (!position) break;
-      await this.fill(order, (order.triggerPrice as number) ?? c.close, TAKER_FEE, at);
+      await this.fill(order, exitFillPrice(order, c), TAKER_FEE, at);
+    }
+  }
+
+
+  /**
+   * Charge / pay funding for every 8-hour settlement the open position lived
+   * through. Idempotent: each settlement time is recorded once in the ledger,
+   * so restarts or repeated reads never charge twice.
+   */
+  private async settleFunding(userId: number, symbol: string, now: number): Promise<void> {
+    if (!this.market.funding) return;
+    const position = (await this.store.listPositions(userId)).find((p) => p.symbol === symbol);
+    if (!position) return;
+    const info = await this.market.funding(userId, symbol).catch(() => null);
+    if (!info || !Number.isFinite(info.rate)) return;
+    // Settlement grid: the exchange's own schedule when it reports one, else 00/08/16 UTC.
+    const anchor = info.nextFundingTime && info.nextFundingTime > 0 ? info.nextFundingTime : 0;
+    const offset = ((anchor % FUNDING_INTERVAL_MS) + FUNDING_INTERVAL_MS) % FUNDING_INTERVAL_MS;
+    const first = Math.ceil((position.openedAt - offset) / FUNDING_INTERVAL_MS) * FUNDING_INTERVAL_MS + offset;
+    for (let at = first <= position.openedAt ? first + FUNDING_INTERVAL_MS : first; at <= now; at += FUNDING_INTERVAL_MS) {
+      const done = await this.store.listTransactions(userId, { symbol, type: "FUNDING_FEE", from: at, to: at });
+      if (done.length > 0) continue;
+      const mark = (await this.market.price(userId, symbol).catch(() => null)) ?? position.entryPrice;
+      // Positive rate: longs pay shorts. Signed like the exchange ledger (negative = paid).
+      const amount = round8((position.side === "LONG" ? -1 : 1) * info.rate * mark * position.quantity);
+      const wallet = await this.wallet(userId);
+      wallet.balance = round8(wallet.balance + amount);
+      await this.store.saveWallet(wallet);
+      await this.store.addTransaction({ userId, symbol, type: "FUNDING_FEE", amount, orderId: null, createdAt: at });
     }
   }
 
@@ -525,6 +575,28 @@ export class PaperExchange {
   }
 }
 
+/** Taker fills always slip against the trader. */
+function slip(price: number, side: "BUY" | "SELL"): number {
+  return round8(side === "BUY" ? price * (1 + TAKER_SLIPPAGE) : price * (1 - TAKER_SLIPPAGE));
+}
+
+/**
+ * Fill price of a triggered stop / take-profit / market exit. If the whole
+ * candle traded beyond the trigger (price gapped through it), the fill uses the
+ * worse candle price instead of the trigger; then taker slippage applies.
+ */
+function exitFillPrice(order: PaperOrder, c: Candle1m): number {
+  const trigger = order.triggerPrice;
+  if (trigger == null) return slip(c.close, order.side);
+  let base = trigger;
+  if (order.orderType === "STOP_MARKET") {
+    // a SELL stop protects a long: if even the high is below the stop, it gapped
+    if (order.side === "SELL" && c.high < trigger) base = c.high;
+    if (order.side === "BUY" && c.low > trigger) base = c.low;
+  }
+  return slip(base, order.side);
+}
+
 function rank(o: PaperOrder): number {
   return o.orderType === "STOP_MARKET" ? 0 : o.orderType === "MARKET" ? 1 : 2;
 }
@@ -538,7 +610,18 @@ async function liveMarket(): Promise<PaperMarket> {
   const { coinswitchClient } = await import("@/automation/executor/client");
   const priceCache = new Map<string, { at: number; value: number | null }>();
   const candleCache = new Map<string, { at: number; rows: Candle1m[] }>();
+  const fundingCache = new Map<string, { at: number; value: { rate: number; nextFundingTime: number | null } | null }>();
   return {
+    async funding(userId, symbol) {
+      const hit = fundingCache.get(symbol);
+      if (hit && Date.now() - hit.at < 60_000) return hit.value;
+      const row = await coinswitchClient.getTicker(userId, symbol);
+      const rate = Number(row?.funding_rate ?? row?.r ?? row?.fundingRate);
+      const next = Number(row?.next_funding_time ?? row?.T ?? row?.nextFundingTime);
+      const value = Number.isFinite(rate) ? { rate, nextFundingTime: Number.isFinite(next) && next > 0 ? next : null } : null;
+      fundingCache.set(symbol, { at: Date.now(), value });
+      return value;
+    },
     async price(userId, symbol) {
       const hit = priceCache.get(symbol);
       if (hit && Date.now() - hit.at < 5_000) return hit.value;

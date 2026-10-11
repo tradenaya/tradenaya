@@ -37,7 +37,7 @@ export interface PaperPosition {
 export interface PaperTransaction {
   userId: number;
   symbol: string;
-  type: "COMMISSION" | "PNL";
+  type: "COMMISSION" | "PNL" | "FUNDING_FEE";
   amount: number;
   orderId: string | null;
   createdAt: number;

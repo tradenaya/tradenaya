@@ -185,6 +185,8 @@ export function StrategyComparisonCard() {
                   <TableRow>
                     <TableHead>Strategy</TableHead>
                     <TableHead className="text-right">Trades</TableHead>
+                    <TableHead className="text-right">Won</TableHead>
+                    <TableHead className="text-right">Lost</TableHead>
                     <TableHead className="text-right">Win rate</TableHead>
                     <TableHead className="text-right">Net PnL</TableHead>
                     <TableHead className="text-right">Avg / trade</TableHead>
@@ -207,6 +209,8 @@ export function StrategyComparisonCard() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{r.trades}</TableCell>
+                      <TableCell className="text-right tabular-nums text-emerald-400">{r.trades ? r.wins : "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums text-red-400">{r.trades ? r.losses : "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.trades ? formatPercent(r.winRate) : "—"}{mark("winRate", r.strategy)}</TableCell>
                       <TableCell className={cn("text-right font-medium tabular-nums", signClass(r.netPnl))}>{r.trades ? pnlText(r.netPnl) : "—"}{mark("netPnl", r.strategy)}</TableCell>
                       <TableCell className={cn("text-right tabular-nums", signClass(r.averageTradePnl))}>{r.trades ? pnlText(r.averageTradePnl) : "—"}</TableCell>

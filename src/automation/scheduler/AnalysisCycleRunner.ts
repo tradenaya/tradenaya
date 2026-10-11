@@ -21,6 +21,7 @@ import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
 import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
 import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
 import { currentTradingMode } from "@/automation/paper/mode";
+import { MAX_RUNNING_BOTS } from "./SchedulerTypes";
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
 
@@ -669,7 +670,9 @@ export class AnalysisCycleRunner {
       this.deps.store.getDailyStats(bot.userId),
     ]);
 
-    const runningBots = await this.deps.lifecycle.countActiveBotsForUser(bot.userId, currentTradingMode());
+    // Count the OTHER running bots: this bot is itself running, so including it
+    // would reject every trade once MAX_RUNNING_BOTS bots are on.
+    const runningBots = Math.max(0, (await this.deps.lifecycle.countActiveBotsForUser(bot.userId, currentTradingMode())) - 1);
     const isPercent = config.capitalMode === "percent";
     const fixedCapital = Number(config.capital) || 0;
     const walletAvailable = wallet?.available ?? null;
@@ -716,8 +719,8 @@ export class AnalysisCycleRunner {
         maxCapitalAllocationPct: 100,
         minWalletBalance: 0,
         maxLeverage: 100,
-        maxSimultaneousPositions: 5,
-        maxSimultaneousBots: 5,
+        maxSimultaneousPositions: MAX_RUNNING_BOTS,
+        maxSimultaneousBots: MAX_RUNNING_BOTS,
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
         minRiskRewardRatio: resolvedMinRR.value,
