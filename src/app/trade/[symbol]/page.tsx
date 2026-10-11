@@ -97,7 +97,7 @@ export default function TradePage() {
         >
           <ChevronLeft size={16} /> Back
         </Button>
-        <h1 className="text-xl sm:text-2xl font-bold">{symbol} Futures</h1>
+        <h1 className="text-xl sm:text-2xl brand-heading">{symbol} Futures</h1>
       </div>
 
       {/* Chart takes the main screen first — compact position & order cards sit beside it */}

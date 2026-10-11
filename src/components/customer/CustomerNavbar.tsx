@@ -85,7 +85,7 @@ export default function CustomerNavbar({ onMenuClick }: Props) {
         </button>
         <div className="flex items-center gap-2.5">
           <TradenayaLogo className="h-auto w-8 shrink-0" />
-          <h1 className="text-lg font-semibold">{tenant.tenantName || "Tradenaya"}</h1>
+          <h1 className="text-lg sm:text-xl brand-heading">{tenant.tenantName || "Tradenaya"}</h1>
         </div>
       </div>
 

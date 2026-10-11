@@ -1,37 +1,51 @@
 import Providers from "./providers";
 import type { Metadata } from "next";
-import { Cinzel, Cinzel_Decorative, Inter, Noto_Serif_Devanagari, Poppins } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Toaster } from "sonner";
 
-const inter = Inter({
+// Fonts are bundled in ./fonts (downloaded from Google Fonts) instead of
+// next/font/google, so production builds never fetch from Google — that fetch
+// step failed on the VPS ("next/font/google queries have exactly one entry").
+
+const inter = localFont({
   variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: [{ path: "./fonts/inter-latin-variable.woff2", weight: "300 700", style: "normal" }],
+  display: "swap",
 });
 
-const poppins = Poppins({
+const poppins = localFont({
   variable: "--font-poppins",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  src: [
+    { path: "./fonts/poppins-latin-400.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/poppins-latin-500.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/poppins-latin-600.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/poppins-latin-700.woff2", weight: "700", style: "normal" },
+    { path: "./fonts/poppins-latin-800.woff2", weight: "800", style: "normal" },
+  ],
+  display: "swap",
 });
 
-const cinzel = Cinzel({
+const cinzel = localFont({
   variable: "--font-cinzel",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  src: [{ path: "./fonts/cinzel-latin-variable.woff2", weight: "400 600", style: "normal" }],
+  display: "swap",
 });
 
-const cinzelDecorative = Cinzel_Decorative({
+const cinzelDecorative = localFont({
   variable: "--font-cinzel-decorative",
-  subsets: ["latin"],
-  weight: ["400", "700"],
+  src: [
+    { path: "./fonts/cinzel-decorative-latin-400.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/cinzel-decorative-latin-700.woff2", weight: "700", style: "normal" },
+  ],
+  display: "swap",
 });
 
-const notoSerifDevanagari = Noto_Serif_Devanagari({
+const notoSerifDevanagari = localFont({
   variable: "--font-devanagari",
-  subsets: ["devanagari"],
-  weight: ["500", "600", "700"],
+  src: [{ path: "./fonts/noto-serif-devanagari-devanagari-variable.woff2", weight: "500 700", style: "normal" }],
+  display: "swap",
+  preload: false, // only the landing page's mantra uses it
 });
 
 export const metadata: Metadata = {

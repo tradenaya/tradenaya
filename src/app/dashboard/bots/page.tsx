@@ -420,7 +420,7 @@ export default function AutomationPage() {
     <div className="space-y-6 px-3 sm:px-6 py-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Automation</h1>
+          <h1 className="text-xl sm:text-2xl brand-heading">Automation</h1>
           <p className="text-sm text-muted-foreground">Your automated trading strategies — live status, logs and controls.</p>
         </div>
         {bots.length > 0 && (

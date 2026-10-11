@@ -64,6 +64,18 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-poppins), system-ui, sans-serif;
 }
 
+/* Brand headings (app name + page titles): Cinzel in a text→primary gradient
+   built from the active theme's colours, matching the admin header. */
+.brand-heading {
+  font-family: var(--font-cinzel), serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: linear-gradient(100deg, var(--foreground) 0%, var(--primary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);

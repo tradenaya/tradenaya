@@ -90,7 +90,7 @@ export default function PortfolioPage() {
     <div className="space-y-4 px-3 sm:px-6 py-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Spot Portfolio</h1>
+          <h1 className="text-xl sm:text-2xl brand-heading">Spot Portfolio</h1>
           <p className="text-sm text-muted-foreground">Your spot balances across all assets.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

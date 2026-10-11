@@ -100,7 +100,7 @@ export default function OrdersPage() {
   return (
     <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold">Order History</h1>
+        <h1 className="text-xl sm:text-2xl brand-heading">Order History</h1>
         <p className="text-sm text-muted-foreground">
           Every futures order placed from your account, newest first.
         </p>

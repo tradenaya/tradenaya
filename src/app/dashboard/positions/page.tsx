@@ -209,7 +209,7 @@ export default function AllPositionsPage() {
   return (
 <div className="space-y-4 px-3 sm:px-6 py-5">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold">Positions & Orders</h1>
+        <h1 className="text-xl sm:text-2xl brand-heading">Positions & Orders</h1>
         <p className="text-sm text-muted-foreground">Live futures positions and open orders, refreshed every 8s.</p>
       </div>
 
