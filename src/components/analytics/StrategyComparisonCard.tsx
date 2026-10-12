@@ -13,7 +13,7 @@ import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 import { cn } from "@/lib/utils"
 import { apiGet } from "./api"
 import { useAsyncData } from "./use-data"
-import { formatDuration, formatMoney, formatPercent, formatShortDate, pnlText, signClass } from "./format"
+import { formatDuration, formatAxisMoney, formatMoney, formatPercent, formatShortDate, pnlText, signClass } from "./format"
 
 const AXIS_STROKE = "#9aa4b6"
 const GRID_STROKE = "rgba(154,164,182,0.15)"
@@ -244,7 +244,7 @@ export function StrategyComparisonCard() {
                       tickLine={false}
                       axisLine={false}
                     />
-                    <YAxis stroke={AXIS_STROKE} tick={{ fill: AXIS_STROKE, fontSize: 11 }} tickLine={false} axisLine={false} width={72} tickFormatter={(v) => formatMoney(Number(v), 0)} />
+                    <YAxis stroke={AXIS_STROKE} tick={{ fill: AXIS_STROKE, fontSize: 11 }} tickLine={false} axisLine={false} width={72} tickFormatter={(v) => formatAxisMoney(Number(v))} />
                     <Tooltip
                       formatter={(value, name) => [pnlText(Number(value)), STRATEGIES.find((s) => s.id === name)?.label ?? String(name)]}
                       labelFormatter={(ms) => formatShortDate(Number(ms))}

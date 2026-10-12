@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { AppShellSkeleton } from "@/components/ui/page-skeletons";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { adminLogin } from "@/store/slices/adminAuthSlice";
 import { customerLogin } from "@/store/slices/customerAuthSlice";
@@ -13,6 +15,7 @@ export default function AuthHydrator({
   children: React.ReactNode;
 }) {
   const dispatch = useAppDispatch();
+  const pathname = usePathname() ?? "";
   const adminAuth = useAppSelector((state) => state.adminAuth);
   const customerAuth = useAppSelector((state) => state.customerAuth);
   const attempted = useRef(false);
@@ -84,7 +87,9 @@ export default function AuthHydrator({
   }, [adminAuth.isAuthenticated, customerAuth.isAuthenticated, dispatch]);
 
   if (!hydrated) {
-    return null;
+    // App screens: show the screen's layout skeleton (not a blank page) while
+    // the session is confirmed after a refresh. Sign-in / landing stay as before.
+    return pathname.startsWith("/dashboard") || pathname.startsWith("/trade/") ? <AppShellSkeleton pathname={pathname} /> : null;
   }
 
   return <>{children}</>;

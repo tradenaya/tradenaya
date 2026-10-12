@@ -1,12 +1,21 @@
 import { getCurrencyState, convertUsdt } from "@/lib/currency/store";
 
+/** Chart-axis amount: number only (the unit is in the tooltip / title). */
+export function formatAxisMoney(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const conv = convertUsdt(value);
+  const isInr = getCurrencyState().currency === "INR" && conv != null;
+  return (conv ?? value).toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: 0 });
+}
+
+/** Amount in the display currency with its unit: "1,153.20 INR" / "13.10 USDT". */
 export function formatMoney(value: number | null | undefined, decimals = 2): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const state = getCurrencyState();
   const conv = convertUsdt(value);
   const isInr = state.currency === "INR" && conv != null;
   const num = conv ?? value;
-  return `${isInr ? "₹" : "$"}${num.toLocaleString(isInr ? "en-IN" : "en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+  return `${num.toLocaleString(isInr ? "en-IN" : "en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })} ${isInr ? "INR" : "USDT"}`;
 }
 
 export function formatPrice(value: number | null | undefined): string {
@@ -17,7 +26,7 @@ export function formatPrice(value: number | null | undefined): string {
   const num = conv ?? value;
   const decimals = num >= 1000 ? 2 : num >= 1 ? 4 : 6;
   const body = num.toLocaleString(isInr ? "en-IN" : "en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-  return isInr ? `₹${body}` : body;
+  return `${body} ${isInr ? "INR" : "USDT"}`;
 }
 
 export function formatPercent(value: number | null | undefined, decimals = 1): string {

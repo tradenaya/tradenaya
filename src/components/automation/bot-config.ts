@@ -150,21 +150,11 @@ export function fmtRelative(iso?: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-import { convertUsdt, getCurrencyState } from "@/lib/currency/store";
+import { formatWithUnit } from "@/lib/currency/store";
 
+/** Price / amount in the display currency, always with its unit ("121,572.7 INR"). */
 export function fmtMoney(value: number | string | null | undefined, digits?: number): string {
-  if (value == null) return "—";
-  const num = Number(value);
-  if (!Number.isFinite(num)) return "—";
-  const state = getCurrencyState();
-  const conv = convertUsdt(num);
-  const isInr = state.currency === "INR" && conv != null;
-  const display = conv ?? num;
-  if (digits == null) {
-    const abs = Math.abs(display);
-    digits = abs >= 1000 ? 2 : abs >= 1 ? 4 : abs === 0 ? 2 : 6;
-  }
-  return display.toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: digits });
+  return formatWithUnit(value, digits);
 }
 
 /**
@@ -223,7 +213,7 @@ export function activeTrade(bot: Pick<BotView, "symbol" | "status" | "leverage">
 }
 
 /** How much the bot trades with: "25% of wallet" for percent bots, else the fixed amount. */
-export function capitalText(cfg: BotConfig, currency: string): string {
+export function capitalText(cfg: BotConfig): string {
   if (cfg.capitalMode === "percent" && cfg.walletPercent != null) return `${cfg.walletPercent}% of wallet`;
-  return `${fmtMoney(cfg.capital)} ${currency}`;
+  return fmtMoney(cfg.capital, 2);
 }

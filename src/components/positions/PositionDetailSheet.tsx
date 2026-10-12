@@ -18,7 +18,7 @@ import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState, formatDisplayPrice } from "@/lib/currency/store";
+import { formatWithUnit, formatPct, formatSignedWithUnit } from "@/lib/currency/store";
 
 export interface ExchangePosition {
   position_id: string;
@@ -70,8 +70,8 @@ function num(value: string | number | null | undefined): number | null {
 }
 
 /** USDT price/amount in the chosen display currency. */
-function money(value: number | string | null | undefined, digits = 4): string {
-  return formatDisplayPrice(num(value), digits);
+function money(value: number | string | null | undefined, digits?: number): string {
+  return formatWithUnit(num(value), digits);
 }
 
 /** Quantity in coin units — never currency-converted. */
@@ -82,10 +82,7 @@ function qty(value: number | string | null | undefined, digits = 4): string {
 }
 
 function balance(value: number | null): string {
-  if (value == null) return "—";
-  const conv = convertUsdt(value);
-  const state = getCurrencyState();
-  return `${(conv ?? value).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+  return formatWithUnit(value, 2);
 }
 
 interface Props {
@@ -150,7 +147,9 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
   const size = num(position.position_size);
   const outcomeAt = (price: number | null): number | null =>
     price == null || entry == null || size == null ? null : (price - entry) * size * (isLong ? 1 : -1);
-  const outcomeText = (v: number | null) => (v == null ? "" : ` · ${v >= 0 ? "you make +" : "you lose "}${balance(Math.abs(v))}`);
+  const ofMoney = (v: number | null) => (v != null && margin != null && margin > 0 ? ` (${formatPct((v / margin) * 100)} of your money)` : "");
+  const outcomeText = (v: number | null) => (v == null ? "" : ` · ${v >= 0 ? `you make ${formatSignedWithUnit(v)}` : `you lose ${balance(Math.abs(v))}`}${ofMoney(v)}`);
+  const awayText = (d: number | null) => (d == null ? "" : ` · price ${formatPct(d)} away`);
 
   const distancePct = (price: number | null): number | null => {
     if (price == null || current == null || current === 0) return null;
@@ -241,10 +240,12 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
                     pnl != null && pnl < 0 ? "text-red-400" : "text-emerald-400"
                   }`}
                 >
-                  {pnl != null && pnl >= 0 ? "+" : ""}{balance(pnl)}
+                  {formatSignedWithUnit(pnl)}
                 </div>
                 {margin != null && (
-                  <div className="mt-1 text-sm text-muted-foreground tabular-nums">on {balance(margin)} of your money</div>
+                  <div className="mt-1 text-sm text-muted-foreground tabular-nums">
+                    {pnl != null && margin > 0 ? `${formatPct((pnl / margin) * 100)} ` : ""}on {balance(margin)} of your money
+                  </div>
                 )}
               </div>
 
@@ -268,12 +269,12 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               {rows("Protection", [
                 {
                   label: "Stop loss",
-                  value: sl != null ? `${money(sl)}${outcomeText(outcomeAt(sl))}` : "—",
+                  value: sl != null ? `${money(sl)}${awayText(slDistance)}${outcomeText(outcomeAt(sl))}` : "—",
                   tone: slDistance != null && ((isLong && slDistance < 0) || (!isLong && slDistance > 0)) ? "text-red-400" : undefined,
                 },
                 {
                   label: "Take profit",
-                  value: tp != null ? `${money(tp)}${outcomeText(outcomeAt(tp))}` : "—",
+                  value: tp != null ? `${money(tp)}${awayText(tpDistance)}${outcomeText(outcomeAt(tp))}` : "—",
                   tone: tpDistance != null && ((isLong && tpDistance > 0) || (!isLong && tpDistance < 0)) ? "text-emerald-400" : undefined,
                 },
                 ...(detail?.trailingEnabled
@@ -288,7 +289,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               ])}
 
               {rows("Position", [
-                { label: "Size", value: qty(position.position_size) },
+                { label: "Size", value: `${qty(position.position_size)} ${String(position.symbol ?? "").toUpperCase().replace(/USDT$/, "")}` },
                 { label: "Your money in", value: money(margin) },
                 {
                   label: "Est. Liq. distance",

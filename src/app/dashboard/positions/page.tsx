@@ -25,7 +25,7 @@ import {
 import { formatTimestamp } from "@/components/analytics/format";
 import { orderTypeLabel, positionSideLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState, formatDisplayPrice } from "@/lib/currency/store";
+import { formatWithUnit, formatPct, formatSignedWithUnit } from "@/lib/currency/store";
 
 type Position = ExchangePosition;
 
@@ -53,15 +53,12 @@ function qty(value: string | number | null | undefined): string {
 
 /** USDT price/amount in the chosen display currency. */
 function money(value: string | number | null | undefined): string {
-  return formatDisplayPrice(value);
+  return formatWithUnit(value);
 }
 
+/** Amount (2 decimals) with its unit. */
 function balance(value: string | number | null | undefined): string {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return "—";
-  const conv = convertUsdt(num);
-  const state = getCurrencyState();
-  return `${(conv ?? num).toLocaleString(state.currency === "INR" && conv != null ? "en-IN" : "en-US", { maximumFractionDigits: 2 })} ${currencyLabel()}`;
+  return formatWithUnit(value, 2);
 }
 
 /** Estimated PnL (in quote/USDT) if a protective TP/SL order triggers, using the matching live position's entry. */
@@ -83,6 +80,18 @@ function outcomeAt(pos: Position, price: number | null): number | null {
   const size = Number(pos.position_size);
   if (price == null || !Number.isFinite(entry) || !Number.isFinite(size)) return null;
   return (price - entry) * size * (pos.position_side === "LONG" ? 1 : -1);
+}
+
+/** "+0.96% of your money": P&L relative to the position's margin (what the exchange shows). */
+function pctOfMoney(amount: number | null, pos: Position | undefined): string | null {
+  const margin = Number(pos?.position_margin);
+  return amount != null && Number.isFinite(margin) && margin > 0 ? `${formatPct((amount / margin) * 100)} of your money` : null;
+}
+
+/** "price +47.80% away" from the current mark price. */
+function priceAway(pos: Position | undefined, level: number | null): string | null {
+  const mark = Number(pos?.mark_price);
+  return level != null && Number.isFinite(mark) && mark > 0 ? `price ${formatPct(((level - mark) / mark) * 100)} away` : null;
 }
 
 /** TP/SL trigger prices for a position, derived from its protective open orders. */
@@ -268,7 +277,7 @@ export default function AllPositionsPage() {
                              {positionSideLabel(pos.position_side)} {pos.leverage}x
                            </Badge>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{qty(pos.position_size)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{qty(pos.position_size)} {pos.symbol.toUpperCase().replace(/USDT$/, "")}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(pos.avg_entry_price)}</TableCell>
                         <TableCell className="text-right tabular-nums hidden lg:table-cell">{money(pos.mark_price)}</TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden xl:table-cell">
@@ -280,12 +289,14 @@ export default function AllPositionsPage() {
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{money(pos.position_margin)}</TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{money(pos.liquidation_price)}</TableCell>
                         <TableCell className={`text-right font-medium tabular-nums ${profit ? "text-emerald-400" : "text-red-400"}`}>
-                          {profit ? "+" : ""}
-                          {balance(pnl)}
+                          {formatSignedWithUnit(pnl)}
+                          <div className="text-[11px] font-normal text-muted-foreground">{pctOfMoney(pnl, pos)}</div>
                         </TableCell>
                         <TableCell className="text-right text-xs whitespace-nowrap tabular-nums">
-                          <div className="text-emerald-400">Target {atTp != null ? `${atTp >= 0 ? "+" : ""}${balance(atTp)}` : "—"}</div>
-                          <div className="text-red-400">Stop {atSl != null ? `${atSl >= 0 ? "+" : ""}${balance(atSl)}` : "—"}</div>
+                          <div className="text-emerald-400">Target {formatSignedWithUnit(atTp)}</div>
+                          <div className="text-[11px] text-muted-foreground">{pctOfMoney(atTp, pos)} · {priceAway(pos, tp)}</div>
+                          <div className="mt-1 text-red-400">Stop {formatSignedWithUnit(atSl)}</div>
+                          <div className="text-[11px] text-muted-foreground">{pctOfMoney(atSl, pos)} · {priceAway(pos, sl)}</div>
                         </TableCell>
                         <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden md:table-cell">
                           {formatTimestamp(pos.created_at)}
@@ -374,11 +385,18 @@ export default function AllPositionsPage() {
                         {(() => {
                           const pnl = estimatePnl(order, positions);
                           if (pnl == null) return <span className="text-muted-foreground">—</span>;
+                          const pos = positions.find((p) => p.symbol === order.symbol && Number(p.position_size) > 0);
+                          const trigger = Number(order.trigger_price);
                           return (
-                            <span className={`font-medium tabular-nums ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                              {pnl >= 0 ? "You make +" : "You lose "}
-                              {balance(Math.abs(pnl))}
-                            </span>
+                            <div className="tabular-nums">
+                              <span className={`font-medium ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                {pnl >= 0 ? `You make ${formatSignedWithUnit(pnl)}` : `You lose ${formatWithUnit(Math.abs(pnl), 2)}`}
+                              </span>
+                              <div className="text-[11px] text-muted-foreground">
+                                {pctOfMoney(pnl, pos)}
+                                {Number.isFinite(trigger) && pos ? ` · ${priceAway(pos, trigger)}` : ""}
+                              </div>
+                            </div>
                           );
                         })()}
                       </TableCell>

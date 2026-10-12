@@ -14,7 +14,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { errorMessage, fetchJson } from "@/lib/api-client";
 import { parseBotConfig, botName, activeTrade, capitalText } from "@/components/automation/bot-config";
 import { AutoBadge } from "@/components/automation/AutoBadge";
-import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 interface BotRecord {
@@ -290,7 +290,7 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {cfg.timeframe || bot.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
+                    {cfg.timeframe || bot.timeframe} · {trade.leverage} · {capitalText(cfg)}
                   </div>
                   {bot.lastError && <div className="mt-1 text-xs text-red-400">{localizeUsdtText(bot.lastError)}</div>}
                 </div>

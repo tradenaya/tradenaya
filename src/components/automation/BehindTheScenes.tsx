@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
 import { botName, activeTrade, capitalText } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
-import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { strategyLabel } from "@/automation/strategy/catalog";
 import { getTradingMode } from "@/lib/trading-mode/store";
@@ -314,7 +314,7 @@ export function BehindTheScenes() {
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg)}
                       </span>
                     </div>
                     <Badge

@@ -26,7 +26,7 @@ import { type OpenPositionAnalytics } from "@/automation/analytics/types";
 import { fmtMoney, displaySymbol, botName, activeTrade, capitalText } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { formatPct, formatSignedWithUnit, localizeUsdtText } from "@/lib/currency/store";
 import { strategyLabel } from "@/automation/strategy/catalog";
 
 const RUNNING_STATES = ["RUNNING", "STARTING", "RECOVERING", "ANALYZING", "TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED", "STOPPING"];
@@ -91,14 +91,27 @@ function outcomeAt(position: OpenPositionAnalytics, entry: number | null, price:
   return (price - entry) * size * (position.side === "BUY" ? 1 : -1);
 }
 
-function MoneyBox({ label, amount, strong }: { label: string; amount: number | null; strong?: boolean }) {
+/** "+0.96% of your money": profit/loss relative to the margin you put in (same % the exchange shows). */
+function pctOfMoney(amount: number | null, margin: number | null): string | null {
+  return amount != null && margin != null && margin > 0 ? `${formatPct((amount / margin) * 100)} of your money` : null;
+}
+
+/** "price +47.80% away": how far the price must move from now to reach a level. */
+function priceAway(current: number | null, level: number | null): string | null {
+  return current != null && current > 0 && level != null ? `price ${formatPct(((level - current) / current) * 100)} away` : null;
+}
+
+function MoneyBox({ label, amount, strong, notes = [] }: { label: string; amount: number | null; strong?: boolean; notes?: (string | null)[] }) {
   const tone = amount == null ? "text-foreground" : amount >= 0 ? "text-emerald-400" : "text-red-400";
   return (
     <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={cn("tabular-nums font-semibold", strong ? "text-lg" : "text-base", tone)}>
-        {amount == null ? "—" : `${amount >= 0 ? "+" : "−"}${fmtMoney(Math.abs(amount))}`}
+        {formatSignedWithUnit(amount)}
       </div>
+      {notes.filter(Boolean).map((n) => (
+        <div key={n} className="text-[11px] text-muted-foreground tabular-nums">{n}</div>
+      ))}
     </div>
   );
 }
@@ -241,9 +254,9 @@ function LiveBotCard({
           <div className="space-y-3 text-sm">
             {/* Money first, in plain words — what you have now and what you get at either exit. */}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <MoneyBox label="Profit / loss now" amount={position.unrealizedPnl} strong />
-              <MoneyBox label="If target hits" amount={outcomeAt(position, entry, tp)} />
-              <MoneyBox label="If stop-loss hits" amount={outcomeAt(position, entry, sl)} />
+              <MoneyBox label="Profit / loss now" amount={position.unrealizedPnl} strong notes={[pctOfMoney(position.unrealizedPnl, position.margin)]} />
+              <MoneyBox label="If target hits" amount={outcomeAt(position, entry, tp)} notes={[pctOfMoney(outcomeAt(position, entry, tp), position.margin), priceAway(current, tp)]} />
+              <MoneyBox label="If stop-loss hits" amount={outcomeAt(position, entry, sl)} notes={[pctOfMoney(outcomeAt(position, entry, sl), position.margin), priceAway(current, sl)]} />
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
               <Metric label="Your money in" value={position.margin != null ? fmtMoney(position.margin) : "—"} />
@@ -571,8 +584,8 @@ export default function AutomationPage() {
                         )}
                         {offline && <span className="shrink-0 text-[10px] font-normal text-amber-400">offline</span>}
                       </div>
-                      <div className="truncate text-[11px] text-muted-foreground" title={`${strategyLabel(cfg.strategy)} · ${cfg.timeframe} · ${trade.leverage} · ${capitalText(cfg, currencyLabel())}`}>
-                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
+                      <div className="truncate text-[11px] text-muted-foreground" title={`${strategyLabel(cfg.strategy)} · ${cfg.timeframe} · ${trade.leverage} · ${capitalText(cfg)}`}>
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg)}
                       </div>
                       {bot.lastError && !live && (
                         <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{localizeUsdtText(bot.lastError)}</div>

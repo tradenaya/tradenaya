@@ -16,7 +16,7 @@ import { ChartSkeleton } from "@/components/ui/skeletons"
 import type { PnlAnalytics } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
-import { formatMoney, formatShortDate, pnlText, signClass } from "./format"
+import { formatAxisMoney, formatMoney, formatShortDate, pnlText, signClass } from "./format"
 
 const AXIS_STROKE = "#a89880"
 const GRID_STROKE = "rgba(168,152,128,0.15)"
@@ -73,7 +73,7 @@ export function PnlChartCard({ filters }: { filters: AnalyticsFilterState }) {
                   tickLine={false}
                   axisLine={false}
                   width={70}
-                  tickFormatter={(v) => formatMoney(v, 0)}
+                  tickFormatter={(v) => formatAxisMoney(v)}
                 />
                 <Tooltip
                   formatter={(value, name) => [formatMoney(Number(value)), name === "cumulative" ? "Cumulative" : "Realized"]}

@@ -11,7 +11,7 @@ import { fetchJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { fmtMoney, fmtRelative, isRunning, parseBotConfig, statusMeta, displaySymbol, sideLabel, botName, type BotView } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
-import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
+import { localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 
 export function BotOverviewCards() {
@@ -129,7 +129,7 @@ export function BotOverviewCards() {
                       <Gauge size={12} /> {config.leverage}x
                     </span>
                     <span className="flex items-center gap-1">
-                      <Wallet size={12} /> {fmtMoney(config.capital)} {currencyLabel()}
+                      <Wallet size={12} /> {fmtMoney(config.capital, 2)}
                     </span>
                     <span className={cn("ml-auto flex items-center gap-1", live && !offline && "text-emerald-400")}>
                       <Cpu size={12} /> {live && !offline ? "Live" : fmtRelative(bot.updatedAt)}

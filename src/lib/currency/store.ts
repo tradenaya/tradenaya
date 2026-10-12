@@ -201,3 +201,34 @@ export function localizeUsdtText(text: string | null | undefined): string {
     return amountForText(sign === "-" ? -value : value, decimals);
   });
 }
+
+/**
+ * A USDT-based price or amount in the display currency, ALWAYS with its unit,
+ * e.g. "1,21,572.7 INR" or "1,382.42 USDT". Use this on every dashboard /
+ * bots / positions screen so no number is shown without saying what it is in.
+ * Falls back to USDT (and says so) until the live INR rate loads.
+ */
+export function formatWithUnit(value: number | string | null | undefined, maxDecimals?: number): string {
+  if (value == null || value === "") return "—";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const conv = convertUsdt(num);
+  const isInr = state.currency === "INR" && conv != null;
+  const shown = isInr ? (conv as number) : num;
+  const abs = Math.abs(shown);
+  const digits = maxDecimals ?? (abs >= 100 ? 2 : abs >= 1 ? 4 : abs === 0 ? 2 : 6);
+  const body = shown.toLocaleString(isInr ? INR_LOCALE : USDT_LOCALE, { maximumFractionDigits: digits });
+  return `${body} ${isInr ? "INR" : "USDT"}`;
+}
+
+/** Signed version for profit/loss: "+1,153.2 INR" / "−108.4 INR". */
+export function formatSignedWithUnit(value: number | null | undefined, maxDecimals = 2): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${formatWithUnit(Math.abs(value), maxDecimals)}`;
+}
+
+/** Signed percentage: "+0.96%" / "−4.43%". */
+export function formatPct(value: number | null | undefined, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
+}

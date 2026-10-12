@@ -15,7 +15,7 @@ import { ChartSkeleton } from "@/components/ui/skeletons"
 import type { EquityAnalytics } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
-import { formatMoney, formatPercent, formatShortDate, signClass } from "./format"
+import { formatAxisMoney, formatMoney, formatPercent, formatShortDate, signClass } from "./format"
 
 const AXIS_STROKE = "#a89880"
 const GRID_STROKE = "rgba(168,152,128,0.15)"
@@ -83,7 +83,7 @@ export function EquityCurveCard({ filters }: { filters: AnalyticsFilterState }) 
                   axisLine={false}
                   domain={["auto", "auto"]}
                   width={70}
-                  tickFormatter={(v) => formatMoney(v, 0)}
+                  tickFormatter={(v) => formatAxisMoney(v)}
                 />
                 <Tooltip
                   formatter={(value) => [formatMoney(Number(value)), "Equity"]}

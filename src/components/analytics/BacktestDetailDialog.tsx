@@ -31,7 +31,7 @@ import {
 import type { BacktestDetail } from "@/automation/analytics/types"
 import { apiGet } from "./api"
 import { strategyLabel } from "@/automation/strategy/catalog"
-import { formatDate, formatMoney, formatPercent, formatPrice, formatShortDate, pnlText, signClass } from "./format"
+import { formatDate, formatAxisMoney, formatMoney, formatPercent, formatPrice, formatShortDate, pnlText, signClass } from "./format"
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 
 const AXIS_STROKE = "#9aa4b6"
@@ -168,7 +168,7 @@ export function BacktestDetailDialog({
                         tickLine={false}
                         axisLine={false}
                       />
-                      <YAxis stroke={AXIS_STROKE} tick={{ fill: AXIS_STROKE, fontSize: 11 }} tickLine={false} axisLine={false} width={70} tickFormatter={(v) => formatMoney(v, 0)} />
+                      <YAxis stroke={AXIS_STROKE} tick={{ fill: AXIS_STROKE, fontSize: 11 }} tickLine={false} axisLine={false} width={70} tickFormatter={(v) => formatAxisMoney(v)} />
                       <Tooltip
                         formatter={(value, name) => [formatMoney(Number(value)), name === "equity" ? "Equity" : name]}
                         labelFormatter={(ms) => formatShortDate(Number(ms))}

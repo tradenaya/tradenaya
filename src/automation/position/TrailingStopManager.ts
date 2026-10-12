@@ -192,7 +192,7 @@ export class TrailingStopManager {
     // Only now is it safe to remove the obsolete SL.
     if (position.stopLossOrderId) {
       await this.client.cancelOrder(position.userId, position.stopLossOrderId).catch(() => null);
-      this.recordProtective("STOP_MARKET", position, position.stopLossOrderId, "CANCELLED", newStop).catch(() => null);
+      this.recordProtective("STOP_MARKET", position, position.stopLossOrderId, "CANCELLED", position.stopLoss).catch(() => null);
     }
 
     this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);

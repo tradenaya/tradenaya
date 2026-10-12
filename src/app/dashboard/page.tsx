@@ -17,7 +17,7 @@ import { PositionDetailSheet, type ExchangePosition } from "@/components/positio
 import { formatTimestamp } from "@/components/analytics/format";
 import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
-import { convertUsdt, currencyLabel, getCurrencyState } from "@/lib/currency/store";
+import { currencyLabel, formatWithUnit, formatPct } from "@/lib/currency/store";
 
 type Position = ExchangePosition;
 
@@ -57,14 +57,16 @@ function SummaryRow({ label, value }: SummaryRowProps) {
   );
 }
 
-function money(value: string | number | null | undefined, decimals = 4): string {
-  if (value == null) return "—";
+/** Price / amount with its unit ("1,21,572.7 INR"). */
+function money(value: string | number | null | undefined, decimals?: number): string {
+  return formatWithUnit(value, decimals);
+}
+
+/** Coin quantity, e.g. "0.02 ZEC" — never currency-converted. */
+function coinQty(value: string | number | null | undefined, symbol: string): string {
   const num = Number(value);
-  if (!Number.isFinite(num)) return "—";
-  const state = getCurrencyState();
-  const conv = convertUsdt(num);
-  const isInr = state.currency === "INR" && conv != null;
-  return (conv ?? num).toLocaleString(isInr ? "en-IN" : "en-US", { maximumFractionDigits: decimals });
+  if (value == null || !Number.isFinite(num)) return "—";
+  return `${num.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${symbol.toUpperCase().replace(/USDT$/, "")}`;
 }
 
 export default function DashboardPage() {
@@ -232,7 +234,7 @@ export default function DashboardPage() {
                           {dir && <Badge className={sideBadge(dir === "Long" ? "LONG" : "SHORT")}>{dir}</Badge>}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
+                          {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital, 2)}
                         </div>
                       </div>
                     </div>
@@ -271,13 +273,6 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {positions.filter((p) => Number(p.position_size) > 0).map((p) => {
                   const up = Number(p.unrealised_pnl ?? 0) >= 0;
-                  const _entry = Number(p.avg_entry_price);
-                  const _mark = Number(p.mark_price);
-                  const _isLong = p.position_side === "LONG";
-                  const _pct =
-                    _entry > 0 && Number.isFinite(_mark)
-                      ? ((_mark - _entry) / _entry) * (_isLong ? 1 : -1) * 100
-                      : 0;
                   return (
                     <div
                       key={p.position_id}
@@ -291,13 +286,16 @@ export default function DashboardPage() {
                         </Badge>
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5 text-sm">
-                        <div className="flex justify-between"><span className="text-muted-foreground">Size</span><span className="font-medium tabular-nums">{money(p.position_size)}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Size</span><span className="font-medium tabular-nums">{coinQty(p.position_size, p.symbol)}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Entry</span><span className="font-medium tabular-nums">{money(p.avg_entry_price)}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Mark</span><span className="font-medium tabular-nums">{money(p.mark_price)}</span></div>
                         <div className="flex justify-between col-span-2">
                           <span className="text-muted-foreground">PnL</span>
                           <span className={`font-medium tabular-nums ${up ? "text-emerald-400" : "text-red-400"}`}>
-                            {up ? "+" : ""}{money(p.unrealised_pnl)} {currencyLabel()} ({up ? "+" : ""}{_pct.toFixed(2)}%)
+                            {up ? "+" : ""}{money(p.unrealised_pnl, 2)}
+                            {Number(p.position_margin) > 0 && (
+                              <span className="ml-1 text-xs font-normal opacity-80">({formatPct((Number(p.unrealised_pnl) / Number(p.position_margin)) * 100)} of your money)</span>
+                            )}
                           </span>
                         </div>
                       </div>

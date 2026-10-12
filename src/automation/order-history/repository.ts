@@ -184,7 +184,12 @@ export class OrderHistoryRepository implements IOrderHistoryRepository {
     const search = buildSearch(query.search ?? "");
     // Live view excludes paper orders; paper view shows only paper orders.
     const modeSql = isPaperContext() ? " AND o.exchange = 'PAPER'" : " AND (o.exchange IS NULL OR o.exchange <> 'PAPER')";
-    const sql = modeSql + search.sql;
+    // Each status change (placed → cancelled / filled) is stored as its own row
+    // for the audit trail; the list shows every exchange order ONCE, at its
+    // latest status, so a stop-loss doesn't appear twice.
+    const latestOnly =
+      " AND (o.exchange_order_id IS NULL OR o.exchange_order_id = '' OR NOT EXISTS (SELECT 1 FROM futures_orders_history n WHERE n.user_id = o.user_id AND n.exchange_order_id = o.exchange_order_id AND n.id > o.id))";
+    const sql = modeSql + latestOnly + search.sql;
     const params = search.params;
 
     const results = await Promise.all([

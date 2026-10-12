@@ -21,6 +21,7 @@ import type { OrderHistoryRow, Paged } from "@/automation/order-history/types"
 import { apiGet, apiSend } from "@/components/analytics/api"
 import { useAsyncData } from "@/components/analytics/use-data"
 import { formatDate, formatPrice, pnlText, signClass } from "@/components/analytics/format"
+import { formatPct } from "@/lib/currency/store"
 import { orderTypeLabel, orderContextLabel, sideBadgeClass, sideLabel } from "@/components/trading/terms"
 
 const PAGE_SIZE = 25
@@ -156,9 +157,9 @@ export default function OrdersPage() {
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right hidden md:table-cell">Trigger</TableHead>
-                      <TableHead className="text-right">PnL</TableHead>
-                      <TableHead className="text-right hidden lg:table-cell">ROI</TableHead>
-                      <TableHead className="text-right hidden sm:table-cell">Time</TableHead>
+                      <TableHead className="text-right">Profit / Loss</TableHead>
+                      <TableHead className="text-right hidden lg:table-cell" title="Profit or loss as a % of the money used for the order">Return</TableHead>
+                      <TableHead className="text-right">Date &amp; time</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -176,7 +177,7 @@ export default function OrdersPage() {
                             <div className="mt-1 text-xs text-muted-foreground">{orderTypeLabel(order.orderType)}</div>
                           </TableCell>
                           <TableCell>{statusBadge(order.status)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{order.quantity != null ? Number(order.quantity).toLocaleString("en-US", { maximumFractionDigits: 6 }) : "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{order.quantity != null ? `${Number(order.quantity).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${order.symbol.toUpperCase().replace(/USDT$/, "")}` : "—"}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(order.price)}</TableCell>
                           <TableCell className="text-right tabular-nums hidden md:table-cell">
                             {formatPrice(order.triggerPrice)}
@@ -191,16 +192,14 @@ export default function OrdersPage() {
                                ? (() => {
                                    const pct = (order.realizedPnl / order.amountUsed) * 100;
                                    return (
-                                     <span className={signClass(pct)}>
-                                       {pct > 0 ? "+" : ""}
-                                       {pct.toFixed(2)}%
-                                     </span>
+                                     <span className={signClass(pct)}>{formatPct(pct)}</span>
                                    );
                                  })()
                                : "—"}
                            </TableCell>
-                           <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden sm:table-cell">
-                             {formatDate(order.createdAt)}
+                           <TableCell className="text-right text-xs whitespace-nowrap tabular-nums">
+                             <div className="text-foreground">{formatDate(order.createdAt, { hour: undefined, minute: undefined })}</div>
+                             <div className="text-muted-foreground">{formatDate(order.createdAt, { year: undefined, month: undefined, day: undefined, second: "2-digit" })}</div>
                            </TableCell>
                         </TableRow>
                       )

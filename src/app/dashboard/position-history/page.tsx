@@ -182,7 +182,7 @@ export default function PositionHistoryPage() {
                         <TableHead className="text-right hidden sm:table-cell">TP</TableHead>
                         <TableHead className="text-right">Unrealized PnL</TableHead>
                         <TableHead className="text-right hidden sm:table-cell">Lev</TableHead>
-                        <TableHead className="text-right">Duration</TableHead>
+                        <TableHead className="text-right">Open for</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -208,7 +208,10 @@ export default function PositionHistoryPage() {
                             {pnlText(pos.unrealizedPnl)}
                           </TableCell>
                           <TableCell className="text-right hidden sm:table-cell">{pos.leverage ? `${pos.leverage}x` : "—"}</TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground hidden lg:table-cell">{formatDuration(pos.durationMs)}</TableCell>
+                          <TableCell className="text-right text-xs whitespace-nowrap">
+                            <div className="font-medium text-foreground">{formatDuration(pos.durationMs)}</div>
+                            <div className="text-muted-foreground">since {formatTimestamp(pos.openTime)}</div>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

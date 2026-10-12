@@ -16,6 +16,7 @@ import type { OpenPositionAnalytics } from "@/automation/analytics/types"
 import { apiGet, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatDate, formatMoney, formatPercent, formatPrice, pnlText, signClass } from "./format"
+import { formatPct } from "@/lib/currency/store";
 
 function ProtectionBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
@@ -86,6 +87,9 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
                   <TableCell className="text-right tabular-nums">{formatPrice(p.currentPrice)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(p.unrealizedPnl)}`}>
                     {pnlText(p.unrealizedPnl)}
+                    {p.unrealizedPnl != null && p.margin != null && p.margin > 0 && (
+                      <div className="text-xs opacity-80">{formatPct((p.unrealizedPnl / p.margin) * 100)} of your money</div>
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.stopLoss)}</TableCell>
                   <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.takeProfit)}</TableCell>
