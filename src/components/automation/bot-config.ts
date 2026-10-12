@@ -200,3 +200,30 @@ export function sideLabel(side?: string | null): "Long" | "Short" | null {
   if (s === "SHORT" || s === "SELL") return "Short";
   return null;
 }
+/** Bot statuses during which the bot is actually working a trade. */
+const IN_TRADE_STATUSES = new Set(["TRADE_PLANNED", "ORDER_PENDING", "POSITION_OPEN", "POSITION_MANAGED"]);
+
+export function botInTrade(bot: Pick<BotView, "status">): boolean {
+  return IN_TRADE_STATUSES.has(String(bot.status ?? "").toUpperCase());
+}
+
+/**
+ * What a bot is trading RIGHT NOW. Auto-select bots remember their last pick
+ * (coin, side, leverage) in config, but once that trade closes they're back
+ * to scanning, so only show the pick while the bot is in a trade.
+ */
+export function activeTrade(bot: Pick<BotView, "symbol" | "status" | "leverage">, cfg: BotConfig): {
+  symbol: string;
+  side: "Long" | "Short" | null;
+  leverage: string;
+  scanning: boolean;
+} {
+  if (cfg.autoSelect && !botInTrade(bot)) return { symbol: "", side: null, leverage: "auto lev", scanning: true };
+  return { symbol: displaySymbol(bot, cfg), side: sideLabel(cfg.side), leverage: `${bot.leverage}x`, scanning: false };
+}
+
+/** How much the bot trades with: "25% of wallet" for percent bots, else the fixed amount. */
+export function capitalText(cfg: BotConfig, currency: string): string {
+  if (cfg.capitalMode === "percent" && cfg.walletPercent != null) return `${cfg.walletPercent}% of wallet`;
+  return `${fmtMoney(cfg.capital)} ${currency}`;
+}

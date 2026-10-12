@@ -77,6 +77,14 @@ function estimatePnl(order: OpenOrder, positions: Position[]): number | null {
   return (trigger - entry) * qty * direction;
 }
 
+/** Money made (+) or lost (−) if this position closed at `price` (before fees). */
+function outcomeAt(pos: Position, price: number | null): number | null {
+  const entry = Number(pos.avg_entry_price);
+  const size = Number(pos.position_size);
+  if (price == null || !Number.isFinite(entry) || !Number.isFinite(size)) return null;
+  return (price - entry) * size * (pos.position_side === "LONG" ? 1 : -1);
+}
+
 /** TP/SL trigger prices for a position, derived from its protective open orders. */
 function positionTargets(
   pos: Position,
@@ -98,13 +106,6 @@ function positionTargets(
     }
   }
   return { tp, sl };
-}
-
-/** Distance in % from current mark price to a target price. */
-function distancePct(current: number | null, target: number | null): number | null {
-  if (current == null || target == null || !Number.isFinite(current) || !Number.isFinite(target) || current === 0)
-    return null;
-  return ((target - current) / current) * 100;
 }
 
 export default function AllPositionsPage() {
@@ -239,11 +240,11 @@ export default function AllPositionsPage() {
                     <TableHead className="text-right">Size</TableHead>
                     <TableHead className="text-right">Entry</TableHead>
                     <TableHead className="text-right hidden lg:table-cell">Mark</TableHead>
-                    <TableHead className="text-right hidden xl:table-cell">Amount (Leveraged)</TableHead>
-                    <TableHead className="text-right hidden md:table-cell">Margin</TableHead>
+                    <TableHead className="text-right hidden xl:table-cell">Trade size</TableHead>
+                    <TableHead className="text-right hidden md:table-cell" title="Your own money locked in this trade (margin)">Your money</TableHead>
                     <TableHead className="text-right hidden lg:table-cell">Liq. Price</TableHead>
-                    <TableHead className="text-right">Unrealized PnL</TableHead>
-                    <TableHead className="text-right">To TP / SL</TableHead>
+                    <TableHead className="text-right">Profit / Loss now</TableHead>
+                    <TableHead className="text-right" title="What you make if the target hits, and lose if the stop-loss hits (before fees)">If target / stop hits</TableHead>
                     <TableHead className="text-right hidden md:table-cell">Opened</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
@@ -252,12 +253,9 @@ export default function AllPositionsPage() {
                   {positions.map((pos) => {
                     const pnl = Number(pos.unrealised_pnl);
                     const profit = pnl >= 0;
-                    const margin = Number(pos.position_margin);
-                    const pnlPct = Number.isFinite(margin) && margin > 0 ? (pnl / margin) * 100 : null;
-                    const mark = Number(pos.mark_price);
                     const { tp, sl } = positionTargets(pos, orders);
-                    const tpDist = distancePct(mark, tp);
-                    const slDist = distancePct(mark, sl);
+                    const atTp = outcomeAt(pos, tp);
+                    const atSl = outcomeAt(pos, sl);
                     return (
                       <TableRow
                         key={pos.position_id}
@@ -276,10 +274,7 @@ export default function AllPositionsPage() {
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden xl:table-cell">
                           {(() => {
                             const notional = Number(pos.position_size) * Number(pos.avg_entry_price);
-                            const margin = Number(pos.position_margin);
-                            if (!Number.isFinite(notional)) return "—";
-                            const marginText = Number.isFinite(margin) && margin > 0 ? balance(margin) : "—";
-                            return `${marginText} (${balance(notional)})`;
+                            return Number.isFinite(notional) ? balance(notional) : "—";
                           })()}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground hidden md:table-cell">{money(pos.position_margin)}</TableCell>
@@ -287,16 +282,10 @@ export default function AllPositionsPage() {
                         <TableCell className={`text-right font-medium tabular-nums ${profit ? "text-emerald-400" : "text-red-400"}`}>
                           {profit ? "+" : ""}
                           {balance(pnl)}
-                          {pnlPct != null && <span className="ml-1 text-xs opacity-80">({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)</span>}
                         </TableCell>
-                        <TableCell className="text-right text-xs whitespace-nowrap">
-                          <span className="text-emerald-400">
-                            TP {tpDist != null ? `${tpDist >= 0 ? "+" : ""}${tpDist.toFixed(2)}%` : "—"}
-                          </span>
-                          <span className="text-muted-foreground"> · </span>
-                          <span className="text-red-400">
-                            SL {slDist != null ? `${slDist >= 0 ? "+" : ""}${slDist.toFixed(2)}%` : "—"}
-                          </span>
+                        <TableCell className="text-right text-xs whitespace-nowrap tabular-nums">
+                          <div className="text-emerald-400">Target {atTp != null ? `${atTp >= 0 ? "+" : ""}${balance(atTp)}` : "—"}</div>
+                          <div className="text-red-400">Stop {atSl != null ? `${atSl >= 0 ? "+" : ""}${balance(atSl)}` : "—"}</div>
                         </TableCell>
                         <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground hidden md:table-cell">
                           {formatTimestamp(pos.created_at)}
@@ -356,7 +345,7 @@ export default function AllPositionsPage() {
                     <TableHead className="text-right">Price</TableHead>
                     <TableHead className="text-right hidden lg:table-cell">Amount</TableHead>
                     <TableHead className="text-right hidden xl:table-cell">Trigger (TP/SL)</TableHead>
-                    <TableHead className="text-right">Est. PnL</TableHead>
+                    <TableHead className="text-right" title="Money made (+) or lost (−) if this order triggers, before fees">If it triggers</TableHead>
                     <TableHead className="text-right hidden md:table-cell">Placed</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
@@ -385,16 +374,10 @@ export default function AllPositionsPage() {
                         {(() => {
                           const pnl = estimatePnl(order, positions);
                           if (pnl == null) return <span className="text-muted-foreground">—</span>;
-                          const pos = positions.find(
-                            (p) => p.symbol === order.symbol && Number(p.position_size) > 0,
-                          );
-                          const margin = Number(pos?.position_margin);
-                          const pct = Number.isFinite(margin) && margin > 0 ? (pnl / margin) * 100 : null;
                           return (
                             <span className={`font-medium tabular-nums ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                              {pnl >= 0 ? "+" : ""}
-                              {balance(pnl)}
-                              {pct != null && <span className="ml-1 text-xs opacity-80">({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)</span>}
+                              {pnl >= 0 ? "You make +" : "You lose "}
+                              {balance(Math.abs(pnl))}
                             </span>
                           );
                         })()}

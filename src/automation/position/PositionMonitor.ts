@@ -81,7 +81,7 @@ export class PositionMonitor {
     this.slm = new SLMonitor(client);
     this.protective = new ProtectiveOrdersService(client, this.executionStore);
     this.botState = new BotLifecycleService();
-    this.trailing = new TrailingStopManager(client, this.store);
+    this.trailing = new TrailingStopManager(client, this.store, (p, ref) => this.executionStore.updateProtectiveRef(p.executionId, "sl", ref));
     this.recovery = new PositionRecovery(client, this.store, this.executionStore, this.protective, this.config);
   }
 
@@ -176,6 +176,7 @@ export class PositionMonitor {
         return;
       }
 
+      await this.removeDuplicateStops(snapshot);
       await this.handleOpenPosition(snapshot);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -189,6 +190,58 @@ export class PositionMonitor {
         message,
       });
     }
+  }
+
+  /**
+   * A position must have exactly one resting stop-loss. If more than one
+   * reduce-only STOP_MARKET is open on the closing side (left over from an
+   * earlier trail), keep the one at the position's current stop level and
+   * cancel the rest. Skipped when another bot holds the same symbol for this
+   * user, since then we can't tell whose stop is whose.
+   */
+  private async removeDuplicateStops(snapshot: PositionSnapshot): Promise<void> {
+    const { position } = snapshot;
+    if (snapshot.openOrdersReadFailed || !snapshot.exchangePosition) return;
+    const closeSide = position.side === "BUY" ? "SELL" : "BUY";
+    const stops = snapshot.openOrders.filter(
+      (o) =>
+        o.orderId &&
+        String(o.raw?.order_type ?? o.raw?.type ?? "").toUpperCase() === "STOP_MARKET" &&
+        String(o.raw?.side ?? "").toUpperCase() === closeSide,
+    );
+    if (stops.length < 2) return;
+    const sameSymbol = (await this.store.getActivePositions().catch(() => [])).filter(
+      (p) => p.id !== position.id && p.userId === position.userId && p.symbol.toLowerCase() === position.symbol.toLowerCase(),
+    );
+    if (sameSymbol.length > 0) return;
+
+    const trigger = (o: ExchangeOrder) => Number(o.raw?.trigger_price ?? o.raw?.stop_price ?? NaN);
+    const isLong = position.side === "BUY";
+    const target = position.stopLoss;
+    // Keep the stop at the current level; otherwise the tightest (most protective) one.
+    const keep = [...stops].sort((a, b) => {
+      if (target != null) {
+        const d = Math.abs(trigger(a) - target) - Math.abs(trigger(b) - target);
+        if (Math.abs(d) > 1e-9) return d;
+      }
+      return isLong ? trigger(b) - trigger(a) : trigger(a) - trigger(b);
+    })[0];
+
+    const cancelled = new Set<string>();
+    for (const o of stops) {
+      if (o === keep || !o.orderId) continue;
+      if (await this.client.cancelOrder(position.userId, o.orderId).catch(() => false)) cancelled.add(o.orderId);
+    }
+    if (cancelled.size === 0) return;
+    snapshot.openOrders = snapshot.openOrders.filter((o) => !o.orderId || !cancelled.has(o.orderId));
+    if (keep.orderId && keep.orderId !== position.stopLossOrderId) {
+      await this.store.updateProtection(position.id, keep.orderId, position.takeProfitOrderId);
+      await this.executionStore
+        .updateProtectiveRef(position.executionId, "sl", { orderId: keep.orderId, clientOrderId: keep.clientOrderId, status: "OPEN" })
+        .catch(() => null);
+      position.stopLossOrderId = keep.orderId;
+    }
+    await this.log(position, "DUPLICATE_STOP_CANCELLED", `cancelled ${cancelled.size} duplicate stop-loss order(s); kept ${keep.orderId} @ ${trigger(keep)}`);
   }
 
   private async buildSnapshot(position: PositionRecord): Promise<PositionSnapshot> {
