@@ -12,8 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { errorMessage, fetchJson } from "@/lib/api-client";
-import { parseBotConfig, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
-import { fmtMoney } from "@/components/automation/bot-config";
+import { parseBotConfig, botName, activeTrade, capitalText } from "@/components/automation/bot-config";
 import { AutoBadge } from "@/components/automation/AutoBadge";
 import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
@@ -272,26 +271,26 @@ export function AutomationSwitch({ onCreated }: { onCreated?: () => void }) {
             {botList.map((bot) => {
               const live = runningStates.includes(bot.desiredStatus ?? bot.status);
               const cfg = parseBotConfig(bot);
-              const sym = displaySymbol(bot, cfg);
-              const dir = sideLabel(cfg.side);
+              const trade = activeTrade(bot, cfg);
               const name = botName(bot, cfg);
+              const coin = trade.symbol.replace(/USDT$/, "") || "Auto";
               return (
                 <div
                   key={bot.id}
                   className={`flex h-full min-w-0 flex-col justify-center rounded-lg border px-3 py-2 text-sm ${live ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-muted/40"}`}
                 >
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-medium text-foreground">
-                    {name && <span className="min-w-0 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
-                    <span>{sym.replace(/USDT$/, "") || "Auto"}</span>
+                  <div className="truncate font-medium text-foreground" title={name ?? coin}>{name ?? coin}</div>
+                  <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                    <span className="truncate font-medium text-foreground/90">{trade.scanning ? "Scanning for a setup" : coin}</span>
                     {cfg.autoSelect && <AutoBadge />}
-                    {dir && (
-                      <span className={`text-[10px] font-bold ${dir === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
-                        {dir}
+                    {trade.side && (
+                      <span className={`shrink-0 text-[10px] font-bold ${trade.side === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
+                        {trade.side}
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {cfg.timeframe || bot.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
+                  <div className="truncate text-xs text-muted-foreground">
+                    {cfg.timeframe || bot.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
                   </div>
                   {bot.lastError && <div className="mt-1 text-xs text-red-400">{localizeUsdtText(bot.lastError)}</div>}
                 </div>

@@ -23,7 +23,7 @@ import { EditBotDialog } from "@/components/automation/EditBotDialog";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { parseBotConfig, statusMeta, type BotView } from "@/components/automation/bot-config";
 import { type OpenPositionAnalytics } from "@/automation/analytics/types";
-import { fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
+import { fmtMoney, displaySymbol, botName, activeTrade, capitalText } from "@/components/automation/bot-config";
 import { formatDate } from "@/components/analytics/format";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
@@ -84,15 +84,23 @@ interface BotPosition {
   position: OpenPositionAnalytics | null;
 }
 
-function distancePct(current: number, target: number): string {
-  if (!current || current <= 0) return "—";
-  return `${(((target - current) / current) * 100).toFixed(2)}%`;
+/** Money made (+) or lost (−) if the position closed at `price` (before fees). */
+function outcomeAt(position: OpenPositionAnalytics, entry: number | null, price: number | null): number | null {
+  const size = position.filledQuantity ?? position.quantity;
+  if (entry == null || price == null || size == null) return null;
+  return (price - entry) * size * (position.side === "BUY" ? 1 : -1);
 }
 
-function positionPnlPct(side: "BUY" | "SELL", entry: number | null, current: number | null): string {
-  if (!entry || entry <= 0 || current == null) return "—";
-  const dir = side === "BUY" ? 1 : -1;
-  return `${((dir * (current - entry)) / entry * 100).toFixed(2)}%`;
+function MoneyBox({ label, amount, strong }: { label: string; amount: number | null; strong?: boolean }) {
+  const tone = amount == null ? "text-foreground" : amount >= 0 ? "text-emerald-400" : "text-red-400";
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={cn("tabular-nums font-semibold", strong ? "text-lg" : "text-base", tone)}>
+        {amount == null ? "—" : `${amount >= 0 ? "+" : "−"}${fmtMoney(Math.abs(amount))}`}
+      </div>
+    </div>
+  );
 }
 
 /** Small checkbox used for selecting bots to delete (supports a "mixed" state for Select all). */
@@ -180,8 +188,10 @@ function LiveBotCard({
   const current = position?.currentPrice ?? null;
   const sl = position?.stopLoss ?? null;
   const tp = position?.takeProfit ?? null;
-  const sym = displaySymbol(bot, cfg);
-  const dir = sideLabel(cfg.side);
+  // An open position is the source of truth; otherwise what the bot is working now.
+  const trade = activeTrade(bot, cfg);
+  const sym = position?.symbol ?? trade.symbol;
+  const dir = position ? (position.side === "BUY" ? "Long" : "Short") : trade.side;
   const name = botName(bot, cfg);
 
   return (
@@ -228,22 +238,21 @@ function LiveBotCard({
       </CardHeader>
       <CardContent className="pt-4">
         {position ? (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
-            <Metric label="Entry" value={entry != null ? fmtMoney(entry) : "—"} />
-            <Metric label="Current" value={current != null ? fmtMoney(current) : "—"} />
-            <Metric label="Stop loss" value={sl != null ? `${fmtMoney(sl)} · ${distancePct(current ?? 0, sl)}` : "—"} tone="text-red-400" />
-            <Metric label="Take profit" value={tp != null ? `${fmtMoney(tp)} · ${distancePct(current ?? 0, tp)}` : "—"} tone="text-emerald-400" />
-            <Metric
-              label="Unrealized PnL"
-              value={
-                position.unrealizedPnl != null
-                  ? `${position.unrealizedPnl >= 0 ? "+" : ""}${fmtMoney(position.unrealizedPnl)} (${positionPnlPct(position.side, entry, current)})`
-                  : "—"
-              }
-              tone={position.unrealizedPnl != null ? (position.unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400") : undefined}
-              strong
-            />
-            <Metric label="Opened" value={formatDate(position.openTime, { hour12: false, second: "2-digit" })} />
+          <div className="space-y-3 text-sm">
+            {/* Money first, in plain words — what you have now and what you get at either exit. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <MoneyBox label="Profit / loss now" amount={position.unrealizedPnl} strong />
+              <MoneyBox label="If target hits" amount={outcomeAt(position, entry, tp)} />
+              <MoneyBox label="If stop-loss hits" amount={outcomeAt(position, entry, sl)} />
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Metric label="Your money in" value={position.margin != null ? fmtMoney(position.margin) : "—"} />
+              <Metric label="Bought at" value={entry != null ? fmtMoney(entry) : "—"} />
+              <Metric label="Price now" value={current != null ? fmtMoney(current) : "—"} />
+              <Metric label="Target price" value={tp != null ? fmtMoney(tp) : "—"} tone="text-emerald-400" />
+              <Metric label="Stop-loss price" value={sl != null ? fmtMoney(sl) : "—"} tone="text-red-400" />
+              <Metric label="Opened" value={formatDate(position.openTime, { hour12: false, second: "2-digit" })} />
+            </div>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">No open position yet — waiting for the next entry signal.</p>
@@ -529,6 +538,8 @@ export default function AutomationPage() {
                 const offline = schedulerActive === false && live;
                 const st = statusMeta(bot.status);
                 const busy = busyId === bot.id;
+                const trade = activeTrade(bot, cfg);
+                const coin = trade.symbol.replace(/USDT$/, "") || "Auto";
                 return (
                   <div key={bot.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-2.5">
                     <SelectBox
@@ -543,34 +554,32 @@ export default function AutomationPage() {
                         live && !offline ? "bg-emerald-400/15 text-emerald-400" : "bg-muted text-muted-foreground",
                       )}
                     >
-                      {displaySymbol(bot, cfg).slice(0, 1) || bot.symbol.slice(0, 1)}
+                      {trade.symbol.slice(0, 1) || "A"}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold text-foreground">
-                        <span className="truncate">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
-                        {botName(bot, cfg) && (
-                          <span className="shrink-0 truncate text-[11px] font-medium text-muted-foreground" title={botName(bot, cfg)!}>
-                            {botName(bot, cfg)}
-                          </span>
-                        )}
+                    <div className="min-w-0 flex-1 basis-32">
+                      <div className="truncate text-sm font-semibold text-foreground" title={botName(bot, cfg) ?? coin}>
+                        {botName(bot, cfg) ?? coin}
+                      </div>
+                      <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                        <span className="truncate font-medium text-foreground/90">{trade.scanning ? "Scanning" : coin}</span>
                         {cfg.autoSelect && <AutoBadge />}
-                        {sideLabel(cfg.side) && (
-                          <span className={cn("shrink-0 text-[10px] font-bold", sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
-                            {sideLabel(cfg.side)}
+                        {trade.side && (
+                          <span className={cn("shrink-0 text-[10px] font-bold", trade.side === "Long" ? "text-emerald-500/80" : "text-red-500/80")}>
+                            {trade.side}
                           </span>
                         )}
                         {offline && <span className="shrink-0 text-[10px] font-normal text-amber-400">offline</span>}
                       </div>
-                      <div className="truncate text-[11px] text-muted-foreground">
-                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital)} {currencyLabel()}
+                      <div className="truncate text-[11px] text-muted-foreground" title={`${strategyLabel(cfg.strategy)} · ${cfg.timeframe} · ${trade.leverage} · ${capitalText(cfg, currencyLabel())}`}>
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
                       </div>
                       {bot.lastError && !live && (
                         <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-red-400">{localizeUsdtText(bot.lastError)}</div>
                       )}
                     </div>
 
-                    <div className="ml-auto flex min-w-0 shrink flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+                    <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5 sm:gap-2">
                       <Badge className={cn("shrink-0 text-[10px]", live && !offline ? "bg-emerald-500/15 text-emerald-400" : st.className)}>
                         {live && !offline ? "Running" : st.label}
                       </Badge>

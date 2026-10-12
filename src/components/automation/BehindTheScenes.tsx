@@ -24,8 +24,7 @@ import { ListSkeleton } from "@/components/ui/skeletons";
 import { fetchData } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { parseBotConfig, type BotView } from "./bot-config";
-import { displaySymbol, sideLabel, botName } from "./bot-config";
-import { fmtMoney } from "./bot-config";
+import { botName, activeTrade, capitalText } from "./bot-config";
 import { AutoBadge } from "./AutoBadge";
 import { currencyLabel, localizeUsdtText } from "@/lib/currency/store";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
@@ -43,6 +42,23 @@ interface BotRecord {
   desiredStatus: string;
   lastError: string | null;
   configJson?: string | null;
+  name?: string | null;
+}
+
+/** Bot id → the name the user gave it (or "Bot #id"), so every log line says whose it is. */
+function botLabels(bots: BotRecord[] | null): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const b of bots ?? []) map.set(b.id, botName(b as BotView, parseBotConfig(b as BotView)) ?? `Bot #${b.id}`);
+  return map;
+}
+
+function BotChip({ label }: { label: string | null | undefined }) {
+  if (!label) return null;
+  return (
+    <span className="max-w-40 truncate rounded bg-muted px-1.5 py-px text-[10px] font-semibold text-foreground/90" title={label}>
+      {label}
+    </span>
+  );
 }
 
 interface ActivityEntry {
@@ -248,6 +264,8 @@ export function BehindTheScenes() {
     ),
   );
 
+  const labels = botLabels(bots);
+
   return (
     <Card className="bg-card">
       <CardHeader className="border-b">
@@ -281,21 +299,22 @@ export function BehindTheScenes() {
             {liveBots.map((bot) => {
               const cfg = parseBotConfig(bot as BotView);
               const name = botName(bot as BotView, cfg);
+              const trade = activeTrade(bot as BotView, cfg);
               return (
                 <div key={bot.id} className="rounded-lg border border-border bg-background/40 p-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Bot size={14} className="text-emerald-400" />
                       {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
-                      <span className="text-sm font-semibold text-foreground">{displaySymbol(bot, cfg).replace(/USDT$/, "") || "Auto"}</span>
+                      <span className="text-sm font-semibold text-foreground">{trade.scanning ? "Scanning" : trade.symbol.replace(/USDT$/, "") || "Auto"}</span>
                       {cfg.autoSelect && <AutoBadge />}
-                      {sideLabel(cfg.side) && (
-                        <span className={`text-[10px] font-bold ${sideLabel(cfg.side) === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
-                          {sideLabel(cfg.side)}
+                      {trade.side && (
+                        <span className={`text-[10px] font-bold ${trade.side === "Long" ? "text-emerald-500/80" : "text-red-500/80"}`}>
+                          {trade.side}
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {bot.leverage}x · {fmtMoney(bot.capital)} {currencyLabel()}
+                        {strategyLabel(cfg.strategy)} · {cfg.timeframe} · {trade.leverage} · {capitalText(cfg, currencyLabel())}
                       </span>
                     </div>
                     <Badge
@@ -328,15 +347,15 @@ export function BehindTheScenes() {
 
         {/* Trace + activity side by side, each independently scrollable — this is what used to run the page long */}
         <div className="grid gap-3 lg:grid-cols-2">
-          <LiveSteps steps={steps} streamUp={streamUp} />
-          <Feed activity={activity} />
+          <LiveSteps steps={steps} streamUp={streamUp} labels={labels} />
+          <Feed activity={activity} labels={labels} />
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function Feed({ activity }: { activity: ActivityEntry[] }) {
+function Feed({ activity, labels }: { activity: ActivityEntry[]; labels: Map<number, string> }) {
   return (
     <div className="flex h-72 flex-col overflow-hidden rounded-lg border border-border bg-background/40">
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
@@ -359,7 +378,8 @@ function Feed({ activity }: { activity: ActivityEntry[] }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                     <span className="font-medium text-foreground">{meta.label}</span>
-                    {item.symbol && <span className="text-muted-foreground">{item.symbol}</span>}
+                    <BotChip label={item.botId != null ? labels.get(item.botId) ?? item.botName ?? `Bot #${item.botId}` : item.botName} />
+                    {item.symbol && item.symbol.toUpperCase() !== "AUTO" && <span className="text-muted-foreground">{item.symbol}</span>}
                     <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{relativeTime(item.timestamp)}</span>
                   </div>
                   <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">{localizeUsdtText(item.message)}</p>
@@ -373,7 +393,7 @@ function Feed({ activity }: { activity: ActivityEntry[] }) {
   );
 }
 
-function LiveSteps({ steps, streamUp }: { steps: LiveStep[]; streamUp: boolean }) {
+function LiveSteps({ steps, streamUp, labels }: { steps: LiveStep[]; streamUp: boolean; labels: Map<number, string> }) {
   return (
     <div className="flex h-72 flex-col overflow-hidden rounded-lg border border-border bg-background/40">
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
@@ -407,7 +427,8 @@ function LiveSteps({ steps, streamUp }: { steps: LiveStep[]; streamUp: boolean }
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                       <span className={cn("font-medium", meta.tone)}>{meta.label}</span>
-                      {step.symbol && <span className="text-muted-foreground">{step.symbol}</span>}
+                      <BotChip label={labels.get(step.botId) ?? `Bot #${step.botId}`} />
+                      {step.symbol && step.symbol.toUpperCase() !== "AUTO" && <span className="text-muted-foreground">{step.symbol}</span>}
                       <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{relativeTime(step.at)}</span>
                     </div>
                     <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground">{localizeUsdtText(step.message)}</p>

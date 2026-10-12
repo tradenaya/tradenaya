@@ -81,11 +81,6 @@ function qty(value: number | string | null | undefined, digits = 4): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
-function signed(value: number | null, digits = 4): string {
-  if (value == null) return "—";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
-}
-
 function balance(value: number | null): string {
   if (value == null) return "—";
   const conv = convertUsdt(value);
@@ -151,10 +146,11 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
   const sl = detail?.stopLoss ?? null;
   const tp = detail?.takeProfit ?? null;
 
-  const pnlPct =
-    margin != null && margin !== 0 && pnl != null
-      ? (pnl / margin) * 100
-      : null;
+  // Money made (+) or lost (−) if the position closed at a price (before fees).
+  const size = num(position.position_size);
+  const outcomeAt = (price: number | null): number | null =>
+    price == null || entry == null || size == null ? null : (price - entry) * size * (isLong ? 1 : -1);
+  const outcomeText = (v: number | null) => (v == null ? "" : ` · ${v >= 0 ? "you make +" : "you lose "}${balance(Math.abs(v))}`);
 
   const distancePct = (price: number | null): number | null => {
     if (price == null || current == null || current === 0) return null;
@@ -238,7 +234,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
                 }`}
               >
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Unrealized PnL
+                  Profit / loss now
                 </div>
                 <div
                   className={`mt-1 text-3xl font-bold tabular-nums ${
@@ -247,14 +243,8 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
                 >
                   {pnl != null && pnl >= 0 ? "+" : ""}{balance(pnl)}
                 </div>
-                {pnlPct != null && (
-                  <div
-                    className={`mt-1 text-sm font-medium tabular-nums ${
-                      pnlPct < 0 ? "text-red-400" : "text-emerald-400"
-                    }`}
-                  >
-                    {signed(pnlPct, 2)}%
-                  </div>
+                {margin != null && (
+                  <div className="mt-1 text-sm text-muted-foreground tabular-nums">on {balance(margin)} of your money</div>
                 )}
               </div>
 
@@ -278,12 +268,12 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
               {rows("Protection", [
                 {
                   label: "Stop loss",
-                  value: sl != null ? `${money(sl)}${slDistance != null ? ` · ${slDistance.toFixed(2)}%` : ""}` : "—",
+                  value: sl != null ? `${money(sl)}${outcomeText(outcomeAt(sl))}` : "—",
                   tone: slDistance != null && ((isLong && slDistance < 0) || (!isLong && slDistance > 0)) ? "text-red-400" : undefined,
                 },
                 {
                   label: "Take profit",
-                  value: tp != null ? `${money(tp)}${tpDistance != null ? ` · ${tpDistance.toFixed(2)}%` : ""}` : "—",
+                  value: tp != null ? `${money(tp)}${outcomeText(outcomeAt(tp))}` : "—",
                   tone: tpDistance != null && ((isLong && tpDistance > 0) || (!isLong && tpDistance < 0)) ? "text-emerald-400" : undefined,
                 },
                 ...(detail?.trailingEnabled
@@ -299,7 +289,7 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
 
               {rows("Position", [
                 { label: "Size", value: qty(position.position_size) },
-                { label: "Margin", value: money(margin) },
+                { label: "Your money in", value: money(margin) },
                 {
                   label: "Est. Liq. distance",
                   value: liqDistance != null ? `${liqDistance.toFixed(2)}%` : "—",

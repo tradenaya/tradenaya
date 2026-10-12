@@ -2,6 +2,10 @@ import type { CoinSwitchClientLike, PositionSnapshot, PositionRecord, PositionSt
 import { clientOrderId } from "@/automation/executor/order-id";
 import { OrderHistoryRepository, type OrderHistoryInsert } from "@/automation/order-history";
 import { validateStopLossBoundary } from "@/automation/risk/liquidation-safety";
+import type { OrderRef } from "@/automation/executor/types";
+
+/** Called after a stop was replaced, so the trade (execution) record points at the new stop too. */
+export type StopReplacedHook = (position: PositionRecord, ref: OrderRef) => Promise<void>;
 
 const TERMINAL_STATUSES = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
 
@@ -14,6 +18,7 @@ export class TrailingStopManager {
   constructor(
     private readonly client: CoinSwitchClientLike,
     private readonly store: PositionStoreLike,
+    private readonly onStopReplaced?: StopReplacedHook,
   ) {}
 
   async update(snapshot: PositionSnapshot): Promise<TrailingUpdateResult> {
@@ -149,6 +154,7 @@ export class TrailingStopManager {
     const opposite = position.side === "BUY" ? "SELL" : "BUY";
 
     let newOrderId: string | null = null;
+    const newClientOrderId = clientOrderId(`trail_${position.executionId}_${Date.now()}`);
     try {
       const order = await this.client.placeOrder(position.userId, {
         symbol: position.symbol,
@@ -157,7 +163,7 @@ export class TrailingStopManager {
         quantity: position.filledQuantity ?? position.quantity,
         triggerPrice: newStop,
         reduceOnly: true,
-        clientOrderId: clientOrderId(`trail_${position.executionId}_${Date.now()}`),
+        clientOrderId: newClientOrderId,
       });
       newOrderId = order.orderId ?? null;
       if (!newOrderId) throw new Error("replacement SL placed but no order id returned");
@@ -191,6 +197,11 @@ export class TrailingStopManager {
 
     this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);
     await this.store.updateProtection(position.id, newOrderId, position.takeProfitOrderId);
+    // Keep the execution record in step. Without this the monitor's snapshot
+    // sync copied the ORIGINAL stop id back onto the position, so the next
+    // trail cancelled the wrong order and left duplicate stops resting.
+    await this.onStopReplaced?.(position, { orderId: newOrderId, clientOrderId: newClientOrderId, status: "OPEN" }).catch(() => null);
+    position.stopLossOrderId = newOrderId;
     return true;
   }
 

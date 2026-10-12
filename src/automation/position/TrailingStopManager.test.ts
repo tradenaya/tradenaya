@@ -348,3 +348,28 @@ describe("TrailingStopManager — existing mandatory pre-entry guard still works
     expect(result.ok).toBe(false);
   });
 });
+
+describe("TrailingStopManager — stop id bookkeeping", () => {
+  it("updates the execution record and cancels the previous trail's stop, not the original", async () => {
+    let n = 0;
+    const client = mockClient({
+      placeOrder: vi.fn().mockImplementation(async () => ({ orderId: `trail-${++n}`, clientOrderId: null, status: "NEW", raw: {} })),
+    });
+    const store = mockStore();
+    const hook = vi.fn().mockResolvedValue(undefined);
+    const manager = new TrailingStopManager(client, store, hook);
+    const safeLiq = {
+      symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+      realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: 90, maintMargin: null, positionMargin: null,
+    };
+    const position = buildPosition();
+    await manager.moveStopTo(buildSnapshot({ position, exchangePosition: safeLiq }), 102);
+    position.stopLoss = 102;
+    await manager.moveStopTo(buildSnapshot({ position, exchangePosition: safeLiq }), 104);
+
+    expect(client.cancelOrder.mock.calls.map((c) => c[1])).toEqual(["sl-1", "trail-1"]);
+    expect(hook).toHaveBeenCalledTimes(2);
+    expect(hook.mock.calls[1][1]).toMatchObject({ orderId: "trail-2", status: "OPEN" });
+    expect(position.stopLossOrderId).toBe("trail-2");
+  });
+});
