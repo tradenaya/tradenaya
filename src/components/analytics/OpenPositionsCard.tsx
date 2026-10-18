@@ -18,6 +18,11 @@ import { useAsyncData } from "./use-data"
 import { formatDate, formatMoney, formatPercent, formatPrice, pnlText, signClass } from "./format"
 import { formatPct } from "@/lib/currency/store";
 
+/** "−4.87% from entry". */
+function fromEntry(entry: number | null, price: number | null): string | null {
+  return entry != null && entry > 0 && price != null ? `${formatPct(((price - entry) / entry) * 100)} from entry` : null;
+}
+
 function ProtectionBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
     PROTECTED: { label: "Protected", className: "bg-emerald-500/15 text-emerald-400" },
@@ -84,15 +89,28 @@ export function OpenPositionsCard({ filters }: { filters: AnalyticsFilterState }
                     <div className="text-xs text-muted-foreground">{p.leverage != null ? `${p.leverage}x` : ""}{p.margin != null ? ` · ${formatMoney(p.margin)}` : ""}</div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(p.entryPrice ?? p.plannedEntryPrice)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatPrice(p.currentPrice)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatPrice(p.currentPrice)}
+                    {p.currentPrice != null && p.entryPrice ? <div className="text-xs text-muted-foreground">{fromEntry(p.entryPrice, p.currentPrice)}</div> : null}
+                  </TableCell>
                   <TableCell className={`text-right tabular-nums ${signClass(p.unrealizedPnl)}`}>
                     {pnlText(p.unrealizedPnl)}
                     {p.unrealizedPnl != null && p.margin != null && p.margin > 0 && (
                       <div className="text-xs opacity-80">{formatPct((p.unrealizedPnl / p.margin) * 100)} of your money</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.stopLoss)}</TableCell>
-                  <TableCell className="text-right tabular-nums hidden md:table-cell">{formatPrice(p.takeProfit)}</TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">
+                    {formatPrice(p.stopLoss)}
+                    {p.stopLoss != null && (p.entryPrice ?? p.plannedEntryPrice) ? (
+                      <div className="text-xs text-muted-foreground">{fromEntry(p.entryPrice ?? p.plannedEntryPrice, p.stopLoss)}</div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums hidden md:table-cell">
+                    {formatPrice(p.takeProfit)}
+                    {p.takeProfit != null && (p.entryPrice ?? p.plannedEntryPrice) ? (
+                      <div className="text-xs text-muted-foreground">{fromEntry(p.entryPrice ?? p.plannedEntryPrice, p.takeProfit)}</div>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <ProtectionBadge status={p.protectionStatus} />
                     {p.trailingEnabled && (

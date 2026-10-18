@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { CandlestickChart, Check, Eye, Loader2, MoreVertical, Pause, Play, Plus, Power, Square, Pencil, Trash } from "lucide-react";
+import { CandlestickChart, Check, Eye, Loader2, Lock, MoreVertical, Pause, Play, Plus, Power, Square, Pencil, Trash } from "lucide-react";
 import { toast } from "sonner";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { CardGridSkeleton, ListSkeleton } from "@/components/ui/skeletons";
 import { fetchJson } from "@/lib/api-client";
+import { StopLossHistory } from "@/components/positions/StopLossHistory";
 import { cn } from "@/lib/utils";
 import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { AutoBadge } from "@/components/automation/AutoBadge";
@@ -174,13 +175,19 @@ function PhaseTrack({ status }: { status: string }) {
   );
 }
 
-function Metric({ label, value, tone, strong }: { label: string; value: ReactNode; tone?: string; strong?: boolean }) {
+function Metric({ label, value, tone, strong, note }: { label: string; value: ReactNode; tone?: string; strong?: boolean; note?: string | null }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("font-medium text-foreground tabular-nums", tone, strong && "text-base font-semibold")}>{value}</span>
+      {note && <span className="text-[11px] tabular-nums text-muted-foreground">{note}</span>}
     </div>
   );
+}
+
+/** "−4.87% from entry": how far a price is from the entry price. */
+function fromEntry(entry: number | null, price: number | null): string | null {
+  return entry != null && entry > 0 && price != null ? `${formatPct(((price - entry) / entry) * 100)} from entry` : null;
 }
 
 /** One card per live bot: identity, phase, and position metrics together — no duplicate status blocks elsewhere. */
@@ -201,6 +208,7 @@ function LiveBotCard({
   const current = position?.currentPrice ?? null;
   const sl = position?.stopLoss ?? null;
   const tp = position?.takeProfit ?? null;
+  const [showStops, setShowStops] = useState(false);
   // An open position is the source of truth; otherwise what the bot is working now.
   const trade = activeTrade(bot, cfg);
   const sym = position?.symbol ?? trade.symbol;
@@ -259,12 +267,27 @@ function LiveBotCard({
               <MoneyBox label="If stop-loss hits" amount={outcomeAt(position, entry, sl)} notes={[pctOfMoney(outcomeAt(position, entry, sl), position.margin), priceAway(current, sl)]} />
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Metric label="Your money in" value={position.margin != null ? fmtMoney(position.margin) : "—"} />
-              <Metric label="Bought at" value={entry != null ? fmtMoney(entry) : "—"} />
-              <Metric label="Price now" value={current != null ? fmtMoney(current) : "—"} />
-              <Metric label="Target price" value={tp != null ? fmtMoney(tp) : "—"} tone="text-emerald-400" />
-              <Metric label="Stop-loss price" value={sl != null ? fmtMoney(sl) : "—"} tone="text-red-400" />
+              <Metric
+                label="Your money in"
+                value={position.margin != null ? fmtMoney(position.margin, 2) : "—"}
+                note={position.leverage ? `${position.leverage}x → trade size ${position.margin != null ? fmtMoney(position.margin * position.leverage, 2) : "—"}` : null}
+              />
+              <Metric label={position.side === "BUY" ? "Bought at" : "Sold (shorted) at"} value={entry != null ? fmtMoney(entry) : "—"} />
+              <Metric label="Price now" value={current != null ? fmtMoney(current) : "—"} note={fromEntry(entry, current)} />
+              <Metric label="Target price" value={tp != null ? fmtMoney(tp) : "—"} tone="text-emerald-400" note={fromEntry(entry, tp)} />
+              <Metric
+                label={position.trailingActivated || position.protectionStatus === "TRAILING" ? "Stop-loss (trailed)" : "Stop-loss price"}
+                value={sl != null ? fmtMoney(sl) : "—"}
+                tone={(outcomeAt(position, entry, sl) ?? -1) >= 0 ? "text-emerald-400" : "text-red-400"}
+                note={fromEntry(entry, sl)}
+              />
               <Metric label="Opened" value={formatDate(position.openTime, { hour12: false, second: "2-digit" })} />
+            </div>
+            <div>
+              <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setShowStops((v) => !v)}>
+                <Lock size={12} /> {showStops ? "Hide" : "Show"} stop-loss history &amp; proof
+              </Button>
+              {showStops && <StopLossHistory positionId={position.positionId} className="mt-3" />}
             </div>
           </div>
         ) : (

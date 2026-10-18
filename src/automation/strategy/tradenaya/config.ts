@@ -138,6 +138,8 @@ export interface TradenayaThresholds {
   maxStopPct: number;
   /** Distance a stop sits beyond a structural swing, in ATR. */
   stopBeyondStructureAtr: number;
+  /** Which view's support / resistance the order planner uses for stop and target: the entry candles or the higher (resampled) timeframe. */
+  levelsFrom: "entry" | "higher";
 
   /** MFI above this is overbought (flow favors the downside / long faded). */
   mfiOverbought: number;
@@ -201,6 +203,7 @@ export const TRADENAYA_THRESHOLDS: TradenayaThresholds = {
   minStopPct: 0.006,
   maxStopPct: 0.06,
   stopBeyondStructureAtr: 0.5,
+  levelsFrom: "entry",
 
   mfiOverbought: 80,
   mfiOversold: 20,

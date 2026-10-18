@@ -349,6 +349,45 @@ export function telegramProtected(p: {
   ].join("\n");
 }
 
+/** Money made (+) / lost (−) if the position closed at `price`. */
+function outcomeAt(side: string | null | undefined, entry: number | null | undefined, quantity: number | null | undefined, price: number | null | undefined): number | null {
+  if (entry == null || quantity == null || price == null) return null;
+  return (price - entry) * quantity * (typeOfSide(side) === "LONG" ? 1 : -1);
+}
+
+export function telegramStopMoved(p: {
+  symbol?: string | null;
+  side?: string | null;
+  entry?: number | null;
+  quantity?: number | null;
+  leverage?: number | null;
+  from: number;
+  to: number;
+  price: number;
+  rule?: string | null;
+  takeProfit?: number | null;
+}): string {
+  const margin = p.entry != null && p.quantity != null && p.leverage ? (p.entry * p.quantity) / p.leverage : null;
+  const pct = (v: number | null) => (v != null && margin ? ` (${fmtSigned((v / margin) * 100, 2)}% of your money)` : "");
+  const before = outcomeAt(p.side, p.entry, p.quantity, p.from);
+  const after = outcomeAt(p.side, p.entry, p.quantity, p.to);
+  const fromEntry = p.entry ? ` (${fmtSigned(((p.to - p.entry) / p.entry) * 100, 2)}% from entry)` : "";
+  const away = p.price ? `${fmt((Math.abs(p.price - p.to) / p.price) * 100, 2)}% away` : "n/a";
+  return [
+    "🔒 <b>STOP-LOSS MOVED</b>",
+    ``,
+    `Symbol: ${escapeHtml(String(p.symbol ?? "n/a")).toUpperCase()} · ${sideLabel(p.side)}`,
+    `Entry: ${fmt(p.entry)}`,
+    `Stop: ${fmt(p.from)} → <b>${fmt(p.to)}</b>${fromEntry}`,
+    `Price now: ${fmt(p.price)} (stop ${away})`,
+    p.rule ? `Rule: ${escapeHtml(p.rule)}` : "",
+    ``,
+    `If stop hits now: ${fmtSigned(after)} USDT${pct(after)}`,
+    `Before this move: ${fmtSigned(before)} USDT${pct(before)}`,
+    p.takeProfit != null ? `Target (fixed): ${fmt(p.takeProfit)} → ${fmtSigned(outcomeAt(p.side, p.entry, p.quantity, p.takeProfit))} USDT${pct(outcomeAt(p.side, p.entry, p.quantity, p.takeProfit))}` : "",
+  ].filter((line, i, all) => line !== "" || all[i - 1] !== "").join("\n");
+}
+
 export function telegramTakeProfit(p: {
   symbol?: string | null;
   side?: string | null;

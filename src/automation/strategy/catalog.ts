@@ -57,7 +57,7 @@ export const STRATEGIES: StrategyInfo[] = [
     id: TREND_BREAKOUT_ID,
     label: "Trend Breakout (4h)",
     summary:
-      "Enters when price breaks the last 20 candles' range in the direction of the 200-EMA trend; the stop trails the last 10 candles so winners can run. Wins ~1 in 3 trades, but wins are ~3x the losses.",
+      "Enters when price breaks the last 20 candles' range decisively, with volume, in a trending market and in the direction of the 200-EMA trend. The stop stays put until the trade is +1.5R in profit, then moves to entry and trails the last 10 candles so winners can run. Wins ~1 in 3 trades, but wins are ~3x the losses.",
     fixedTimeframe: "4h",
     supportsMomentumFilter: false,
     usesPullbackTuning: false,
@@ -69,7 +69,7 @@ export const STRATEGIES: StrategyInfo[] = [
       momentumEntriesOnly: false,
       enableTrailingStop: false,
       coinUniverse: "MAJORS",
-      note: "Major coins only (BTC, ETH, SOL, XRP, BNB, DOGE — what it was tested on), 1% risk per trade: this strategy wins ~1 in 3 trades, so losing streaks of 6–8 are normal and must stay small. Its own stop trails the last 10 candles.",
+      note: "Major coins only (BTC, ETH, SOL, XRP, BNB, DOGE — what it was tested on), 1% risk per trade: this strategy wins ~1 in 3 trades, so losing streaks of 6–8 are normal and must stay small. Its own stop stays put until +1.5R, then moves to entry and trails the last 10 candles.",
     },
   },
 ];

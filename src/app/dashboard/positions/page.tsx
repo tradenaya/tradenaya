@@ -107,12 +107,16 @@ function positionTargets(
     if (order.symbol !== pos.symbol) continue;
     const trigger = Number(order.trigger_price);
     if (!Number.isFinite(trigger)) continue;
+    // Decide by order TYPE first. A stop that has trailed past the entry (it
+    // now locks in profit) sits on the "profit side" of entry, so guessing by
+    // price made it look like a second take-profit and the stop disappeared.
     const type = String(order.order_type ?? "").toUpperCase();
-    if (type.includes("TAKE_PROFIT") || (isLong && trigger > entry) || (!isLong && trigger < entry)) {
-      tp = trigger;
-    } else {
-      sl = trigger;
-    }
+    const isTp = type.includes("TAKE_PROFIT");
+    const isStop = type.includes("STOP") && !isTp;
+    if (isTp) tp = trigger;
+    else if (isStop) sl = trigger;
+    else if ((isLong && trigger > entry) || (!isLong && trigger < entry)) tp = trigger;
+    else sl = trigger;
   }
   return { tp, sl };
 }

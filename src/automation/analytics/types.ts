@@ -239,6 +239,8 @@ export interface OpenPositionAnalytics {
 export interface ClosedTradeSummary {
   id: number;
   tradeId: string;
+  /** The execution (trade plan) this closed trade came from — links to its stop-loss history. */
+  executionId: number;
   botId: number;
   botName: string;
   symbol: string;
@@ -266,7 +268,6 @@ export interface ClosedTradeSummary {
 }
 
 export interface TradeDetail extends ClosedTradeSummary {
-  executionId: number;
   positionId: number | null;
   entryOrderId: string | null;
   slOrderId: string | null;

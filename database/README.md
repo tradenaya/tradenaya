@@ -65,6 +65,7 @@ mysqldump -u <user> -p --no-data <database> > database/existing/auth_tables.sql
 | 05_paper_leverage.sql | new table | Paper trading — leverage per coin |
 | 06_paper_transactions.sql | new table | Paper trading — commission / realised PnL ledger |
 | 07_automation_bots_trading_mode.sql | new column | `automation_bots.trading_mode` = `LIVE` or `PAPER` (existing bots become `LIVE`) |
+| 08_automation_position_events_details.sql | new column | `automation_position_events.details` — JSON proof for stop-loss moves (old / new level, orders, status) |
 
 ## Running them by hand (optional)
 

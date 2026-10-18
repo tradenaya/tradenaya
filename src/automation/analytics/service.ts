@@ -113,6 +113,7 @@ function formatTrade(trade: ClosedTradeRow, bots: Map<number, BotRow>): ClosedTr
   return {
     id: trade.id,
     tradeId: `T-${trade.id}`,
+    executionId: trade.executionId,
     botId: trade.botId,
     botName: bot ? botName(bot) : `Bot #${trade.botId}`,
     symbol: trade.symbol,

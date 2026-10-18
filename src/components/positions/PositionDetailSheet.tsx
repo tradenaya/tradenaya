@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchData } from "@/lib/api-client";
+import { StopLossHistory } from "./StopLossHistory";
 import { CandlestickChart } from "lucide-react";
 import { formatTimestamp } from "@/components/analytics/format";
 import { positionSideLabel, sideBadgeClass } from "@/components/trading/terms";
@@ -36,6 +37,7 @@ export interface ExchangePosition {
 }
 
 export interface AutomationPositionDetail {
+  positionId: number;
   symbol: string;
   side: "BUY" | "SELL";
   state: string;
@@ -310,6 +312,12 @@ export function PositionDetailSheet({ position, open, onOpenChange }: Props) {
                   ? [{ label: "Opened", value: formatTimestamp(detail?.openTime ?? position.created_at) }]
                   : []),
               ])}
+
+              {detail?.positionId != null && (
+                <div className="rounded-lg border border-border p-3">
+                  <StopLossHistory positionId={detail.positionId} />
+                </div>
+              )}
             </>
           )}
         </div>

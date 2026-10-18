@@ -155,6 +155,8 @@ export interface CoinSwitchClientLike {
   placeOrder(userId: number, params: any): Promise<ExchangeOrder>;
   getTransactions(userId: number, opts?: { symbol?: string; type?: string; fromTime?: number; toTime?: number; limit?: number }): Promise<FuturesTransaction[]>;
   getClosedOrders(userId: number, opts?: { symbol?: string; status?: string; limit?: number; fromTime?: number; toTime?: number }): Promise<{ orders: ClosedOrderRecord[]; cursor: number | null }>;
+  /** Exchange instrument rules (price precision etc.); optional so test doubles can omit it. */
+  getInstrumentInfo?(userId: number, symbol: string): Promise<Record<string, unknown> | null>;
 }
 
 export interface BotStateServiceLike {
@@ -233,6 +235,8 @@ export interface PositionEventInput {
   positionId: number | null;
   type: string;
   message: string;
+  /** Structured facts behind the message (e.g. a stop move's old/new level and order ids), stored as JSON. */
+  details?: Record<string, unknown> | null;
 }
 
 export class PositionManagerError extends Error {

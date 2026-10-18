@@ -136,6 +136,11 @@ export class PositionStore {
     if (!columns.has("symbol")) {
       await db.query(`ALTER TABLE automation_position_events ADD COLUMN symbol VARCHAR(50) NULL;`);
     }
+    // Structured details (JSON) for events such as stop-loss moves, so the UI
+    // can show exactly what changed and which exchange orders prove it.
+    if (!columns.has("details")) {
+      await db.query(`ALTER TABLE automation_position_events ADD COLUMN details TEXT NULL;`);
+    }
   }
 
   async ensureCloseTable() {
@@ -328,6 +333,12 @@ export class PositionStore {
     );
   }
 
+  /** Remember that a trade's trailing stop has been armed (survives restarts and dips back). */
+  async markTrailingActivated(id: number) {
+    await this.ensureTable();
+    await db.query(`UPDATE automation_positions SET trailing_activated = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`, [id]);
+  }
+
   async updateTrailingConfig(id: number, enabled: boolean, distancePct: number | null, activationPct: number | null) {
     await this.ensureTable();
     await db.query(
@@ -443,9 +454,9 @@ export class PositionStore {
   async saveEvent(input: PositionEventInput) {
     await this.ensureEventsTable();
     await db.query(
-      `INSERT INTO automation_position_events (user_id, bot_id, execution_id, position_id, type, message)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      [input.userId, input.botId, input.executionId, input.positionId, input.type, input.message],
+      `INSERT INTO automation_position_events (user_id, bot_id, execution_id, position_id, type, message, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+      [input.userId, input.botId, input.executionId, input.positionId, input.type, input.message, input.details ? JSON.stringify(input.details) : null],
     );
   }
 

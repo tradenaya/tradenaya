@@ -19,6 +19,42 @@ import { apiGet } from "@/components/analytics/api"
 import { useAsyncData } from "@/components/analytics/use-data"
 import { formatPrice, formatMoney, pnlText, signClass, formatDuration } from "@/components/analytics/format"
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
+import { formatPct } from "@/lib/currency/store"
+import { StopLossHistory } from "@/components/positions/StopLossHistory"
+
+/** "−4.87% from entry". */
+function fromEntry(entry: number | null, price: number | null): string | null {
+  return entry != null && entry > 0 && price != null ? `${formatPct(((price - entry) / entry) * 100)} from entry` : null
+}
+
+/** Money made (+) / lost (−) if the position closed at `price` (before fees). */
+function outcomeAt(side: "BUY" | "SELL", entry: number | null, quantity: number | null, price: number | null): number | null {
+  if (entry == null || quantity == null || price == null) return null
+  return (price - entry) * Math.abs(quantity) * (side === "BUY" ? 1 : -1)
+}
+
+/** "+12.40% of your money". */
+function ofMoney(amount: number | null, margin: number | null): string | null {
+  return amount != null && margin != null && margin > 0 ? `${formatPct((amount / margin) * 100)} of your money` : null
+}
+
+/** A price with its % from entry and, for stop / target, what it means in money. */
+function LevelCell({ price, entry, side, quantity, margin, tone }: { price: number | null; entry: number | null; side: "BUY" | "SELL"; quantity: number | null; margin: number | null; tone?: string }) {
+  if (price == null) return <span className="text-muted-foreground">—</span>
+  const amount = outcomeAt(side, entry, quantity, price)
+  return (
+    <div className="space-y-0.5">
+      <div className={tone}>{formatPrice(price)}</div>
+      <div className="text-[11px] text-muted-foreground">{fromEntry(entry, price)}</div>
+      {amount != null && (
+        <div className="text-[11px]">
+          <span className={signClass(amount)}>{pnlText(amount)}</span>
+          {ofMoney(amount, margin) && <span className="text-muted-foreground"> · {ofMoney(amount, margin)}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const PAGE_SIZE = 25
 
@@ -36,7 +72,11 @@ interface ClosedTrade {
   grossProfit: number
   commission: number
   fundingFee: number
+  /** Net P&L as a % of your own money (margin). */
   percentage: number
+  margin: number
+  priceMovePct: number
+  executionId: number | null
   exitReason: string
   outcome: "WIN" | "LOSS" | "BREAKEVEN"
   botName: string
@@ -64,6 +104,8 @@ interface ActivePosition {
   entryPrice: number | null
   currentPrice: number | null
   unrealizedPnl: number | null
+  quantity: number | null
+  margin: number | null
   leverage: number | null
   openTime: string
   durationMs: number
@@ -132,6 +174,7 @@ export default function PositionHistoryPage() {
   useDisplayCurrency();
   const [page, setPage] = useState(1)
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null)
+  const [expandedOpen, setExpandedOpen] = useState<number | null>(null)
 
   const { data, error, errorInfo, loading, refresh } = useAsyncData<PositionHistoryData>(
     () => apiGet("/api/position-history", { page, pageSize: PAGE_SIZE, sortBy: "closedAt", sortDir: "desc" }),
@@ -178,17 +221,26 @@ export default function PositionHistoryPage() {
                         <TableHead>Bot</TableHead>
                         <TableHead className="text-right">Entry</TableHead>
                         <TableHead className="text-right">Current</TableHead>
-                        <TableHead className="text-right hidden sm:table-cell">SL</TableHead>
-                        <TableHead className="text-right hidden sm:table-cell">TP</TableHead>
-                        <TableHead className="text-right">Unrealized PnL</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">Stop-loss</TableHead>
+                        <TableHead className="text-right hidden sm:table-cell">Target</TableHead>
+                        <TableHead className="text-right">Profit / Loss now</TableHead>
                         <TableHead className="text-right hidden sm:table-cell">Lev</TableHead>
                         <TableHead className="text-right">Open for</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {active.map((pos, i) => (
-                        <TableRow key={pos.positionId ?? `active-${i}`}>
-                          <TableCell className="font-medium">{pos.symbol}</TableCell>
+                        <Fragment key={pos.positionId ?? `active-${i}`}>
+                        <TableRow
+                          className={pos.positionId != null ? "cursor-pointer hover:bg-muted/50" : undefined}
+                          onClick={() => pos.positionId != null && setExpandedOpen(expandedOpen === pos.positionId ? null : pos.positionId)}
+                        >
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-1">
+                              {pos.positionId != null && (expandedOpen === pos.positionId ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
+                              {pos.symbol}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <Badge className={sideBadge(pos.side)}>{pos.side}</Badge>
                           </TableCell>
@@ -197,15 +249,28 @@ export default function PositionHistoryPage() {
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{pos.botName}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatPrice(pos.entryPrice)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatPrice(pos.currentPrice)}</TableCell>
-                          <TableCell className="text-right tabular-nums text-xs text-red-400 hidden sm:table-cell">
-                            {pos.stopLoss != null ? formatPrice(pos.stopLoss) : "—"}
+                          <TableCell className="text-right tabular-nums">
+                            <div>{formatPrice(pos.currentPrice)}</div>
+                            <div className="text-[11px] text-muted-foreground">{fromEntry(pos.entryPrice, pos.currentPrice)}</div>
                           </TableCell>
-                          <TableCell className="text-right tabular-nums text-xs text-emerald-400 hidden sm:table-cell">
-                            {pos.takeProfit != null ? formatPrice(pos.takeProfit) : "—"}
+                          <TableCell className="text-right tabular-nums text-xs hidden sm:table-cell">
+                            <LevelCell
+                              price={pos.stopLoss}
+                              entry={pos.entryPrice}
+                              side={pos.side}
+                              quantity={pos.quantity}
+                              margin={pos.margin}
+                              tone={(outcomeAt(pos.side, pos.entryPrice, pos.quantity, pos.stopLoss) ?? -1) >= 0 ? "text-emerald-400" : "text-red-400"}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-xs hidden sm:table-cell">
+                            <LevelCell price={pos.takeProfit} entry={pos.entryPrice} side={pos.side} quantity={pos.quantity} margin={pos.margin} tone="text-emerald-400" />
                           </TableCell>
                           <TableCell className={`text-right font-medium tabular-nums ${signClass(pos.unrealizedPnl)}`}>
                             {pnlText(pos.unrealizedPnl)}
+                            {ofMoney(pos.unrealizedPnl, pos.margin) && (
+                              <div className="text-[11px] font-normal text-muted-foreground">{ofMoney(pos.unrealizedPnl, pos.margin)}</div>
+                            )}
                           </TableCell>
                           <TableCell className="text-right hidden sm:table-cell">{pos.leverage ? `${pos.leverage}x` : "—"}</TableCell>
                           <TableCell className="text-right text-xs whitespace-nowrap">
@@ -213,6 +278,14 @@ export default function PositionHistoryPage() {
                             <div className="text-muted-foreground">since {formatTimestamp(pos.openTime)}</div>
                           </TableCell>
                         </TableRow>
+                        {pos.positionId != null && expandedOpen === pos.positionId && (
+                          <TableRow className="bg-muted/30">
+                            <TableCell colSpan={11} className="px-4 py-3">
+                              <StopLossHistory positionId={pos.positionId} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       ))}
                     </TableBody>
                   </Table>
@@ -283,7 +356,7 @@ export default function PositionHistoryPage() {
                         <TableHead className="text-right hidden lg:table-cell">Gross</TableHead>
                         <TableHead className="text-right hidden xl:table-cell">Fees</TableHead>
                         <TableHead className="text-right hidden xl:table-cell">Funding</TableHead>
-                        <TableHead className="text-right hidden md:table-cell">ROI</TableHead>
+                        <TableHead className="text-right hidden md:table-cell" title="Net profit / loss as a % of your own money (margin)">% of your money</TableHead>
                         <TableHead className="text-right hidden sm:table-cell">Duration</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -315,7 +388,10 @@ export default function PositionHistoryPage() {
                                 <Badge className={sideBadge(trade.side)}>{trade.side}</Badge>
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs">{formatPrice(trade.entryPrice)}</TableCell>
-                              <TableCell className="text-right tabular-nums text-xs">{formatPrice(trade.exitPrice)}</TableCell>
+                              <TableCell className="text-right tabular-nums text-xs">
+                                <div>{formatPrice(trade.exitPrice)}</div>
+                                <div className="text-[11px] text-muted-foreground">{formatPct(trade.priceMovePct)} from entry</div>
+                              </TableCell>
                               <TableCell className="text-right tabular-nums text-xs hidden md:table-cell">
                                 {trade.positionSize != null ? trade.positionSize.toFixed(4) : "—"}
                               </TableCell>
@@ -334,6 +410,7 @@ export default function PositionHistoryPage() {
                               </TableCell>
                               <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.profitLoss)}`}>
                                 {pnlText(trade.profitLoss)}
+                                <div className="text-[11px] font-normal text-muted-foreground">{formatPct(trade.percentage)} of your money</div>
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground hidden lg:table-cell">
                                 {trade.grossProfit != null && trade.grossProfit !== 0
@@ -347,7 +424,7 @@ export default function PositionHistoryPage() {
                                 {trade.fundingFee != null && trade.fundingFee !== 0 ? (trade.fundingFee > 0 ? `-${formatMoney(trade.fundingFee)}` : `+${formatMoney(Math.abs(trade.fundingFee))}`) : "—"}
                               </TableCell>
                               <TableCell className={`text-right tabular-nums text-xs hidden md:table-cell ${signClass(pct)}`}>
-                                {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+                                {formatPct(pct)}
                               </TableCell>
                               <TableCell className="text-right text-xs text-muted-foreground hidden sm:table-cell">{formatDuration(trade.durationMs)}</TableCell>
                             </TableRow>
@@ -355,6 +432,7 @@ export default function PositionHistoryPage() {
                               <TableRow key={`detail-${trade.tradeId}`} className="bg-muted/30">
                                 <TableCell colSpan={16} className="py-3 px-4">
                                   <TradeDetailGrid trade={trade} className="grid-cols-2 sm:grid-cols-4" />
+                                  {trade.executionId != null && <StopLossHistory executionId={trade.executionId} className="mt-4 border-t border-border pt-3" />}
                                 </TableCell>
                               </TableRow>
                             )}
@@ -416,9 +494,9 @@ function TradeDetailGrid({ trade, className = "" }: { trade: ClosedTrade; classN
         </p>
       </div>
       <div>
-        <span className="text-muted-foreground">ROI</span>
+        <span className="text-muted-foreground">Return on your money</span>
         <p className={`font-bold ${signClass(trade.percentage)}`}>
-          {trade.percentage >= 0 ? "+" : ""}{trade.percentage.toFixed(2)}%
+          {formatPct(trade.percentage)}
         </p>
       </div>
       <div>
@@ -452,20 +530,21 @@ function TradeDetailGrid({ trade, className = "" }: { trade: ClosedTrade; classN
         <p className="font-medium">{trade.strategy}</p>
       </div>
       <div>
-        <span className="text-muted-foreground">Investment</span>
-        <p className="font-medium">{formatMoney(trade.investment)}</p>
+        <span className="text-muted-foreground">Your money in</span>
+        <p className="font-medium">{formatMoney(trade.margin)}</p>
+        <p className="text-[11px] text-muted-foreground">Trade size {formatMoney(trade.investment)}{trade.leverage ? ` (${trade.leverage}x)` : ""}</p>
       </div>
       <div>
         <span className="text-muted-foreground">Position Size</span>
         <p className="font-medium">{trade.positionSize != null ? `${trade.positionSize.toFixed(4)} ${trade.symbol.replace("USDT", "")}` : "—"}</p>
       </div>
       <div>
-        <span className="text-muted-foreground">Stop Loss</span>
-        <p className="font-medium text-red-400">{trade.stopLoss != null ? formatPrice(trade.stopLoss) : "—"}</p>
+        <span className="text-muted-foreground">Stop-loss (last)</span>
+        <LevelCell price={trade.stopLoss} entry={trade.entryPrice} side={trade.side} quantity={trade.quantity} margin={trade.margin} tone="font-medium text-red-400" />
       </div>
       <div>
-        <span className="text-muted-foreground">Take Profit</span>
-        <p className="font-medium text-emerald-400">{trade.takeProfit != null ? formatPrice(trade.takeProfit) : "—"}</p>
+        <span className="text-muted-foreground">Target</span>
+        <LevelCell price={trade.takeProfit} entry={trade.entryPrice} side={trade.side} quantity={trade.quantity} margin={trade.margin} tone="font-medium text-emerald-400" />
       </div>
       <div>
         <span className="text-muted-foreground">Trailing Stop</span>
@@ -513,13 +592,13 @@ function ClosedTradeCard({ trade, expanded, onToggle }: { trade: ClosedTrade; ex
           <div className="shrink-0 text-right">
             <div className={`text-sm font-semibold tabular-nums ${signClass(trade.profitLoss)}`}>{pnlText(trade.profitLoss)}</div>
             <div className={`text-[11px] tabular-nums ${signClass(trade.percentage)}`}>
-              {trade.percentage >= 0 ? "+" : ""}{trade.percentage.toFixed(2)}%
+              {formatPct(trade.percentage)} of your money
             </div>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
           <div><span className="text-muted-foreground">Entry </span><span className="tabular-nums">{formatPrice(trade.entryPrice)}</span></div>
-          <div><span className="text-muted-foreground">Exit </span><span className="tabular-nums">{formatPrice(trade.exitPrice)}</span></div>
+          <div><span className="text-muted-foreground">Exit </span><span className="tabular-nums">{formatPrice(trade.exitPrice)}</span> <span className="text-[11px] text-muted-foreground">({formatPct(trade.priceMovePct)})</span></div>
           <div className="min-w-0"><span className="text-muted-foreground">Opened </span><span className="tabular-nums">{formatTimestamp(trade.entryTime)}</span></div>
           <div className="min-w-0"><span className="text-muted-foreground">Closed </span><span className="tabular-nums">{formatTimestamp(trade.exitTime)}</span></div>
           <div><span className="text-muted-foreground">Duration </span>{formatDuration(trade.durationMs)}</div>
@@ -532,6 +611,7 @@ function ClosedTradeCard({ trade, expanded, onToggle }: { trade: ClosedTrade; ex
       {expanded && (
         <div className="border-t border-border bg-muted/30 p-3">
           <TradeDetailGrid trade={trade} className="grid-cols-2" />
+          {trade.executionId != null && <StopLossHistory executionId={trade.executionId} className="mt-4 border-t border-border pt-3" />}
         </div>
       )}
     </li>
