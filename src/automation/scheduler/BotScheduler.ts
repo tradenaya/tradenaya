@@ -469,6 +469,25 @@ export class BotScheduler {
       );
     }
 
+    // Wallet-% bots share the wallet and size from whatever is FREE when they
+    // look for a trade. If other bots' trades hold the money right now, this
+    // bot may still start: it simply finds nothing until money is freed.
+    // Only an empty wallet (nothing free AND nothing in trades) is refused.
+    if (config.capitalMode === "percent") {
+      const freeNow = effectiveAllocation(Number(config.walletPercent) || 0, balance).amount;
+      if (!(freeNow > 0)) {
+        const snapshot = await coinswitchClient.getWalletSnapshot(userId).catch(() => null);
+        const total = Number(snapshot?.total ?? 0);
+        if (!(total > 0)) {
+          throw new Error(
+            "Your futures wallet is empty (0 USDT). Add USDT to your CoinSwitch futures wallet before starting a bot.",
+          );
+        }
+        console.log(`[scheduler] wallet-% bot starting with 0 USDT free (${total} USDT in other trades) — it will trade once money is freed`);
+        return;
+      }
+    }
+
     // Percent mode is capped to the safe maximum (keeps margin headroom) rather
     // than rejected, so choosing 100% simply allocates the highest safe share.
     const allocated =
@@ -545,6 +564,10 @@ export class BotScheduler {
         if (price != null && price > 0) {
           const maxPosition = (allocated * config.leverage) / price;
           const floored = Number.isFinite(step) && step > 0 ? Math.floor(maxPosition / step) * step : maxPosition;
+          if (floored < minQty && config.capitalMode === "percent") {
+            console.log(`[scheduler] ${config.symbol}: ${allocated.toFixed(4)} USDT free now is below the minimum order — the bot will trade when more is free`);
+            return;
+          }
           if (floored < minQty) {
             const minNotional = minQty * price;
             const requiredCapital = minNotional / config.leverage;

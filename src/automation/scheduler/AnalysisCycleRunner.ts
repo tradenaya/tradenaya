@@ -22,6 +22,21 @@ import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants
 import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
 import { currentTradingMode } from "@/automation/paper/mode";
 import { MAX_RUNNING_BOTS } from "./SchedulerTypes";
+import { accountOrderLock } from "./account-lock";
+
+const normSymbol = (s: unknown) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** True when an exchange position or a resting non-protective order already exists on `symbol`. */
+export function symbolInUse(symbol: string, positions: ExchangePosition[], orders: ExchangeOrder[]): boolean {
+  const target = normSymbol(symbol);
+  if (positions.some((p) => normSymbol(p.symbol) === target && Math.abs(Number(p.quantity) || 0) > 0)) return true;
+  return orders.some((o) => {
+    const raw = (o.raw ?? {}) as Record<string, unknown>;
+    if (normSymbol(raw.symbol) !== target) return false;
+    const reduceOnly = raw.reduce_only === true || String(raw.reduce_only) === "true" || String(raw.reduce_only) === "1";
+    return !reduceOnly; // a resting ENTRY order (stops / targets are reduce-only)
+  });
+}
 
 const PERMANENT_ERROR_MARKERS = ["subaccount association not found"];
 
@@ -407,7 +422,28 @@ export class AnalysisCycleRunner {
     index: number,
     scanId?: string,
   ): Promise<{ status: "CONTINUE"; reason: string } | { status: "DONE"; result: CycleResult }> {
+    // One bot per account at a time from "read free balance" until the order is
+    // on the exchange, so the next bot sizes from the balance really left.
+    return accountOrderLock.run(`${bot.userId}:${currentTradingMode()}`, () => this.checkRiskAndSubmitLocked(bot, config, plan, cycleSymbol, index, scanId));
+  }
+
+  private async checkRiskAndSubmitLocked(
+    bot: BotRuntimeState,
+    config: AutomationConfig,
+    plan: TradePlan,
+    cycleSymbol: string,
+    index: number,
+    scanId?: string,
+  ): Promise<{ status: "CONTINUE"; reason: string } | { status: "DONE"; result: CycleResult }> {
     const risk = await this.evaluateRisk(bot, config, plan);
+    // Another bot (or a manual trade) already holds this coin: on the exchange
+    // two trades on one coin merge into a single position, so skip it and let
+    // the scan try the next coin.
+    if (risk.symbolBusy) {
+      const reason = `${cycleSymbol} already has an open trade or order (another bot) — skipped`;
+      this.rejectCandidate(bot, cycleSymbol, index, reason, "risk");
+      return { status: "CONTINUE", reason };
+    }
     const riskSnapshotTs = new Date().toISOString();
     // Log detailed risk snapshot metadata for traceability across candidates
     if (scanId) console.log(`[AUTO SCAN] scanId=${scanId} botId=${bot.id} userId=${bot.userId} candidate=${index} symbol=${cycleSymbol} riskSnapshotTs=${riskSnapshotTs} decision_approved=${risk.decision.approved} positionSize=${risk.decision.positionSize}`);
@@ -662,7 +698,7 @@ export class AnalysisCycleRunner {
     return message;
   }
 
-  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number }> {
+  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number; symbolBusy: boolean }> {
     const [wallet, exchangePositions, openOrders, daily] = await Promise.all([
       this.deps.client.getWalletSnapshot(bot.userId).catch(() => null),
       this.deps.client.getPositions(bot.userId).catch(() => []),
@@ -684,6 +720,9 @@ export class AnalysisCycleRunner {
     const allocation = effectiveAllocation(Number(config.walletPercent) || 0, balance);
     const walletPercent = isPercent ? allocation.effectivePct : config.walletPercent;
     const allocatedCapital = isPercent ? allocation.amount : fixedCapital;
+    if (isPercent) {
+      console.log(`[scan] wallet-% bot ${bot.id}: ${walletAvailable ?? 0} USDT free in the wallet now → this cycle uses ${allocatedCapital.toFixed(4)} USDT`);
+    }
     if (isPercent && allocation.capped) {
       console.log(
         `[scan] wallet allocation ${allocation.requestedPct}% capped to ${allocation.effectivePct.toFixed(2)}% (${allocatedCapital.toFixed(4)} USDT of ${balance.toFixed(4)} USDT available) to keep margin headroom`,
@@ -742,6 +781,7 @@ export class AnalysisCycleRunner {
     return {
       decision: this.deps.riskManager.evaluate(input),
       allocatedCapital,
+      symbolBusy: symbolInUse(String(plan.symbol ?? config.symbol), exchangePositions, openOrders),
     };
   }
 

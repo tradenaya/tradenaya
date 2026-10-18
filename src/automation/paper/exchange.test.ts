@@ -250,3 +250,25 @@ describe("request trading mode", () => {
     expect(seen).toBe("LIVE");
   });
 });
+
+describe("paper exchange — several wallet-% bots sharing one wallet", () => {
+  it("each bot's free balance is what the earlier bots' orders left, and a closed trade frees it again", async () => {
+    const { call } = setup(5);
+    const free = async () => Number(body(await call("GET", "/futures/wallet_balance")).base_asset_balances[0].balances.total_available_balance);
+    await call("POST", "/futures/leverage", { symbol: "btcusdt", leverage: 10 });
+    await call("POST", "/futures/leverage", { symbol: "ethusdt", leverage: 10 });
+
+    expect(await free()).toBe(5); // bot 1 sees 5 USDT
+    // bot 1 rests a LIMIT entry: 0.05 × 99 / 10 ≈ 0.495 USDT margin
+    const o1 = body(await call("POST", "/futures/order", { symbol: "btcusdt", side: "BUY", order_type: "LIMIT", quantity: 0.05, price: 99 }));
+    const after1 = await free();
+    expect(after1).toBeCloseTo(5 - 0.495, 6); // bot 2 sizes from ≈4.5
+    // bot 2 rests its own entry on another coin
+    await call("POST", "/futures/order", { symbol: "ethusdt", side: "BUY", order_type: "LIMIT", quantity: 0.07, price: 99 });
+    const after2 = await free();
+    expect(after2).toBeCloseTo(after1 - 0.693, 6); // bot 3 sizes from ≈3.8
+    // bot 1's order goes away → its margin is free again for the next cycle
+    await call("DELETE", "/futures/order", { order_id: o1.order_id });
+    expect(await free()).toBeCloseTo(after2 + 0.495, 6);
+  });
+});
