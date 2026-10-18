@@ -360,3 +360,65 @@ describe("TrailingStopManager — exchange price precision", () => {
     expect(client.placeOrder.mock.calls[0][1].triggerPrice).toBe(1.3471);
   });
 });
+
+describe("TrailingStopManager — exchanges that allow ONE stop per position (CoinSwitch)", () => {
+  const ONE_STOP = new Error("Stop market order already exists for this position");
+  const liveSnap = () =>
+    buildSnapshot({
+      exchangePosition: {
+        symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+        realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      },
+    });
+
+  it("cancels the old stop first, then places the new one", async () => {
+    const client = mockClient({
+      placeOrder: vi.fn().mockRejectedValueOnce(ONE_STOP).mockResolvedValue({ orderId: "new-sl", clientOrderId: null, status: "NEW", raw: {} }),
+    });
+    const store = mockStore();
+    const result = await new TrailingStopManager(client, store).update(liveSnap());
+    expect(result.moved).toBe(true);
+    expect(client.cancelOrder).toHaveBeenCalledWith(1000, "sl-1");
+    // second placement happens AFTER the cancel
+    expect(client.cancelOrder.mock.invocationCallOrder[0]).toBeLessThan(client.placeOrder.mock.invocationCallOrder[1]);
+    expect(store.updateProtection).toHaveBeenCalledWith(1, "new-sl", null);
+    expect(result.move).toMatchObject({ oldOrderId: "sl-1", oldOrderCancelled: true, newOrderId: "new-sl" });
+  });
+
+  it("puts the old stop back when the new stop cannot be placed", async () => {
+    const client = mockClient({
+      placeOrder: vi.fn()
+        .mockRejectedValueOnce(ONE_STOP)
+        .mockRejectedValueOnce(new Error("busy")).mockRejectedValueOnce(new Error("busy")).mockRejectedValueOnce(new Error("busy"))
+        .mockResolvedValue({ orderId: "restored-sl", clientOrderId: null, status: "NEW", raw: {} }),
+    });
+    const store = mockStore();
+    const result = await new TrailingStopManager(client, store).update(liveSnap());
+    expect(result.moved).toBe(false);
+    expect(result.critical).toBeFalsy();
+    expect(result.failure).toMatch(/restored the stop at 98.5/);
+    expect(client.placeOrder.mock.calls.at(-1)![1].triggerPrice).toBe(98.5);
+    expect(store.updateProtection).toHaveBeenCalledWith(1, "restored-sl", null);
+  });
+
+  it("flags CRITICAL if neither the new nor the old stop can be placed", async () => {
+    const client = mockClient({ placeOrder: vi.fn().mockRejectedValueOnce(ONE_STOP).mockRejectedValue(new Error("exchange down")) });
+    const store = mockStore();
+    const result = await new TrailingStopManager(client, store).update(liveSnap());
+    expect(result.critical).toBe(true);
+    expect(result.failure).toMatch(/POSITION HAS NO STOP-LOSS/);
+    expect(store.updateProtection).toHaveBeenCalledWith(1, null, null); // monitor's protection check re-protects next cycle
+  });
+
+  it("keeps the old stop if it cannot be cancelled", async () => {
+    const client = mockClient({
+      placeOrder: vi.fn().mockRejectedValueOnce(ONE_STOP),
+      cancelOrder: vi.fn().mockResolvedValue(false),
+      getOrderStatus: vi.fn().mockResolvedValue({ orderId: "sl-1", clientOrderId: null, status: "OPEN", raw: {} }),
+    });
+    const result = await new TrailingStopManager(client, mockStore()).update(liveSnap());
+    expect(result.moved).toBe(false);
+    expect(result.failure).toMatch(/could not be cancelled; kept it/);
+    expect(client.placeOrder).toHaveBeenCalledTimes(1);
+  });
+});

@@ -32,11 +32,16 @@ export interface TrailingUpdateResult {
   move?: StopMove;
   /** The level the manager tried to move to (set on failure). */
   wanted?: number;
+  /** The position was left without a stop (alert immediately). */
+  critical?: boolean;
 }
 
 type ReplaceResult =
   | { ok: true; oldOrderId: string | null; oldOrderCancelled: boolean | null; newOrderId: string; newOrderStatus: string }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; critical?: boolean };
+
+/** CoinSwitch's rejection when a second stop-market order is placed for a position. */
+const ONE_STOP_PER_POSITION = /stop[\s_-]*market order already exists/i;
 
 function moveOf(placed: Extract<ReplaceResult, { ok: true }>, from: number, to: number, price: number): StopMove {
   return {
@@ -127,7 +132,7 @@ export class TrailingStopManager {
     const placed = await this.replaceStopOrder(position, candidate, snapshot.exchangePosition?.quantity ?? null);
     if (!placed.ok) {
       await this.store.updateTrailing(position.id, current, highest, lowest);
-      return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate };
+      return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate, critical: placed.critical };
     }
 
     await this.store.updateTrailing(position.id, candidate, highest, lowest);
@@ -157,7 +162,7 @@ export class TrailingStopManager {
     if (blocked) return { moved: false, newStopLoss: current, failure: blocked, wanted: candidate };
 
     const placed = await this.replaceStopOrder(position, candidate, snapshot.exchangePosition?.quantity ?? null);
-    if (!placed.ok) return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate };
+    if (!placed.ok) return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate, critical: placed.critical };
     await this.store.updateTrailing(position.id, candidate, position.highestPrice ?? price, position.lowestPrice ?? price);
     return { moved: true, newStopLoss: candidate, move: moveOf(placed, current, candidate, price) };
   }
@@ -195,47 +200,28 @@ export class TrailingStopManager {
     // Size the new stop to what is REALLY open on the exchange, so no part of
     // the position is left without a stop if the local record is behind.
     const quantity = exchangeQuantity != null && exchangeQuantity > 0 ? Math.abs(exchangeQuantity) : position.filledQuantity ?? position.quantity;
-    const opposite = position.side === "BUY" ? "SELL" : "BUY";
 
-    let newOrderId: string | null = null;
-    const newClientOrderId = clientOrderId(`trail_${position.executionId}_${Date.now()}`);
-    try {
-      const order = await this.client.placeOrder(position.userId, {
-        symbol: position.symbol,
-        side: opposite,
-        orderType: "STOP_MARKET",
-        quantity,
-        triggerPrice: newStop,
-        reduceOnly: true,
-        clientOrderId: newClientOrderId,
-      });
-      newOrderId = order.orderId ?? null;
-      if (!newOrderId) throw new Error("replacement SL placed but no order id returned");
-    } catch (error) {
-      return { ok: false, reason: `exchange rejected the new stop at ${newStop}: ${error instanceof Error ? error.message : String(error)}` };
+    // Preferred: place the new stop FIRST, then cancel the old one — the
+    // position is never without a stop.
+    const placed = await this.placeStop(position, newStop, quantity);
+    if ("error" in placed) {
+      // CoinSwitch allows only ONE stop-market order per position ("Stop market
+      // order already exists for this position"), so place-first can never work
+      // there; replace it the only way the exchange allows.
+      if (ONE_STOP_PER_POSITION.test(placed.error) && position.stopLossOrderId) {
+        return this.replaceCancelFirst(position, newStop, quantity);
+      }
+      return { ok: false, reason: `exchange rejected the new stop at ${newStop}: ${placed.error}` };
     }
 
-    let confirmed = false;
-    let statusSeen = "";
-    try {
-      statusSeen = String((await this.client.getOrderStatus(position.userId, newOrderId))?.status ?? "").toUpperCase();
-      confirmed = statusSeen !== "" && !TERMINAL_STATUSES.has(statusSeen);
-    } catch {
-      confirmed = false;
-    }
-    if (!confirmed && !TERMINAL_STATUSES.has(statusSeen)) {
-      // Status unreadable / empty: confirm through the open-orders list instead.
-      const open = await this.client.getOpenOrders(position.userId, position.symbol).catch(() => null);
-      confirmed = Boolean(open?.some((o) => o.orderId === newOrderId));
-    }
-
-    if (!confirmed) {
+    const check = await this.confirmActive(position, placed.orderId);
+    if (!check.confirmed) {
       // The replacement could not be confirmed as active (transient API issue
       // or it filled instantly). Cancel the just-created replacement and keep
       // the existing SL so the position is never left with a phantom/unverified
       // protection and is never left unprotected.
-      await this.client.cancelOrder(position.userId, newOrderId).catch(() => null);
-      return { ok: false, reason: `new stop ${newOrderId} at ${newStop} could not be confirmed active (status "${statusSeen || "unknown"}"); kept the old stop` };
+      await this.client.cancelOrder(position.userId, placed.orderId).catch(() => null);
+      return { ok: false, reason: `new stop ${placed.orderId} at ${newStop} could not be confirmed active (status "${check.status || "unknown"}"); kept the old stop` };
     }
 
     // Only now is it safe to remove the obsolete SL.
@@ -245,15 +231,106 @@ export class TrailingStopManager {
       oldOrderCancelled = Boolean(await this.client.cancelOrder(position.userId, oldOrderId).catch(() => false));
       this.recordProtective("STOP_MARKET", position, oldOrderId, "CANCELLED", position.stopLoss).catch(() => null);
     }
+    await this.adoptStop(position, placed, newStop, quantity);
+    return { ok: true, oldOrderId, oldOrderCancelled, newOrderId: placed.orderId, newOrderStatus: check.status || "OPEN" };
+  }
 
-    this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);
-    await this.store.updateProtection(position.id, newOrderId, position.takeProfitOrderId);
+  /**
+   * Replacement for exchanges that allow only one stop per position: cancel the
+   * old stop, confirm it is gone, then place the new one straight away (retried).
+   * If the new stop still cannot be placed, the OLD stop is put back at once;
+   * if even that fails the result is flagged critical so the monitor alerts and
+   * its protection check re-protects the position on the next cycle.
+   */
+  private async replaceCancelFirst(position: PositionRecord, newStop: number, quantity: number | null): Promise<ReplaceResult> {
+    const oldOrderId = position.stopLossOrderId as string;
+    const oldStop = position.stopLoss;
+
+    const cancelled = await this.client.cancelOrder(position.userId, oldOrderId).catch(() => false);
+    if (!cancelled) {
+      const still = await this.confirmActive(position, oldOrderId);
+      if (still.confirmed || still.status === "") {
+        return { ok: false, reason: `exchange allows one stop per position and the old stop ${oldOrderId} could not be cancelled; kept it at ${oldStop}` };
+      }
+    }
+    this.recordProtective("STOP_MARKET", position, oldOrderId, "CANCELLED", oldStop).catch(() => null);
+
+    let lastError = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const placed = await this.placeStop(position, newStop, quantity);
+      if ("error" in placed) {
+        lastError = placed.error;
+        continue;
+      }
+      const check = await this.confirmActive(position, placed.orderId);
+      if (check.confirmed) {
+        await this.adoptStop(position, placed, newStop, quantity);
+        return { ok: true, oldOrderId, oldOrderCancelled: true, newOrderId: placed.orderId, newOrderStatus: check.status || "OPEN" };
+      }
+      lastError = `new stop ${placed.orderId} not confirmed (status "${check.status || "unknown"}")`;
+    }
+
+    // The new stop failed — put the old one back immediately.
+    if (oldStop != null) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const restored = await this.placeStop(position, oldStop, quantity);
+        if (!("error" in restored)) {
+          await this.adoptStop(position, restored, oldStop, quantity);
+          return { ok: false, reason: `could not place the new stop at ${newStop} (${lastError}); restored the stop at ${oldStop}` };
+        }
+      }
+    }
+    await this.store.updateProtection(position.id, null, position.takeProfitOrderId);
+    position.stopLossOrderId = null;
+    return {
+      ok: false,
+      critical: true,
+      reason: `POSITION HAS NO STOP-LOSS: the old stop was cancelled but neither the new stop at ${newStop} nor the old one at ${oldStop} could be placed (${lastError}) — emergency protection will re-place it`,
+    };
+  }
+
+  private async placeStop(position: PositionRecord, triggerPrice: number, quantity: number | null): Promise<{ orderId: string; clientOrderId: string } | { error: string }> {
+    const clientId = clientOrderId(`trail_${position.executionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    try {
+      const order = await this.client.placeOrder(position.userId, {
+        symbol: position.symbol,
+        side: position.side === "BUY" ? "SELL" : "BUY",
+        orderType: "STOP_MARKET",
+        quantity,
+        triggerPrice,
+        reduceOnly: true,
+        clientOrderId: clientId,
+      });
+      if (!order.orderId) return { error: "stop placed but no order id returned" };
+      return { orderId: order.orderId, clientOrderId: clientId };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Confirm an order is live: by its status, or (when unreadable) by the open-orders list. */
+  private async confirmActive(position: PositionRecord, orderId: string): Promise<{ confirmed: boolean; status: string }> {
+    let status = "";
+    try {
+      status = String((await this.client.getOrderStatus(position.userId, orderId))?.status ?? "").toUpperCase();
+      if (status !== "" && !TERMINAL_STATUSES.has(status)) return { confirmed: true, status };
+    } catch {
+      status = "";
+    }
+    if (TERMINAL_STATUSES.has(status)) return { confirmed: false, status };
+    const open = await this.client.getOpenOrders(position.userId, position.symbol).catch(() => null);
+    return { confirmed: Boolean(open?.some((o) => o.orderId === orderId)), status };
+  }
+
+  /** Make a confirmed stop the position's stop everywhere (DB position + execution record + history). */
+  private async adoptStop(position: PositionRecord, placed: { orderId: string; clientOrderId: string }, stop: number, quantity: number | null): Promise<void> {
+    this.recordProtective("STOP_MARKET", position, placed.orderId, "OPEN", stop, quantity).catch(() => null);
+    await this.store.updateProtection(position.id, placed.orderId, position.takeProfitOrderId);
     // Keep the execution record in step. Without this the monitor's snapshot
     // sync copied the ORIGINAL stop id back onto the position, so the next
     // trail cancelled the wrong order and left duplicate stops resting.
-    await this.onStopReplaced?.(position, { orderId: newOrderId, clientOrderId: newClientOrderId, status: "OPEN" }).catch(() => null);
-    position.stopLossOrderId = newOrderId;
-    return { ok: true, oldOrderId, oldOrderCancelled, newOrderId, newOrderStatus: statusSeen || "OPEN" };
+    await this.onStopReplaced?.(position, { orderId: placed.orderId, clientOrderId: placed.clientOrderId, status: "OPEN" }).catch(() => null);
+    position.stopLossOrderId = placed.orderId;
   }
 
   /** Best-effort persistence of protective SL orders so history survives sub-account unavailability. */

@@ -278,6 +278,12 @@ export class PaperExchange {
         if (side === "SELL" && (order.triggerPrice as number) >= price) throw new Error("Stop price would trigger immediately");
         if (side === "BUY" && (order.triggerPrice as number) <= price) throw new Error("Stop price would trigger immediately");
       }
+      // CoinSwitch rule: only one stop-market order per position. Enforced
+      // here too, so paper trading exercises the same stop-replacement path.
+      if (orderType === "STOP_MARKET") {
+        const open = await this.store.listOrders(userId, { status: "OPEN", symbol });
+        if (open.some((o) => o.orderType === "STOP_MARKET")) throw new Error("Stop market order already exists for this position");
+      }
       if (orderType === "TAKE_PROFIT_MARKET") {
         if (side === "SELL" && (order.triggerPrice as number) <= price) throw new Error("Take-profit price would trigger immediately");
         if (side === "BUY" && (order.triggerPrice as number) >= price) throw new Error("Take-profit price would trigger immediately");

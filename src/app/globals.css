@@ -186,6 +186,30 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Slim themed scrollbars — gold accent on dark track, everywhere (page,
+   sidebar, tables, dialogs). In @layer base so components that hide their
+   scrollbar (e.g. .mobile-tabs) still win. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(201, 154, 88, 0.35) rgba(201, 154, 88, 0.06);
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(201, 154, 88, 0.3);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 154, 88, 0.5);
+  }
+}
+
 /* Mobile tab navigation styles — in @layer so Tailwind responsive utilities
    (lg:hidden, lg:block) still work on desktop. */
 @layer components {
