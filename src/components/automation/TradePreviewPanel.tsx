@@ -102,7 +102,8 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
           />
           <PreviewRow
             label="Risk status"
-            value={riskCompatible ? "✅ Within limit" : "❌ Exceeds limit"}
+            value={riskCompatible ? "Within limit" : "Exceeds limit"}
+            icon={riskCompatible ? <CheckCircle2 size={13} className="text-emerald-400" /> : <XCircle size={13} className="text-red-400" />}
             danger={!riskCompatible}
           />
         </PreviewSection>
@@ -148,9 +149,11 @@ function PreviewRow({
   accent,
   danger,
   positive,
+  icon,
 }: {
   label: string;
   value: string;
+  icon?: React.ReactNode;
   accent?: boolean;
   danger?: boolean;
   positive?: boolean;
@@ -166,7 +169,10 @@ function PreviewRow({
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`text-right tabular-nums ${valueClass}`}>{value}</span>
+      <span className={`inline-flex items-center justify-end gap-1 text-right tabular-nums ${valueClass}`}>
+        {icon}
+        {value}
+      </span>
     </div>
   );
 }

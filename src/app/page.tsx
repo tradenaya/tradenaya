@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TradenayaLogo } from "@/components/brand/TradenayaLogo";
+import { Bot, IdCard, KeyRound, Radar, ShieldCheck, Activity, Wallet } from "lucide-react";
 
 export const metadata = {
   title: "TRADENAYA — Trading ka naya tareeka",
@@ -65,21 +66,21 @@ const steps = [
 
 const prerequisites = [
   {
-    icon: "🪪",
+    icon: <IdCard size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Complete KYC on CoinSwitch",
     body: "Verify your identity on CoinSwitch — PAN card, Aadhaar and a selfie. Without KYC approval, futures trading and deposits will not be enabled on your account.",
     link: "https://coinswitch.co",
     linkLabel: "Start KYC on CoinSwitch",
   },
   {
-    icon: "💳",
+    icon: <Wallet size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Deposit funds into your wallet",
     body: "Add funds to your CoinSwitch wallet via UPI, bank transfer (NEFT/IMPS/RTGS), or net banking. The balance you hold is what the bots will use for trading — deposit only what you are comfortable risking.",
     link: "https://coinswitch.co",
     linkLabel: "Deposit on CoinSwitch",
   },
   {
-    icon: "🔗",
+    icon: <KeyRound size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Generate API keys",
     body: "In CoinSwitch PRO → Profile → API Trading, generate a key pair. Copy both the API key and secret — they are shown only once. You will paste them into Tradenaya during the connect step.",
     link: "https://coinswitch.co/pro/profile?section=api-trading",
@@ -89,22 +90,22 @@ const prerequisites = [
 
 const features = [
   {
-    icon: "⊚",
+    icon: <Bot size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Automated 24/7 trading",
     body: "Strategies keep scanning and trading even while you sleep. No screens to watch, no FOMO, no emotional decisions.",
   },
   {
-    icon: "◈",
+    icon: <Radar size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Smart auto-selection",
     body: "The engine scores fresh market data across every symbol and picks the setup with the strongest signal at the right moment.",
   },
   {
-    icon: "⌁",
+    icon: <ShieldCheck size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Built-in risk controls",
     body: "Live liquidation-distance checks, position-size rules and safety gates protect your capital on every single trade.",
   },
   {
-    icon: "✦",
+    icon: <Activity size={26} strokeWidth={1.5} aria-hidden="true" />,
     title: "Live market intelligence",
     body: "Clean, real-time candle and ticker data powers every analysis cycle — so decisions are made on fresh data, never stale prices.",
   },
@@ -486,9 +487,15 @@ export default function Home() {
         }
         .feat-icon {
           color: var(--gold);
-          font-size: 24px;
-          display: block;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
           margin-bottom: 16px;
+          border: 1px solid rgba(201, 154, 88, .28);
+          border-radius: 12px;
+          background: rgba(201, 154, 88, .07);
         }
         .feat h3 {
           margin: 0 0 10px;
@@ -649,9 +656,15 @@ export default function Home() {
         }
         .prereq-icon {
           color: var(--gold);
-          font-size: 26px;
-          display: block;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
           margin-bottom: 16px;
+          border: 1px solid rgba(201, 154, 88, .28);
+          border-radius: 12px;
+          background: rgba(201, 154, 88, .07);
         }
         .prereq h3 {
           margin: 0 0 10px;
