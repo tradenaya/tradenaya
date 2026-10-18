@@ -13,6 +13,7 @@ import { closedCandles } from "@/automation/indicators/candle-resampler";
 import { passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
 import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
 import { STOP_ATR, analyzeBreakout } from "@/automation/strategy/trend-breakout";
+import { isCryptoSymbol, nonCryptoSymbols } from "./crypto-universe";
 import {
   LEVERAGE_UNSAFE,
   resolveLeverage,
@@ -90,6 +91,8 @@ export interface AutoBestSelectorDeps {
   };
   /** Override for the ticker universe provider (used in tests). */
   fetchEligibleCoins?: (apiKey: string, apiSecret: string) => Promise<EligibleCoin[]>;
+  /** Override for the non-crypto symbol list (used in tests). */
+  nonCryptoSymbols?: () => Promise<Set<string>>;
 }
 
 const num = (value: unknown): number | undefined => {
@@ -247,8 +250,14 @@ export class AutoBestSelector {
       return done();
     }
 
+    // Crypto only: gold / oil / tokenized stocks & ETFs are dropped BEFORE the
+    // top-by-volume cut, so the scan still looks at the 10 biggest real coins.
+    const nonCrypto = await (this.deps.nonCryptoSymbols ?? nonCryptoSymbols)();
+    const cryptoOnly = eligible.filter((c) => isCryptoSymbol(c.symbol, nonCrypto));
+    const skipped = eligible.length - cryptoOnly.length;
+    if (skipped > 0) console.log(`[AUTO BEST] NON_CRYPTO_SKIPPED count=${skipped}`);
     const universe = (
-      config.coinUniverse === "MAJORS" ? eligible.filter((c) => MAJOR_COINS.includes(c.symbol.toUpperCase())) : eligible
+      config.coinUniverse === "MAJORS" ? cryptoOnly.filter((c) => MAJOR_COINS.includes(c.symbol.toUpperCase())) : cryptoOnly
     ).slice(0, AUTO_SELECTION_UNIVERSE_SIZE);
     for (const coin of universe) {
       console.log(

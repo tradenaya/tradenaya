@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isTelegramConfigured, sendTelegram, sendTelegramAsync } from "./telegram";
+import { isTelegramConfigured, sendTelegram, sendTelegramAsync, telegramStopMoved } from "./telegram";
 
 interface MockOptions extends Record<string, unknown> {
   hostname?: string;
@@ -232,5 +232,20 @@ describe("telegram IPv4 HTTPS delivery", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(state.calls).toHaveLength(1);
+  });
+});
+describe("telegramStopMoved", () => {
+  it("shows the move, the money it locks and % of your money", () => {
+    // HYPE short: entry 82.615, 0.83 qty, 16x → your money ≈ 4.2855 USDT
+    const text = telegramStopMoved({
+      symbol: "hypeusdt", side: "SELL", entry: 82.615, quantity: 0.83, leverage: 16,
+      from: 84.0823, to: 82.078, price: 79.1, rule: "10-candle high", takeProfit: 67.9416,
+    });
+    expect(text).toContain("STOP-LOSS MOVED");
+    expect(text).toContain("HYPEUSDT · SHORT");
+    expect(text).toContain("84.0823 → <b>82.078</b> (-0.65% from entry)");
+    expect(text).toContain("If stop hits now: +0.4457 USDT (+10.4% of your money)");
+    expect(text).toContain("Before this move: -1.2179 USDT (-28.42% of your money)");
+    expect(text).toContain("Rule: 10-candle high");
   });
 });

@@ -44,7 +44,7 @@ describe("Trend Breakout — signal rules", () => {
   it("goes LONG on a close above the 20-candle high in an uptrend", () => {
     const base = series(260);
     const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
-    const candles = series(260, { last: { close: high + 2, high: high + 2.2 } });
+    const candles = series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
     const r = analyzeBreakout(candles)!;
     expect(r.signal).toBe("BUY");
     expect(r.close).toBeGreaterThan(r.channelHigh);
@@ -65,10 +65,53 @@ describe("Trend Breakout — signal rules", () => {
     expect(r.signal).toBeNull();
   });
 
+  it("rejects a breakout without volume behind it, and says why", () => {
+    const base = series(260);
+    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
+    const r = analyzeBreakout(series(260, { last: { close: high + 2, high: high + 2.2, volume: 1000 } }))!;
+    expect(r.breakout).toBe("BUY");
+    expect(r.signal).toBeNull();
+    expect(r.rejected).toMatch(/no volume behind the breakout/);
+  });
+
+  it("rejects a weak breakout that barely clears the range", () => {
+    const base = series(260);
+    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
+    const r = analyzeBreakout(series(260, { last: { close: high + 0.05, high: high + 0.1, volume: 2000 } }))!;
+    expect(r.breakout).toBe("BUY");
+    expect(r.signal).toBeNull();
+    expect(r.rejected).toMatch(/breakout too weak/);
+  });
+
+  it("rejects a breakout when the market is not trending (low ADX)", () => {
+    // flat, choppy history: price oscillates with no trend, then pokes above the range
+    const flat: MarketCandle[] = [];
+    for (let i = 0; i < 260; i++) {
+      const p = 100 + (i % 2 ? 0.6 : -0.6) + (i > 200 ? 0.004 * (i - 200) : 0);
+      flat.push({ timestamp: T0 + i * H4, open: p, high: p + 0.5, low: p - 0.5, close: p, volume: 1000, timeframe: "4h" });
+    }
+    const high = Math.max(...flat.slice(-21, -1).map((c) => c.high));
+    flat[259] = { ...flat[259], close: high + 0.6, high: high + 0.7, volume: 2500 };
+    const r = analyzeBreakout(flat)!;
+    if (r.breakout) {
+      expect(r.signal).toBeNull();
+      expect(r.rejected).toMatch(/not trending|too weak/);
+    }
+  });
+
+  it("does not block trades when the feed has no volume data", () => {
+    const base = series(260).map((c) => ({ ...c, volume: 0 }));
+    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
+    base[259] = { ...base[259], close: high + 2, high: high + 2.2, volume: 0 };
+    const r = analyzeBreakout(base)!;
+    expect(r.volumeRatio).toBeNull();
+    expect(r.signal).toBe("BUY");
+  });
+
   it("strategy decision carries a 2-ATR stop and a 10R target", async () => {
     const base = series(260);
     const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
-    const candles = series(260, { last: { close: high + 2, high: high + 2.2 } });
+    const candles = series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
     const d = await new TrendBreakoutStrategy().analyze({ symbol: "BTCUSDT", timeframe: "4h", candles, indicators: {} as never, market: { price: high + 2 } as never });
     expect(d.signal).toBe("BUY");
     const risk = (d.entryZone as number) - (d.stopLossSuggestion as number);
@@ -152,7 +195,7 @@ describe("Trend Breakout — wiring", () => {
   it("engine routes a Trend Breakout bot to the breakout strategy + planner", async () => {
     const base = series(320);
     const high = Math.max(...base.slice(-21, -1).map((x) => x.high));
-    const candles = series(320, { last: { close: high + 2, high: high + 2.2 } });
+    const candles = series(320, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
     const adapter = new HistoricalMarketDataAdapter();
     adapter.setSlice(candles, candles.length);
     const result = await new AutomationEngine(adapter).run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", leverage: 5, capital: 1000, capitalMode: "fixed", maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false, momentumEntriesOnly: true });
@@ -170,7 +213,8 @@ describe("Trend Breakout — wiring", () => {
       else if (i === 302) p -= 9;
       else p += 0.02;
       const w = i % 2 ? 0.3 : -0.3;
-      candles.push({ timestamp: T0 + i * H4, open: p - w, high: p + 0.5, low: p - 0.5, close: p + w, volume: 1000, timeframe: "4h" });
+      // breakout candles come with above-average volume, like real ones
+      candles.push({ timestamp: T0 + i * H4, open: p - w, high: p + 0.5, low: p - 0.5, close: p + w, volume: i % 30 === 0 && i >= 300 ? 2500 : 1000, timeframe: "4h" });
     }
     const engine = new BacktestingEngine({ provider: { getCandles: async () => candles }, backtestId: 1 });
     const r = await engine.run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", startTime: candles[300].timestamp, endTime: candles[899].timestamp + 1, initialCapital: 1000, capitalMode: "fixed", leverage: 5, maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false });

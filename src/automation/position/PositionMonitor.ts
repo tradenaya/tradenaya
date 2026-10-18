@@ -1,12 +1,12 @@
 import { ExecutionStore } from "@/automation/executor/store";
 import type { ExecutionNotification } from "@/automation/executor/types";
-import type { CloseDetectionResult, PositionManagerConfig, PositionRecord, PositionSnapshot, PositionSyncSummary } from "./PositionManagerTypes";
+import type { CloseDetectionResult, PositionManagerConfig, PositionRecord, PositionSnapshot, PositionSyncSummary, ProtectionValidationResult } from "./PositionManagerTypes";
 import { PositionStateManager } from "./PositionStateManager";
 import { PositionPnLCalculator } from "./PositionPnLCalculator";
 import { ProtectionValidator } from "./ProtectionValidator";
 import { TPMonitor } from "./TPMonitor";
 import { SLMonitor } from "./SLMonitor";
-import { TrailingStopManager } from "./TrailingStopManager";
+import { TrailingStopManager, type StopMove } from "./TrailingStopManager";
 import { PositionRecovery } from "./PositionRecovery";
 import { PositionStore } from "./PositionStore";
 import { ProtectiveOrdersService } from "@/automation/executor/services/protective-orders";
@@ -27,10 +27,11 @@ import {
   telegramManualClose,
   telegramPositionClosed,
   telegramUnprotected,
+  telegramStopMoved,
 } from "@/lib/telegram";
 import { usdt } from "@/lib/currency/usdt-text";
 import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
-import { channelStop } from "@/automation/strategy/trend-breakout";
+import { BREAKEVEN_BUFFER, EXIT_LOOKBACK, TRAIL_ARM_R, channelStop } from "@/automation/strategy/trend-breakout";
 import { closedCandles } from "@/automation/indicators/candle-resampler";
 import { withBotMode } from "@/automation/paper/mode";
 import { runWithTradingMode } from "@/automation/paper/mode";
@@ -40,6 +41,8 @@ const ENTRY_VISIBILITY_GRACE_MS = 10 * 60_000;
 const ENTRY_VALIDITY_INTERVAL_MS = 60_000;
 /** How often a Trend Breakout position re-checks its candle-channel trailing stop. */
 const CHANNEL_TRAIL_INTERVAL_MS = 5 * 60_000;
+/** A protective order in one of these states is no longer protecting the position. */
+const PROTECTIVE_DONE_STATUSES = new Set(["EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELED", "CANCELLATION_RAISED", "REJECTED", "EXPIRED", "PARTIALLY_EXECUTED"]);
 /** Bot strategy/timeframe lookups are cached this long (configs only change while paused). */
 const BOT_PROFILE_TTL_MS = 10 * 60_000;
 /** How often the "waiting for entry to fill" status is published to the live trace. */
@@ -60,8 +63,11 @@ export class PositionMonitor {
   private readonly protective: ProtectiveOrdersService;
   private readonly lastValidityCheck = new Map<number, number>();
   private readonly lastChannelTrail = new Map<number, number>();
+  private readonly planStops = new Map<number, number | null>();
   private readonly botProfiles = new Map<number, { strategy: string | null; timeframeMinutes: number; at: number }>();
   private readonly lastWaitingPublish = new Map<number, number>();
+  /** Last logged trailing failure per position, so a repeating failure is logged once an hour, not every 5 minutes. */
+  private readonly lastTrailFailure = new Map<number, { reason: string; at: number }>();
 
   private timer: NodeJS.Timeout | null = null;
   private processing = new Set<number>();
@@ -574,7 +580,7 @@ export class PositionMonitor {
       return;
     }
 
-    const protection = await this.protection.validate(snapshot);
+    const protection = await this.confirmProtection(snapshot, await this.protection.validate(snapshot));
     const hasLivePosition = Boolean(snapshot.exchangePosition);
 
     await this.detectPartialExecution(snapshot);
@@ -868,6 +874,15 @@ export class PositionMonitor {
     }
   }
 
+  /** The stop the trade was planned with (the execution record keeps it; trailing only changes the position). */
+  private async planStopOf(position: PositionRecord): Promise<number | null> {
+    if (this.planStops.has(position.id)) return this.planStops.get(position.id) ?? null;
+    const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
+    const stop = execution?.stopLoss ?? null;
+    if (stop != null) this.planStops.set(position.id, stop);
+    return stop ?? (position.trailingActivated ? null : position.stopLoss);
+  }
+
   /** Strategy + timeframe of the bot that owns a position (cached). */
   private async botProfile(botId: number): Promise<{ strategy: string | null; timeframeMinutes: number }> {
     const cached = this.botProfiles.get(botId);
@@ -887,9 +902,13 @@ export class PositionMonitor {
   }
 
   /**
-   * Trend Breakout exits: the stop trails the low (long) / high (short) of the
-   * last 10 closed candles, so winners keep running and the trade closes when
-   * the trend breaks. Replaces the %-distance trailing for these positions.
+   * Trend Breakout exits. The ORIGINAL stop is kept until the trade has been
+   * TRAIL_ARM_R (1.5R) in profit; from then on the stop moves to entry + costs
+   * (the trade can no longer lose) and trails the low (long) / high (short) of
+   * the last 10 closed candles, so winners keep running and the trade closes
+   * when the trend breaks. Trailing from the very first candle stopped out
+   * trades that later ran (replay: avg R 0.18 → 0.36 with this rule + the
+   * entry filters). Replaces the %-distance trailing for these positions.
    */
   private async syncChannelTrailing(snapshot: PositionSnapshot, timeframeMinutes: number): Promise<void> {
     const { position } = snapshot;
@@ -897,16 +916,58 @@ export class PositionMonitor {
     if (now - (this.lastChannelTrail.get(position.id) ?? 0) < CHANNEL_TRAIL_INTERVAL_MS) return;
     this.lastChannelTrail.set(position.id, now);
 
+    const isLong = position.side === "BUY";
+    const entry = snapshot.exchangePosition?.entryPrice ?? position.entryPrice;
+    const price = snapshot.currentPrice;
+    const planStop = await this.planStopOf(position);
+    if (!entry || !planStop || !price || !(Math.abs(entry - planStop) > 0)) return;
+    const risk = Math.abs(entry - planStop);
+
     const candles = await serverMarketDataService
       .getCandles(position.userId, position.symbol, String(timeframeMinutes), { limit: 30 })
       .catch(() => []);
     const closed = closedCandles(candles, timeframeMinutes, now);
-    const level = channelStop(position.side === "BUY" ? "BUY" : "SELL", closed, null);
-    if (level == null) return;
 
-    const result = await this.trailing.moveStopTo(snapshot, level);
+    // Best price since the trade opened: stored extremes, candles that started
+    // after the fill, and the live price.
+    const openedAt = new Date(position.createdAt).getTime();
+    const since = candles.filter((c) => c.timestamp >= openedAt);
+    const highest = Math.max(position.highestPrice ?? entry, price, ...since.map((c) => c.high));
+    const lowest = Math.min(position.lowestPrice ?? entry, price, ...since.map((c) => c.low));
+    if (highest !== position.highestPrice || lowest !== position.lowestPrice) {
+      await this.store.updateTrailing(position.id, position.stopLoss, highest, lowest).catch(() => null);
+      position.highestPrice = highest;
+      position.lowestPrice = lowest;
+    }
+    const bestR = (isLong ? highest - entry : entry - lowest) / risk;
+
+    if (!position.trailingActivated) {
+      if (bestR < TRAIL_ARM_R) return; // keep the original stop until the trade has proven itself
+      await this.store.markTrailingActivated(position.id).catch(() => null);
+      position.trailingActivated = true;
+      await this.log(position, "TRAILING_ARMED", `trade reached +${bestR.toFixed(2)}R (${usdt(isLong ? highest : lowest)}) — stop now moves to entry and trails the last ${EXIT_LOOKBACK} candles`, {
+        bestR, best: isLong ? highest : lowest, entry, planStop, armAtR: TRAIL_ARM_R,
+      });
+    }
+
+    // The tightest protective level of: breakeven (entry + costs) and the channel.
+    const breakeven = entry * (1 + (isLong ? 1 : -1) * BREAKEVEN_BUFFER);
+    const channel = channelStop(isLong ? "BUY" : "SELL", closed, null);
+    const protective = (l: number) => (isLong ? l < price : l > price);
+    const candidates = [
+      { level: breakeven, rule: `breakeven (+${TRAIL_ARM_R}R reached)` },
+      ...(channel != null ? [{ level: channel, rule: `10-candle ${isLong ? "low" : "high"}` }] : []),
+    ]
+      .filter((c) => protective(c.level))
+      .sort((a, b) => (isLong ? b.level - a.level : a.level - b.level));
+    const pick = candidates[0];
+    if (!pick) return;
+
+    const result = await this.trailing.moveStopTo(snapshot, pick.level);
+    await this.logTrailFailure(position, result.failure, result.wanted);
     if (result.moved) {
-      await this.log(position, "TRAILING_MOVED", `stop loss trailed to the 10-candle ${position.side === "BUY" ? "low" : "high"} ${usdt(result.newStopLoss)}`);
+      const rule = pick.rule;
+      await this.logStopMove(position, snapshot, rule, result.move, `stop loss trailed to the ${rule} ${usdt(result.newStopLoss)}`);
       if (position.state === "PROTECTED") {
         await this.stateManager.transition(position.id, "PROTECTED", "TRAILING");
       }
@@ -924,12 +985,97 @@ export class PositionMonitor {
     if (!position.trailingEnabled) return;
 
     const result = await this.trailing.update(snapshot);
+    await this.logTrailFailure(position, result.failure, result.wanted);
     if (result.moved) {
-      await this.log(position, "TRAILING_MOVED", `stop loss moved to ${usdt(result.newStopLoss)}`);
+      const rule = `${position.trailingDistancePct ?? 2}% trailing stop`;
+      await this.logStopMove(position, snapshot, rule, result.move, `stop loss moved to ${usdt(result.newStopLoss)}`);
       if (position.state === "PROTECTED") {
         await this.stateManager.transition(position.id, "PROTECTED", "TRAILING");
       }
     }
+  }
+
+  /**
+   * The open-orders list is not authoritative: CoinSwitch sometimes returns it
+   * without the stop / take-profit (empty or partial page), which raised false
+   * "UNPROTECTED" alerts and placed duplicate protection. Before treating a
+   * known protective order as missing, ask the exchange for that order by id;
+   * if it is still live, the position IS protected.
+   */
+  private async confirmProtection(snapshot: PositionSnapshot, result: ProtectionValidationResult): Promise<ProtectionValidationResult> {
+    if (result.valid || snapshot.openOrdersReadFailed) return result;
+    const { position } = snapshot;
+    const stillLive = async (orderId: string | null): Promise<boolean | null> => {
+      if (!orderId) return false;
+      try {
+        const status = String((await this.client.getOrderStatus(position.userId, orderId))?.status ?? "").toUpperCase();
+        if (!status) return null;
+        return !PROTECTIVE_DONE_STATUSES.has(status);
+      } catch {
+        return null; // unknown: don't claim missing on a failed read
+      }
+    };
+    let hasStopLoss = result.hasStopLoss;
+    let hasTakeProfit = result.hasTakeProfit;
+    let unreadable = false;
+    if (!hasStopLoss && position.stopLoss) {
+      const live = await stillLive(position.stopLossOrderId);
+      if (live === null) unreadable = true;
+      hasStopLoss = live === true;
+    }
+    if (!hasTakeProfit && position.takeProfit) {
+      const live = await stillLive(position.takeProfitOrderId);
+      if (live === null) unreadable = true;
+      hasTakeProfit = live === true;
+    }
+    if (unreadable && !(hasStopLoss && hasTakeProfit)) {
+      // Could not verify: treat like a failed orders read (retry next cycle, no alarm, no re-placing).
+      snapshot.openOrdersReadFailed = true;
+    }
+    const issues = result.issues.filter(
+      (i) => !(hasStopLoss && i.startsWith("stop loss order")) && !(hasTakeProfit && i.startsWith("take profit order")),
+    );
+    return { valid: hasStopLoss && hasTakeProfit, hasStopLoss, hasTakeProfit, issues };
+  }
+
+  /** Record a stop move with everything that proves it (levels, price, exchange orders) and tell Telegram. */
+  private async logStopMove(position: PositionRecord, snapshot: PositionSnapshot, rule: string, move: StopMove | undefined, message: string): Promise<void> {
+    const entry = snapshot.exchangePosition?.entryPrice ?? position.entryPrice;
+    const quantity = snapshot.exchangePosition?.quantity ?? position.filledQuantity ?? position.quantity;
+    const leverage = snapshot.exchangePosition?.leverage ?? position.leverage;
+    await this.log(position, "TRAILING_MOVED", message, move ? { ...move, rule, entry, quantity, leverage } : { rule });
+    if (!move) return;
+    void dispatchTelegram(`trail:${position.id}:${move.to}`, "STOP_MOVED", telegramStopMoved({
+      symbol: position.symbol,
+      side: position.side,
+      entry,
+      quantity,
+      leverage,
+      from: move.from,
+      to: move.to,
+      price: move.price,
+      rule,
+      takeProfit: position.takeProfit,
+    }));
+  }
+
+  /** A stop that should have moved but didn't is logged (and shown in the live trace), never silent. */
+  private async logTrailFailure(position: PositionRecord, failure: string | undefined, wanted?: number): Promise<void> {
+    if (!failure) {
+      this.lastTrailFailure.delete(position.id);
+      return;
+    }
+    const last = this.lastTrailFailure.get(position.id);
+    if (last && last.reason === failure && Date.now() - last.at < 60 * 60_000) return;
+    this.lastTrailFailure.set(position.id, { reason: failure, at: Date.now() });
+    await this.log(position, "TRAILING_FAILED", failure, { reason: failure, wanted: wanted ?? null, current: position.stopLoss });
+    liveActivityHub.publish({
+      botId: position.botId,
+      userId: position.userId,
+      symbol: position.symbol,
+      phase: "lifecycle",
+      message: `Could not move the stop-loss: ${failure}`,
+    });
   }
 
   private async releaseBot(position: PositionRecord): Promise<void> {
@@ -937,7 +1083,7 @@ export class PositionMonitor {
     await this.botState.updateBotHeartbeat(position.botId, null, new Date().toISOString()).catch(() => null);
   }
 
-  private async log(position: PositionRecord, type: string, message: string): Promise<void> {
+  private async log(position: PositionRecord, type: string, message: string, details?: Record<string, unknown>): Promise<void> {
     await this.store.saveEvent({
       userId: position.userId,
       botId: position.botId,
@@ -945,6 +1091,7 @@ export class PositionMonitor {
       positionId: position.id,
       type,
       message,
+      details: details ?? null,
     });
   }
 

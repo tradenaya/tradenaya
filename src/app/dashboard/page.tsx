@@ -288,7 +288,7 @@ export default function DashboardPage() {
                       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5 text-sm">
                         <div className="flex justify-between"><span className="text-muted-foreground">Size</span><span className="font-medium tabular-nums">{coinQty(p.position_size, p.symbol)}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Entry</span><span className="font-medium tabular-nums">{money(p.avg_entry_price)}</span></div>
-                        <div className="flex justify-between"><span className="text-muted-foreground">Mark</span><span className="font-medium tabular-nums">{money(p.mark_price)}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Mark</span><span className="text-right font-medium tabular-nums">{money(p.mark_price)}{Number(p.avg_entry_price) > 0 && <span className="block text-[11px] font-normal text-muted-foreground">{formatPct(((Number(p.mark_price) - Number(p.avg_entry_price)) / Number(p.avg_entry_price)) * 100)} from entry</span>}</span></div>
                         <div className="flex justify-between col-span-2">
                           <span className="text-muted-foreground">PnL</span>
                           <span className={`font-medium tabular-nums ${up ? "text-emerald-400" : "text-red-400"}`}>

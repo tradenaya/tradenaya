@@ -20,3 +20,4 @@ CREATE TABLE IF NOT EXISTS automation_position_events (
 -- Columns the app adds to older databases (it checks information_schema first;
 -- run a line by hand only if that column is missing):
 -- ALTER TABLE automation_position_events ADD COLUMN symbol VARCHAR(50) NULL;
+-- ALTER TABLE automation_position_events ADD COLUMN details TEXT NULL;   -- see new/08

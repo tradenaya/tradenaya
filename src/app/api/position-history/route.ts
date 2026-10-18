@@ -28,6 +28,10 @@ export async function GET(req: NextRequest) {
     return ok({
       closed: tradesResult.items.map((t) => {
         const investment = t.entryPrice * Math.abs(t.quantity);
+        // Your own money in the trade (margin); returns are shown against it,
+        // the same way the exchange shows ROE.
+        const margin = t.leverage && t.leverage > 0 ? investment / t.leverage : investment;
+        const priceMovePct = t.entryPrice > 0 ? ((t.exitPrice - t.entryPrice) / t.entryPrice) * 100 : 0;
         const upperReason = (t.exitReason ?? "").toUpperCase();
         const isWin = t.netPnl > 0;
         const isLoss = t.netPnl < 0;
@@ -50,10 +54,11 @@ export async function GET(req: NextRequest) {
           commission: t.commission,
           fundingFee: t.fundingFee,
           fees: t.fees,
-          percentage:
-            investment > 0
-              ? ((t.netPnl / investment) * 100)
-              : 0,
+          margin,
+          executionId: t.executionId ?? null,
+          priceMovePct,
+          /** Net P&L as a % of your own money (margin). */
+          percentage: margin > 0 ? (t.netPnl / margin) * 100 : 0,
           exitReason: t.exitReason,
           outcome,
           botName: t.botName,
@@ -81,6 +86,8 @@ export async function GET(req: NextRequest) {
         entryPrice: p.entryPrice,
         currentPrice: p.currentPrice,
         unrealizedPnl: p.unrealizedPnl,
+        quantity: p.filledQuantity ?? p.quantity,
+        margin: p.margin,
         leverage: p.leverage,
         openTime: p.openTime,
         durationMs: p.durationMs,

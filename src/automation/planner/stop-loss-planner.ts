@@ -12,6 +12,13 @@ export interface StopLossPlanner {
  * min-distance floor (prevents premature stop-outs) and never wider than the
  * configured max distance (keeps risk capped).
  */
+/**
+ * Stop placement knobs (one place, so backtests and live use the same values):
+ * the stop sits `bufferAtr` ATRs beyond support / resistance and never closer
+ * than `minAtr` ATRs to the entry.
+ */
+export const STOP_PLACEMENT = { bufferAtr: 0.5, minAtr: 1.35 };
+
 export class DefaultStopLossPlanner implements StopLossPlanner {
   plan(context: PlannerContext, entryPrice: number): { stopLoss: number; reason: string } | null {
     const price = Number(context.currentPrice);
@@ -25,11 +32,11 @@ export class DefaultStopLossPlanner implements StopLossPlanner {
     const maxStopDistancePct = context.config.maxStopDistancePct ?? 0.05;
     const support = context.supportResistance?.support;
     const resistance = context.supportResistance?.resistance;
-    const bufferAtr = atr * 0.5;
+    const bufferAtr = atr * STOP_PLACEMENT.bufferAtr;
 
     // Minimum distance floor: at least the ATR-based volatility distance, but
     // never tighter than the configured minimum stop distance.
-    const minDistance = Math.max(atr * 1.35, price * minStopDistancePct * 1.01);
+    const minDistance = Math.max(atr * STOP_PLACEMENT.minAtr, price * minStopDistancePct * 1.01);
     const maxDistance = Math.max(minDistance, price * maxStopDistancePct);
 
     if (context.strategyDecision.signal === "BUY") {

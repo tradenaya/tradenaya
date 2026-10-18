@@ -359,7 +359,9 @@ export class CoinSwitchClient {
     const params: Record<string, any> = { exchange: "EXCHANGE_2" };
     if (symbol) params.symbol = symbol.toLowerCase();
     const data = await this.call("POST", "/futures/orders/open", params, userId);
-    const rows = this.extractList(data);
+    // An unrecognised response is a FAILED read, not "no open orders" — treating
+    // it as empty made protected positions look unprotected.
+    const rows = this.extractList(data, { strict: true });
     return rows.map((o: any) => ({
       orderId: o.order_id ?? null,
       clientOrderId: o.client_order_id ?? null,
@@ -563,11 +565,16 @@ export class CoinSwitchClient {
     return instrument ?? null;
   }
 
-  private extractList(data: any): any[] {
+  // Exchange rows are loosely typed JSON; callers read their fields directly.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractList(data: unknown, { strict = false }: { strict?: boolean } = {}): any[] {
+    const body = data as { data?: unknown } | null;
+    const inner = body?.data as { positions?: unknown; orders?: unknown } | undefined;
     if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.data?.positions)) return data.data.positions;
-    if (Array.isArray(data?.data?.orders)) return data.data.orders;
+    if (Array.isArray(inner)) return inner;
+    if (Array.isArray(inner?.positions)) return inner.positions;
+    if (Array.isArray(inner?.orders)) return inner.orders;
+    if (strict) throw new Error(`unexpected exchange response shape: ${JSON.stringify(data)?.slice(0, 200)}`);
     return [];
   }
 }

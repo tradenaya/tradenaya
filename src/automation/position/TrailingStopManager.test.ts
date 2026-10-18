@@ -238,86 +238,54 @@ describe("TrailingStopManager — authoritative liquidation-safety gate", () => 
     expect(client.placeOrder).toHaveBeenCalledTimes(1);
   });
 
-  it("missing liquidationPrice: does NOT submit a new SL, keeps the current SL, and does not cancel anything", async () => {
-    // liq=null → no known liquidation boundary → replacement is SKIPPED.
-    const snap = buildSnapshot({
-      exchangePosition: {
-        symbol: "BTCUSDT",
-        side: "BUY",
-        quantity: 0.001,
-        entryPrice: 100,
-        markPrice: 110,
-        unrealizedPnl: null,
-        realizedPnl: null,
-        leverage: 10,
-        positionId: "pos-1",
-        liquidationPrice: null,
-        maintMargin: null,
-        positionMargin: null,
-      },
-    });
-    const result = await manager.update(snap);
-
-    // 1. no new SL placement
-    expect(result.moved).toBe(false);
-    expect(client.placeOrder).not.toHaveBeenCalled();
-    // 2. existing SL remains untouched
-    expect(result.newStopLoss).toBe(98.5);
-    expect(store.updateProtection).not.toHaveBeenCalled();
-    expect(store.updateTrailing).toHaveBeenCalledWith(1, 98.5, 110, 99);
-    // 3. no cancelOrder occurs
-    expect(client.cancelOrder).not.toHaveBeenCalled();
-    // 5. no unprotected gap: nothing placed, nothing cancelled — the incumbent
-    //    stop stays as the only protection.
-    expect(client.placeOrder.mock.calls.length + client.cancelOrder.mock.calls.length).toBe(0);
+  it("missing liquidationPrice: still tightens the stop (tightening moves it AWAY from liquidation)", async () => {
+    // Regression: live trailing stops never moved because CoinSwitch did not
+    // always report a liquidation price and the gate silently skipped the move.
+    const result = await manager.update(buildSnapshot({ exchangePosition: {
+        symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+        realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      } }));
+    expect(result.moved).toBe(true);
+    expect(result.newStopLoss).toBe(104.5);
+    expect(result.failure).toBeUndefined();
+    expect(client.placeOrder).toHaveBeenCalledTimes(1);
+    // still create-new before cancel-old
+    expect(client.placeOrder.mock.invocationCallOrder[0]).toBeLessThan(client.cancelOrder.mock.invocationCallOrder[0]);
   });
 
-  it("resumes normal trailing replacement once a valid liquidationPrice becomes available", async () => {
-    // First tick: liquidation data missing → replacement skipped, current SL kept.
-    const missingSnap = buildSnapshot({
-      exchangePosition: {
-        symbol: "BTCUSDT",
-        side: "BUY",
-        quantity: 0.001,
-        entryPrice: 100,
-        markPrice: 110,
-        unrealizedPnl: null,
-        realizedPnl: null,
-        leverage: 10,
-        positionId: "pos-1",
-        liquidationPrice: null,
-        maintMargin: null,
-        positionMargin: null,
-      },
-    });
-    const skipped = await manager.update(missingSnap);
-    expect(skipped.moved).toBe(false);
-    expect(client.placeOrder).not.toHaveBeenCalled();
+  it("reports WHY a stop move failed when the exchange rejects the new order", async () => {
+    client.placeOrder.mockRejectedValueOnce(new Error("Trigger price is invalid"));
+    const result = await manager.update(buildSnapshot({ exchangePosition: {
+        symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+        realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      } }));
+    expect(result.moved).toBe(false);
+    expect(result.newStopLoss).toBe(98.5);
+    expect(result.failure).toContain("Trigger price is invalid");
+    expect(client.cancelOrder).not.toHaveBeenCalled();
+  });
 
-    // Second tick: authoritative liquidation price now available → normal safe
-    // replacement proceeds (create-new before cancel-old).
-    const validSnap = buildSnapshot({
-      exchangePosition: {
-        symbol: "BTCUSDT",
-        side: "BUY",
-        quantity: 0.001,
-        entryPrice: 100,
-        markPrice: 110,
-        unrealizedPnl: null,
-        realizedPnl: null,
-        leverage: 10,
-        positionId: "pos-1",
-        liquidationPrice: 95,
-        maintMargin: null,
-        positionMargin: null,
-      },
-    });
-    const resumed = await manager.update(validSnap);
-    expect(resumed.moved).toBe(true);
-    expect(resumed.newStopLoss).toBe(104.5);
-    expect(client.placeOrder).toHaveBeenCalledTimes(1);
-    expect(client.placeOrder.mock.invocationCallOrder[0])
-      .toBeLessThan(client.cancelOrder.mock.invocationCallOrder[0]);
+  it("confirms the new stop through open orders when its status cannot be read", async () => {
+    client.getOrderStatus.mockResolvedValueOnce({ orderId: "new-sl", clientOrderId: null, status: null, raw: {} });
+    (client.getOpenOrders as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{ orderId: "new-sl", clientOrderId: null, status: "OPEN", raw: {} }]);
+    const result = await manager.update(buildSnapshot({ exchangePosition: {
+        symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+        realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      } }));
+    expect(result.moved).toBe(true);
+    expect(client.cancelOrder).toHaveBeenCalledWith(1000, "sl-1"); // old stop removed only after confirmation
+  });
+
+  it("keeps the old stop and explains when the new stop cannot be confirmed at all", async () => {
+    client.getOrderStatus.mockResolvedValueOnce({ orderId: "new-sl", clientOrderId: null, status: "", raw: {} });
+    const result = await manager.update(buildSnapshot({ exchangePosition: {
+        symbol: "BTCUSDT", side: "BUY", quantity: 0.001, entryPrice: 100, markPrice: 110, unrealizedPnl: null,
+        realizedPnl: null, leverage: 10, positionId: "pos-1", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      } }));
+    expect(result.moved).toBe(false);
+    expect(result.failure).toContain("could not be confirmed");
+    expect(client.cancelOrder).toHaveBeenCalledWith(1000, "new-sl"); // the unconfirmed new one is withdrawn
+    expect(client.cancelOrder).not.toHaveBeenCalledWith(1000, "sl-1");
   });
 
   it("never enters the create-new-before-cancel-old sequence when blocked (no unprotected gap)", async () => {
@@ -371,5 +339,24 @@ describe("TrailingStopManager — stop id bookkeeping", () => {
     expect(hook).toHaveBeenCalledTimes(2);
     expect(hook.mock.calls[1][1]).toMatchObject({ orderId: "trail-2", status: "OPEN" });
     expect(position.stopLossOrderId).toBe("trail-2");
+  });
+});
+
+describe("TrailingStopManager — exchange price precision", () => {
+  it("rounds a new stop to the instrument's price precision", async () => {
+    const client = mockClient({ getInstrumentInfo: vi.fn().mockResolvedValue({ price_precision: 4 }) });
+    const manager = new TrailingStopManager(client, mockStore());
+    const position = buildPosition({ side: "SELL", stopLoss: 1.4053, entryPrice: 1.365, symbol: "XRPUSDT" });
+    const snap = buildSnapshot({
+      position,
+      currentPrice: 1.2954,
+      exchangePosition: {
+        symbol: "XRPUSDT", side: "SELL", quantity: 6.9, entryPrice: 1.365, markPrice: 1.2954, unrealizedPnl: null,
+        realizedPnl: null, leverage: 17, positionId: "p", liquidationPrice: null, maintMargin: null, positionMargin: null,
+      },
+    });
+    const result = await manager.moveStopTo(snap, 1.347123456);
+    expect(result.moved).toBe(true);
+    expect(client.placeOrder.mock.calls[0][1].triggerPrice).toBe(1.3471);
   });
 });

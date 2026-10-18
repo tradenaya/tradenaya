@@ -77,7 +77,7 @@ export class TradenayaSmartV1Strategy implements BaseStrategy {
     );
 
     const analysis = runAnalysis(entryView, higherView, mediumView, this.config, report);
-    return this.toDecision(analysis, entryView, entryLabel, timeframes.higher, timeframes.medium, context);
+    return this.toDecision(analysis, entryView, entryLabel, timeframes.higher, timeframes.medium, context, higherView);
   }
 
   private toDecision(
@@ -87,6 +87,7 @@ export class TradenayaSmartV1Strategy implements BaseStrategy {
     higherLabel: string,
     mediumLabel: string | undefined,
     context: StrategyContext,
+    higherView?: ReturnType<typeof buildMarketView> | null,
   ): StrategyDecision {
     const signal = toStrategySignal(analysis.signal);
     const reasons: ReasonCode[] = [...analysis.reasons, ...analysis.vetoes];
@@ -94,6 +95,11 @@ export class TradenayaSmartV1Strategy implements BaseStrategy {
 
     const structure = evaluateStructure(entryView);
     const indicators = this.buildIndicators(analysis, entryView, entryLabel, higherLabel, mediumLabel, structure);
+    // The order planner places the stop / target from these levels.
+    if (this.config.thresholds.levelsFrom === "higher" && higherView) {
+      indicators.support = roundOpt(higherView.levels.support ?? entryView.levels.support);
+      indicators.resistance = roundOpt(higherView.levels.resistance ?? entryView.levels.resistance);
+    }
 
     return {
       signal,

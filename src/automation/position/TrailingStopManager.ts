@@ -9,9 +9,45 @@ export type StopReplacedHook = (position: PositionRecord, ref: OrderRef) => Prom
 
 const TERMINAL_STATUSES = new Set(["EXECUTED", "PARTIALLY_EXECUTED", "FILLED", "ALL_DONE", "CLOSED", "CANCELLED", "CANCELLATION_RAISED", "CANCELED", "REJECTED", "EXPIRED"]);
 
+/** Everything needed to prove a stop move happened on the exchange. */
+export interface StopMove {
+  from: number;
+  to: number;
+  /** Market price when the stop was moved. */
+  price: number;
+  oldOrderId: string | null;
+  /** Whether the exchange accepted the cancel of the old stop order. */
+  oldOrderCancelled: boolean | null;
+  newOrderId: string;
+  /** Status the exchange reported for the new stop when it was confirmed. */
+  newOrderStatus: string;
+}
+
 export interface TrailingUpdateResult {
   moved: boolean;
   newStopLoss: number | null;
+  /** Why a wanted stop move did NOT happen (exchange error, safety gate…), so it is logged instead of failing silently. */
+  failure?: string;
+  /** Set when the stop moved: old → new level and the exchange orders involved. */
+  move?: StopMove;
+  /** The level the manager tried to move to (set on failure). */
+  wanted?: number;
+}
+
+type ReplaceResult =
+  | { ok: true; oldOrderId: string | null; oldOrderCancelled: boolean | null; newOrderId: string; newOrderStatus: string }
+  | { ok: false; reason: string };
+
+function moveOf(placed: Extract<ReplaceResult, { ok: true }>, from: number, to: number, price: number): StopMove {
+  return {
+    from,
+    to,
+    price,
+    oldOrderId: placed.oldOrderId,
+    oldOrderCancelled: placed.oldOrderCancelled,
+    newOrderId: placed.newOrderId,
+    newOrderStatus: placed.newOrderStatus,
+  };
 }
 
 export class TrailingStopManager {
@@ -60,7 +96,7 @@ export class TrailingStopManager {
     }
 
     const rawCandidate = isLong ? highest * (1 - distancePct) : lowest * (1 + distancePct);
-    const candidate = this.roundPrice(rawCandidate, isLong, currentPrice);
+    const candidate = this.roundPrice(rawCandidate, isLong, currentPrice, await this.pricePrecision(position));
 
     const current = position.stopLoss;
     const isBetter = isLong ? candidate > current : candidate < current;
@@ -82,25 +118,20 @@ export class TrailingStopManager {
     // unavailable the boundary is indeterminate and the replacement is SKIPPED
     // (the incumbent stop is kept) so the position is never left unprotected
     // and never moves into a stop that could not fill before liquidation.
-    const gate = validateStopLossBoundary({
-      side: position.side,
-      stopLoss: candidate,
-      liquidationPrice: snapshot.exchangePosition?.liquidationPrice ?? null,
-      entryPrice: entry,
-    });
-    if (!gate.determinable || !gate.ok) {
+    const blocked = this.liquidationBlock(snapshot, candidate, entry);
+    if (blocked) {
       await this.store.updateTrailing(position.id, current, highest, lowest);
-      return { moved: false, newStopLoss: current };
+      return { moved: false, newStopLoss: current, failure: blocked, wanted: candidate };
     }
 
-    const placed = await this.replaceStopOrder(position, candidate);
-    if (!placed) {
+    const placed = await this.replaceStopOrder(position, candidate, snapshot.exchangePosition?.quantity ?? null);
+    if (!placed.ok) {
       await this.store.updateTrailing(position.id, current, highest, lowest);
-      return { moved: false, newStopLoss: current };
+      return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate };
     }
 
     await this.store.updateTrailing(position.id, candidate, highest, lowest);
-    return { moved: true, newStopLoss: candidate };
+    return { moved: true, newStopLoss: candidate, move: moveOf(placed, current, candidate, currentPrice) };
   }
 
   /**
@@ -116,24 +147,19 @@ export class TrailingStopManager {
     if (!current || !(level > 0) || !price || price <= 0) return { moved: false, newStopLoss: current ?? null };
 
     const isLong = position.side === "BUY";
-    const candidate = this.roundPrice(level, isLong, price);
+    const candidate = this.roundPrice(level, isLong, price, await this.pricePrecision(position));
     const tighter = isLong ? candidate > current : candidate < current;
     const protective = isLong ? candidate < price : candidate > price;
     const movedFarEnough = Math.abs(candidate - current) / current >= 0.0001;
     if (!tighter || !protective || !movedFarEnough) return { moved: false, newStopLoss: current };
 
-    const gate = validateStopLossBoundary({
-      side: position.side,
-      stopLoss: candidate,
-      liquidationPrice: snapshot.exchangePosition?.liquidationPrice ?? null,
-      entryPrice: snapshot.exchangePosition?.entryPrice ?? position.entryPrice,
-    });
-    if (!gate.determinable || !gate.ok) return { moved: false, newStopLoss: current };
+    const blocked = this.liquidationBlock(snapshot, candidate, snapshot.exchangePosition?.entryPrice ?? position.entryPrice);
+    if (blocked) return { moved: false, newStopLoss: current, failure: blocked, wanted: candidate };
 
-    const placed = await this.replaceStopOrder(position, candidate);
-    if (!placed) return { moved: false, newStopLoss: current };
+    const placed = await this.replaceStopOrder(position, candidate, snapshot.exchangePosition?.quantity ?? null);
+    if (!placed.ok) return { moved: false, newStopLoss: current, failure: placed.reason, wanted: candidate };
     await this.store.updateTrailing(position.id, candidate, position.highestPrice ?? price, position.lowestPrice ?? price);
-    return { moved: true, newStopLoss: candidate };
+    return { moved: true, newStopLoss: candidate, move: moveOf(placed, current, candidate, price) };
   }
 
   /**
@@ -150,7 +176,25 @@ export class TrailingStopManager {
    *   4. If the replacement cannot be created/confirmed, the existing SL is
    *      kept untouched so the position is never left unprotected.
    */
-  private async replaceStopOrder(position: PositionRecord, newStop: number): Promise<boolean> {
+  /**
+   * Liquidation-safety check for a TIGHTER stop. Returns a reason when the move
+   * must be blocked, null when it may go ahead.
+   *
+   * Callers only ever tighten the stop (move it toward the price), which moves
+   * it AWAY from liquidation, so a missing exchange liquidation price must not
+   * block the move. Previously it did, silently.
+   */
+  private liquidationBlock(snapshot: PositionSnapshot, candidate: number, entry: number | null): string | null {
+    const liquidationPrice = snapshot.exchangePosition?.liquidationPrice ?? null;
+    if (!(liquidationPrice != null && liquidationPrice > 0)) return null;
+    const gate = validateStopLossBoundary({ side: snapshot.position.side, stopLoss: candidate, liquidationPrice, entryPrice: entry });
+    return gate.determinable && !gate.ok ? `liquidation safety: ${gate.reason}` : null;
+  }
+
+  private async replaceStopOrder(position: PositionRecord, newStop: number, exchangeQuantity: number | null = null): Promise<ReplaceResult> {
+    // Size the new stop to what is REALLY open on the exchange, so no part of
+    // the position is left without a stop if the local record is behind.
+    const quantity = exchangeQuantity != null && exchangeQuantity > 0 ? Math.abs(exchangeQuantity) : position.filledQuantity ?? position.quantity;
     const opposite = position.side === "BUY" ? "SELL" : "BUY";
 
     let newOrderId: string | null = null;
@@ -160,7 +204,7 @@ export class TrailingStopManager {
         symbol: position.symbol,
         side: opposite,
         orderType: "STOP_MARKET",
-        quantity: position.filledQuantity ?? position.quantity,
+        quantity,
         triggerPrice: newStop,
         reduceOnly: true,
         clientOrderId: newClientOrderId,
@@ -168,16 +212,21 @@ export class TrailingStopManager {
       newOrderId = order.orderId ?? null;
       if (!newOrderId) throw new Error("replacement SL placed but no order id returned");
     } catch (error) {
-      void error;
-      return false;
+      return { ok: false, reason: `exchange rejected the new stop at ${newStop}: ${error instanceof Error ? error.message : String(error)}` };
     }
 
     let confirmed = false;
+    let statusSeen = "";
     try {
-      const status = String((await this.client.getOrderStatus(position.userId, newOrderId))?.status ?? "");
-      confirmed = status !== "" && !TERMINAL_STATUSES.has(status);
+      statusSeen = String((await this.client.getOrderStatus(position.userId, newOrderId))?.status ?? "").toUpperCase();
+      confirmed = statusSeen !== "" && !TERMINAL_STATUSES.has(statusSeen);
     } catch {
       confirmed = false;
+    }
+    if (!confirmed && !TERMINAL_STATUSES.has(statusSeen)) {
+      // Status unreadable / empty: confirm through the open-orders list instead.
+      const open = await this.client.getOpenOrders(position.userId, position.symbol).catch(() => null);
+      confirmed = Boolean(open?.some((o) => o.orderId === newOrderId));
     }
 
     if (!confirmed) {
@@ -186,13 +235,15 @@ export class TrailingStopManager {
       // the existing SL so the position is never left with a phantom/unverified
       // protection and is never left unprotected.
       await this.client.cancelOrder(position.userId, newOrderId).catch(() => null);
-      return false;
+      return { ok: false, reason: `new stop ${newOrderId} at ${newStop} could not be confirmed active (status "${statusSeen || "unknown"}"); kept the old stop` };
     }
 
     // Only now is it safe to remove the obsolete SL.
-    if (position.stopLossOrderId) {
-      await this.client.cancelOrder(position.userId, position.stopLossOrderId).catch(() => null);
-      this.recordProtective("STOP_MARKET", position, position.stopLossOrderId, "CANCELLED", position.stopLoss).catch(() => null);
+    const oldOrderId = position.stopLossOrderId;
+    let oldOrderCancelled: boolean | null = null;
+    if (oldOrderId) {
+      oldOrderCancelled = Boolean(await this.client.cancelOrder(position.userId, oldOrderId).catch(() => false));
+      this.recordProtective("STOP_MARKET", position, oldOrderId, "CANCELLED", position.stopLoss).catch(() => null);
     }
 
     this.recordProtective("STOP_MARKET", position, newOrderId, "OPEN", newStop, position.filledQuantity ?? position.quantity).catch(() => null);
@@ -202,7 +253,7 @@ export class TrailingStopManager {
     // trail cancelled the wrong order and left duplicate stops resting.
     await this.onStopReplaced?.(position, { orderId: newOrderId, clientOrderId: newClientOrderId, status: "OPEN" }).catch(() => null);
     position.stopLossOrderId = newOrderId;
-    return true;
+    return { ok: true, oldOrderId, oldOrderCancelled, newOrderId, newOrderStatus: statusSeen || "OPEN" };
   }
 
   /** Best-effort persistence of protective SL orders so history survives sub-account unavailability. */
@@ -247,12 +298,36 @@ export class TrailingStopManager {
     }
   }
 
-  private roundPrice(price: number, isLong: boolean, currentPrice: number): number {
-    const tickSize = this.tickFor(price);
+  private readonly precisionCache = new Map<string, { at: number; decimals: number | null }>();
+
+  /** The exchange's price precision (decimals) for the symbol, cached for a day; null when unknown. */
+  private async pricePrecision(position: PositionRecord): Promise<number | null> {
+    const key = position.symbol.toUpperCase();
+    const hit = this.precisionCache.get(key);
+    if (hit && Date.now() - hit.at < 24 * 3600_000) return hit.decimals;
+    let decimals: number | null = null;
+    try {
+      const info = await this.client.getInstrumentInfo?.(position.userId, position.symbol);
+      const p = Number(info?.price_precision);
+      decimals = Number.isInteger(p) && p >= 0 && p <= 12 ? p : null;
+    } catch {
+      decimals = null;
+    }
+    this.precisionCache.set(key, { at: Date.now(), decimals });
+    return decimals;
+  }
+
+  /**
+   * Round a stop to a price the exchange accepts (its own price precision when
+   * known, else a magnitude-based tick), staying strictly on the protective
+   * side of the live price: below it for a long, above it for a short.
+   */
+  private roundPrice(price: number, isLong: boolean, currentPrice: number, decimals: number | null = null): number {
+    const tickSize = decimals != null ? 10 ** -decimals : this.tickFor(price);
     let rounded = Math.round(price / tickSize) * tickSize;
-    if (isLong) rounded = Math.min(rounded, currentPrice * 0.999999);
-    else rounded = Math.max(rounded, currentPrice * 1.000001);
-    return Number(rounded.toFixed(8));
+    if (isLong && rounded >= currentPrice) rounded = Math.floor((currentPrice * 0.999999) / tickSize) * tickSize;
+    if (!isLong && rounded <= currentPrice) rounded = Math.ceil((currentPrice * 1.000001) / tickSize) * tickSize;
+    return Number(rounded.toFixed(decimals ?? 8));
   }
 
   private tickFor(price: number): number {
