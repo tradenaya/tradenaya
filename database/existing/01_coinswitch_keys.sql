@@ -18,3 +18,5 @@ CREATE TABLE IF NOT EXISTS coinswitch_keys (
 -- Columns the app adds to older databases (it checks information_schema first;
 -- run a line by hand only if that column is missing):
 -- ALTER TABLE coinswitch_keys ADD COLUMN valid_until DATETIME NULL AFTER created_at; -- scripts/2026-09-16_add_key_expiry.sql
+-- ALTER TABLE coinswitch_keys ADD COLUMN api_key_masked TEXT DEFAULT NULL AFTER api_key;
+-- UPDATE coinswitch_keys SET api_key_masked = CONCAT(LEFT(api_key,4),'...',RIGHT(api_key,4)) WHERE api_key_masked IS NULL;

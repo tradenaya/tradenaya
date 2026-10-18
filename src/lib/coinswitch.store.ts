@@ -50,6 +50,22 @@ export async function ensureTable() {
       CONSTRAINT coinswitch_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  // Older databases created this table before these columns existed; add any
+  // that are missing so saving keys never fails with "Unknown column".
+  const [rows] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coinswitch_keys'`,
+  );
+  const columns = new Set((rows as Array<{ COLUMN_NAME: string }>).map((r) => r.COLUMN_NAME));
+  if (!columns.has("api_key_masked")) {
+    await db.query(`ALTER TABLE coinswitch_keys ADD COLUMN api_key_masked TEXT DEFAULT NULL AFTER api_key`);
+    // Keys saved before the column existed get their masked form (e.g. B8FD...852F).
+    await db.query(
+      `UPDATE coinswitch_keys SET api_key_masked = CONCAT(LEFT(api_key, 4), '...', RIGHT(api_key, 4)) WHERE api_key_masked IS NULL AND CHAR_LENGTH(api_key) > 8`,
+    );
+  }
+  if (!columns.has("valid_until")) {
+    await db.query(`ALTER TABLE coinswitch_keys ADD COLUMN valid_until DATETIME NULL AFTER created_at`);
+  }
 }
 
 export async function saveKeysForUser(userId: number, apiKey: string, apiSecret: string, validUntil?: string | null) {
