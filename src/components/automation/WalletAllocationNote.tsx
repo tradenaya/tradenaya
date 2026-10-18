@@ -29,8 +29,9 @@ export function WalletAllocationNote({ requestedPct, wallet, format }: WalletAll
         <p>≈ {format(allocation.amount)}</p>
       )}
       <p>
-        This is the most a single trade can use. Each trade&apos;s margin is sized by your Max Risk and the stop
-        distance, so it is often less.
+        Worked out from the money that is FREE in your wallet each time the bot looks for a trade — money already in
+        other bots&apos; trades is not counted, so several bots can use 100%. Each trade&apos;s margin is sized by your
+        Max Risk and the stop distance, so it is often much less.
       </p>
     </div>
   );

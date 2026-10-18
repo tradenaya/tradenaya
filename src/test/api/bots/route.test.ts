@@ -42,18 +42,17 @@ describe("POST /api/bots wallet %", () => {
     expect((await create(60)).status).toBe(200);
   });
 
-  it("rejects going over 100% and says how much is left", async () => {
+  // Wallet-% bots share the wallet and size from the FREE balance each cycle,
+  // so several bots may each use 100% — no reservation, no idle money.
+  it("accepts a bot even when others together already use more than 100%", async () => {
     scheduler.bots = [{ capitalMode: "percent", walletPercent: 40 }];
-    const res = await create(70);
-    expect(res.status).toBe(400);
-    expect((await res.json()).message).toMatch(/at most 60% is left/);
-    expect(scheduler.createBot).not.toHaveBeenCalled();
+    expect((await create(70)).status).toBe(200);
   });
 
-  it("rejects when other bots already use the whole wallet", async () => {
-    scheduler.bots = [{ capitalMode: "percent", walletPercent: 100 }];
-    const res = await create(10);
-    expect(res.status).toBe(400);
-    expect((await res.json()).message).toMatch(/already use 100%/);
+  it("accepts a second and third 100% bot", async () => {
+    scheduler.bots = [{ capitalMode: "percent", walletPercent: 100 }, { capitalMode: "percent", walletPercent: 100 }];
+    const res = await create(100);
+    expect(res.status).toBe(200);
+    expect(scheduler.createBot).toHaveBeenCalledOnce();
   });
 });
