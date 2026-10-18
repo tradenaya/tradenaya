@@ -964,7 +964,7 @@ export class PositionMonitor {
     if (!pick) return;
 
     const result = await this.trailing.moveStopTo(snapshot, pick.level);
-    await this.logTrailFailure(position, result.failure, result.wanted);
+    await this.logTrailFailure(position, result.failure, result.wanted, result.critical);
     if (result.moved) {
       const rule = pick.rule;
       await this.logStopMove(position, snapshot, rule, result.move, `stop loss trailed to the ${rule} ${usdt(result.newStopLoss)}`);
@@ -985,7 +985,7 @@ export class PositionMonitor {
     if (!position.trailingEnabled) return;
 
     const result = await this.trailing.update(snapshot);
-    await this.logTrailFailure(position, result.failure, result.wanted);
+    await this.logTrailFailure(position, result.failure, result.wanted, result.critical);
     if (result.moved) {
       const rule = `${position.trailingDistancePct ?? 2}% trailing stop`;
       await this.logStopMove(position, snapshot, rule, result.move, `stop loss moved to ${usdt(result.newStopLoss)}`);
@@ -1060,10 +1060,14 @@ export class PositionMonitor {
   }
 
   /** A stop that should have moved but didn't is logged (and shown in the live trace), never silent. */
-  private async logTrailFailure(position: PositionRecord, failure: string | undefined, wanted?: number): Promise<void> {
+  private async logTrailFailure(position: PositionRecord, failure: string | undefined, wanted?: number, critical?: boolean): Promise<void> {
     if (!failure) {
       this.lastTrailFailure.delete(position.id);
       return;
+    }
+    if (critical) {
+      // Never throttled: the position is without a stop until emergency protection re-places it.
+      void dispatchTelegram(`trail-critical:${position.id}:${Date.now()}`, "POSITION_UNPROTECTED", telegramUnprotected({ symbol: position.symbol, reason: failure }));
     }
     const last = this.lastTrailFailure.get(position.id);
     if (last && last.reason === failure && Date.now() - last.at < 60 * 60_000) return;

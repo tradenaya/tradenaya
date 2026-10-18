@@ -285,7 +285,7 @@ function LiveBotCard({
             </div>
             <div>
               <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setShowStops((v) => !v)}>
-                <Lock size={12} /> {showStops ? "Hide" : "Show"} stop-loss history &amp; proof
+                <Lock size={12} /> {showStops ? "Hide stop-loss history" : "Show stop-loss history"}
               </Button>
               {showStops && <StopLossHistory positionId={position.positionId} className="mt-3" />}
             </div>
