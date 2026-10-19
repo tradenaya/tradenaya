@@ -55,12 +55,103 @@ function moveOf(placed: Extract<ReplaceResult, { ok: true }>, from: number, to: 
   };
 }
 
+export interface TargetMoveResult {
+  moved: boolean;
+  from: number | null;
+  to: number | null;
+  newOrderId?: string;
+  oldOrderId?: string | null;
+  failure?: string;
+}
+
 export class TrailingStopManager {
   constructor(
     private readonly client: CoinSwitchClientLike,
     private readonly store: PositionStoreLike,
     private readonly onStopReplaced?: StopReplacedHook,
+    private readonly onTargetReplaced?: StopReplacedHook,
   ) {}
+
+  /**
+   * Push the take-profit further out (only ever AWAY from the price, in the
+   * trade's favour). The exchange keeps one take-profit per position, so the
+   * old one is cancelled first — safe, because the stop-loss keeps protecting
+   * the position meanwhile. If the new one cannot be placed, the old one is put
+   * back at once.
+   */
+  async moveTakeProfitTo(snapshot: PositionSnapshot, level: number): Promise<TargetMoveResult> {
+    const { position } = snapshot;
+    const current = position.takeProfit;
+    const price = snapshot.currentPrice;
+    if (!current || !(level > 0) || !price) return { moved: false, from: current ?? null, to: null };
+    const isLong = position.side === "BUY";
+    const target = Number(this.roundTarget(level, isLong, await this.pricePrecision(position)));
+    if (!(isLong ? target > current && target > price : target < current && target < price)) {
+      return { moved: false, from: current, to: target };
+    }
+    const quantity = snapshot.exchangePosition?.quantity != null && snapshot.exchangePosition.quantity > 0
+      ? Math.abs(snapshot.exchangePosition.quantity)
+      : position.filledQuantity ?? position.quantity;
+
+    const oldOrderId = position.takeProfitOrderId;
+    if (oldOrderId) {
+      const cancelled = await this.client.cancelOrder(position.userId, oldOrderId).catch(() => false);
+      if (!cancelled) {
+        const still = await this.confirmActive(position, oldOrderId);
+        if (still.confirmed) return { moved: false, from: current, to: target, failure: `old take-profit ${oldOrderId} could not be cancelled; kept it at ${current}` };
+      }
+      this.recordProtective("TAKE_PROFIT_MARKET", position, oldOrderId, "CANCELLED", current).catch(() => null);
+    }
+
+    let lastError = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const placed = await this.placeTarget(position, target, quantity);
+      if ("error" in placed) { lastError = placed.error; continue; }
+      const check = await this.confirmActive(position, placed.orderId);
+      if (!check.confirmed) { lastError = `new take-profit not confirmed (status "${check.status || "unknown"}")`; continue; }
+      await this.adoptTarget(position, placed, target, quantity);
+      return { moved: true, from: current, to: target, newOrderId: placed.orderId, oldOrderId };
+    }
+    // Put the old take-profit back.
+    const restored = await this.placeTarget(position, current, quantity);
+    if (!("error" in restored)) await this.adoptTarget(position, restored, current, quantity);
+    return { moved: false, from: current, to: target, failure: `could not place the new take-profit at ${target} (${lastError}); ${"error" in restored ? "the take-profit is missing and will be re-placed by protection" : `kept it at ${current}`}` };
+  }
+
+  private async placeTarget(position: PositionRecord, triggerPrice: number, quantity: number | null): Promise<{ orderId: string; clientOrderId: string } | { error: string }> {
+    const clientId = clientOrderId(`tp_${position.executionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    try {
+      const order = await this.client.placeOrder(position.userId, {
+        symbol: position.symbol,
+        side: position.side === "BUY" ? "SELL" : "BUY",
+        orderType: "TAKE_PROFIT_MARKET",
+        quantity,
+        triggerPrice,
+        reduceOnly: true,
+        clientOrderId: clientId,
+      });
+      if (!order.orderId) return { error: "take-profit placed but no order id returned" };
+      return { orderId: order.orderId, clientOrderId: clientId };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async adoptTarget(position: PositionRecord, placed: { orderId: string; clientOrderId: string }, target: number, quantity: number | null): Promise<void> {
+    this.recordProtective("TAKE_PROFIT_MARKET", position, placed.orderId, "OPEN", target, quantity).catch(() => null);
+    await this.store.updateProtection(position.id, position.stopLossOrderId, placed.orderId);
+    await this.store.updateTakeProfit?.(position.id, target);
+    await this.onTargetReplaced?.(position, { orderId: placed.orderId, clientOrderId: placed.clientOrderId, status: "OPEN" }).catch(() => null);
+    position.takeProfitOrderId = placed.orderId;
+    position.takeProfit = target;
+  }
+
+  /** Round a take-profit to the exchange's price step, rounding AWAY from the price. */
+  private roundTarget(price: number, isLong: boolean, decimals: number | null): number {
+    const tick = decimals != null ? 10 ** -decimals : this.tickFor(price);
+    const rounded = isLong ? Math.ceil(price / tick) * tick : Math.floor(price / tick) * tick;
+    return Number(rounded.toFixed(decimals ?? 8));
+  }
 
   async update(snapshot: PositionSnapshot): Promise<TrailingUpdateResult> {
     const { position } = snapshot;

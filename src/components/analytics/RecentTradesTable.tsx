@@ -19,6 +19,7 @@ import type { ClosedTradeSummary, Paged } from "@/automation/analytics/types"
 import { apiGet, toQuery, type AnalyticsFilterState } from "./api"
 import { useAsyncData } from "./use-data"
 import { formatDate, formatMoney, formatPrice, pnlText, signClass } from "./format"
+import { exitOutcome } from "@/automation/analytics/exit-outcome"
 import { TradeDetailDialog } from "./TradeDetailDialog"
 
 const PAGE_SIZE = 15
@@ -108,7 +109,12 @@ export function RecentTradesTable({ filters }: { filters: AnalyticsFilterState }
                         {trade.side === "BUY" ? "Long" : "Short"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{trade.exitReason}</TableCell>
+                    <TableCell className="text-xs">
+                      {(() => {
+                        const o = exitOutcome(trade.exitReason, trade.netPnl)
+                        return <Badge className={o.badge}>{o.label}</Badge>
+                      })()}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(trade.entryPrice)}</TableCell>
                     <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPrice(trade.exitPrice)}</TableCell>
                     <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.netPnl)}`}>

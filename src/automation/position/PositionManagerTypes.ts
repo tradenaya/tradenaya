@@ -208,6 +208,8 @@ export interface PositionStoreLike {
   updateEntry(id: number, entryPrice: number | null, filledQuantity: number | null, positionId: string | null, entryOrderId: string | null): Promise<void>;
   updateProtection(id: number, stopLossOrderId: string | null, takeProfitOrderId: string | null): Promise<void>;
   updateTrailing(id: number, stopLoss: number | null, highestPrice: number | null, lowestPrice: number | null): Promise<void>;
+  /** Record the position's current take-profit price after it was moved (optional for test doubles). */
+  updateTakeProfit?(id: number, takeProfit: number): Promise<void>;
   markClose(id: number, exitPrice: number, reason: ExitReason, realizedPnl: number, fees: number, closedAt?: string): Promise<void>;
   recordCloseSummary(input: CloseSummaryInput): Promise<void>;
   saveEvent(input: PositionEventInput): Promise<void>;

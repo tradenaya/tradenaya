@@ -21,6 +21,7 @@ import { formatPrice, formatMoney, pnlText, signClass, formatDuration } from "@/
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 import { formatPct } from "@/lib/currency/store"
 import { StopLossHistory } from "@/components/positions/StopLossHistory"
+import { exitOutcome } from "@/automation/analytics/exit-outcome"
 
 /** "−4.87% from entry". */
 function fromEntry(entry: number | null, price: number | null): string | null {
@@ -135,28 +136,10 @@ function outcomeBadge(outside: string): string {
   return "bg-zinc-500/15 text-zinc-400"
 }
 
-function exitReasonLabel(reason: string): string {
-  const upper = (reason ?? "").toUpperCase()
-  if (upper.includes("TAKE_PROFIT") || upper.includes("TP")) return "TP Hit"
-  if (upper.includes("STOP_LOSS") || upper.includes("SL")) return "SL Hit"
-  if (upper.includes("TRAILING")) return "Trailing"
-  if (upper.includes("MANUAL")) return "Manual"
-  if (upper.includes("CIRCUIT")) return "Circuit Break"
-  if (upper.includes("CANCEL")) return "Cancelled"
-  if (upper.includes("EXPIRY") || upper.includes("EXPIRED")) return "Expired"
-  if (upper.includes("RECOVERY")) return "Recovered"
-  return reason || "—"
-}
-
-function exitReasonBadgeClass(reason: string): string {
-  const upper = (reason ?? "").toUpperCase()
-  if (upper.includes("TAKE_PROFIT") || upper.includes("TP")) return "bg-emerald-500/15 text-emerald-400"
-  if (upper.includes("STOP_LOSS") || upper.includes("SL")) return "bg-red-500/15 text-red-400"
-  if (upper.includes("TRAILING")) return "bg-violet-500/15 text-violet-400"
-  if (upper.includes("MANUAL")) return "bg-amber-500/15 text-amber-400"
-  if (upper.includes("CANCEL")) return "bg-zinc-500/15 text-zinc-400"
-  if (upper.includes("RECOVERY")) return "bg-orange-500/15 text-orange-400"
-  return "bg-zinc-500/15 text-zinc-400"
+/** Exit badge named by what the trade earned ("Profit locked", not "SL hit", when a trailed stop closed it in profit). */
+function ExitBadge({ trade }: { trade: { exitReason: string; profitLoss: number } }) {
+  const o = exitOutcome(trade.exitReason, trade.profitLoss)
+  return <Badge className={o.badge}>{o.label}</Badge>
 }
 
 function formatTimestamp(ts: string | null): string {
@@ -404,9 +387,7 @@ export default function PositionHistoryPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                <Badge className={exitReasonBadgeClass(trade.exitReason)}>
-                                  {exitReasonLabel(trade.exitReason)}
-                                </Badge>
+                                <ExitBadge trade={trade} />
                               </TableCell>
                               <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.profitLoss)}`}>
                                 {pnlText(trade.profitLoss)}
@@ -488,9 +469,7 @@ function TradeDetailGrid({ trade, className = "" }: { trade: ClosedTrade; classN
       <div>
         <span className="text-muted-foreground">Exit Reason</span>
         <p className="font-bold">
-          <Badge className={exitReasonBadgeClass(trade.exitReason)}>
-            {exitReasonLabel(trade.exitReason)}
-          </Badge>
+          <ExitBadge trade={trade} />
         </p>
       </div>
       <div>
@@ -587,7 +566,7 @@ function ClosedTradeCard({ trade, expanded, onToggle }: { trade: ClosedTrade; ex
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="font-semibold text-foreground">{trade.symbol}</span>
             <Badge className={sideBadge(trade.side)}>{trade.side}</Badge>
-            <Badge className={exitReasonBadgeClass(trade.exitReason)}>{exitReasonLabel(trade.exitReason)}</Badge>
+            <ExitBadge trade={trade} />
           </div>
           <div className="shrink-0 text-right">
             <div className={`text-sm font-semibold tabular-nums ${signClass(trade.profitLoss)}`}>{pnlText(trade.profitLoss)}</div>

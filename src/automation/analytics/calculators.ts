@@ -498,13 +498,13 @@ export function computeExitAnalytics(trades: ClosedTradeRow[]): ExitAnalytics {
   let trailingPnl = Money.zero();
 
   for (const trade of trades) {
-    const category = normalizeExitReason(trade.exitReason, trade.trailingActivated);
+    const pnl = netPnl(trade);
+    const category = normalizeExitReason(trade.exitReason, trade.trailingActivated, pnl);
     let entry = byReason.get(category);
     if (!entry) {
       entry = { count: 0, pnl: new MoneySum(), wins: 0, losses: 0 };
       byReason.set(category, entry);
     }
-    const pnl = netPnl(trade);
     entry.count += 1;
     entry.pnl.add(pnl);
     const outcome = classifyOutcome(trade.exitReason, pnl);

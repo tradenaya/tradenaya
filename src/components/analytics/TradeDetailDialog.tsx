@@ -14,6 +14,7 @@ import {
 import type { TradeDetail } from "@/automation/analytics/types"
 import { apiGet } from "./api"
 import { formatDate, formatDuration, formatMoney, formatPrice, pnlText, signClass } from "./format"
+import { exitOutcome } from "@/automation/analytics/exit-outcome"
 import { localizeUsdtText } from "@/lib/currency/store"
 
 function Row({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
@@ -86,8 +87,11 @@ export function TradeDetailDialog({
               <Badge className={data.side === "BUY" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}>
                 {data.side === "BUY" ? "Long" : "Short"}
               </Badge>
-              <Badge className="bg-muted text-muted-foreground">{data.exitReason}</Badge>
-              {data.trailingActivated && <Badge className="bg-amber-500/15 text-amber-400">Trailing</Badge>}
+              {(() => {
+                const o = exitOutcome(data.exitReason, data.netPnl)
+                return <Badge className={o.badge}>{o.label}</Badge>
+              })()}
+              {data.trailingActivated && <Badge className="bg-amber-500/15 text-amber-400">Stop-loss trailed</Badge>}
             </div>
 
             <div className="divide-y divide-border">
