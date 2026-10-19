@@ -561,17 +561,19 @@ export const EXIT_REASON_CATEGORIES = [
 
 export type ExitReasonCategory = (typeof EXIT_REASON_CATEGORIES)[number];
 
-export function normalizeExitReason(reason: string | null | undefined, trailingActivated = false): ExitReasonCategory {
+export function normalizeExitReason(reason: string | null | undefined, trailingActivated = false, pnl?: number | null): ExitReasonCategory {
   const normalized = String(reason ?? "").toUpperCase();
   switch (normalized) {
     case "TAKE_PROFIT":
       return "TAKE_PROFIT";
     case "STOP_LOSS":
-      // A stop-loss close on a position whose trailing stop had activated was
-      // closed by the trailing mechanism (the stop had been moved into profit).
-      return trailingActivated ? "TRAILING_STOP" : "STOP_LOSS";
     case "TRAILING_STOP":
-      return "TRAILING_STOP";
+      // Named by what the trade EARNED: a stop-loss that closed the trade in
+      // profit (it had trailed) is "profit locked" (TRAILING_STOP), only a
+      // stop-loss that lost money is STOP_LOSS. Without the P&L, fall back to
+      // whether trailing had activated.
+      if (pnl != null && Number.isFinite(pnl)) return pnl > 0 ? "TRAILING_STOP" : "STOP_LOSS";
+      return normalized === "TRAILING_STOP" || trailingActivated ? "TRAILING_STOP" : "STOP_LOSS";
     case "MANUAL_CLOSE":
     case "MANUAL":
       return "MANUAL_CLOSE";

@@ -422,7 +422,7 @@ export function telegramStopLoss(p: {
   roi?: number | null;
 }): string {
   return [
-    "🛑 <b>STOP LOSS HIT</b>",
+    p.pnl != null && p.pnl > 0 ? "🔒 <b>PROFIT LOCKED</b> — the trailing stop-loss closed the trade in profit" : "🛑 <b>STOP LOSS HIT</b>",
     ``,
     `Symbol: ${escapeHtml(String(p.symbol ?? "n/a")).toUpperCase()}`,
     `Side: ${sideLabel(p.side)}`,

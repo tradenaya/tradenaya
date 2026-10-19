@@ -12,12 +12,24 @@ import { formatMoney, formatPercent, pnlText, signClass } from "./format"
 const COLORS: Record<string, string> = {
   TAKE_PROFIT: "#34d399",
   STOP_LOSS: "#f87171",
-  TRAILING_STOP: "#fbbf24",
+  TRAILING_STOP: "#a3e635",
   MANUAL_CLOSE: "#60a5fa",
   EXCHANGE_CLOSE: "#c084fc",
   END_OF_BACKTEST: "#94a3b8",
   OTHER: "#64748b",
 }
+
+/** Plain names: a stop-loss that closed in profit is "Profit locked", not a loss. */
+const LABELS: Record<string, string> = {
+  TAKE_PROFIT: "Take-profit hit",
+  STOP_LOSS: "Stop-loss (loss)",
+  TRAILING_STOP: "Profit locked (stop-loss)",
+  MANUAL_CLOSE: "Closed manually",
+  EXCHANGE_CLOSE: "Closed on exchange",
+  END_OF_BACKTEST: "End of backtest",
+  OTHER: "Other",
+}
+const label = (reason: string) => LABELS[reason] ?? reason
 
 export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
   const { data, loading, errorInfo, refresh } = useAsyncData<ExitAnalytics>(
@@ -27,7 +39,7 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
 
   const pieData = data?.reasons
     .filter((r) => r.count > 0)
-    .map((r) => ({ name: r.reason, value: r.count })) ?? []
+    .map((r) => ({ name: label(r.reason), key: r.reason, value: r.count })) ?? []
 
   const tpSl = data?.tpSl
 
@@ -35,7 +47,7 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
     <Card className="bg-card">
       <CardHeader className="border-b">
         <CardTitle>Exit Reasons</CardTitle>
-        <CardDescription>How closed trades were exited</CardDescription>
+        <CardDescription>How closed trades ended — by what they earned</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
         {errorInfo && !data ? (
@@ -46,16 +58,16 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
           <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <div className="rounded-lg border border-border px-3 py-2">
-                <p className="text-[11px] uppercase text-muted-foreground">Take Profit</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Take-profit hit</p>
                 <p className="text-sm font-semibold text-emerald-400">{tpSl?.tpHits ?? 0} ({formatPercent(tpSl?.tpPct)})</p>
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
-                <p className="text-[11px] uppercase text-muted-foreground">Stop Loss</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Stop-loss (loss)</p>
                 <p className="text-sm font-semibold text-red-400">{tpSl?.slHits ?? 0} ({formatPercent(tpSl?.slPct)})</p>
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
-                <p className="text-[11px] uppercase text-muted-foreground">Trailing</p>
-                <p className="text-sm font-semibold text-amber-400">{tpSl?.trailingHits ?? 0} ({formatPercent(tpSl?.trailingPct)})</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Profit locked</p>
+                <p className="text-sm font-semibold text-lime-400">{tpSl?.trailingHits ?? 0} ({formatPercent(tpSl?.trailingPct)})</p>
               </div>
             </div>
 
@@ -66,7 +78,7 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2} isAnimationActive={false}>
                         {pieData.map((entry) => (
-                          <Cell key={entry.name} fill={COLORS[entry.name] ?? "#64748b"} />
+                          <Cell key={entry.key} fill={COLORS[entry.key] ?? "#64748b"} />
                         ))}
                       </Pie>
                       <Tooltip
@@ -85,7 +97,7 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
                   <li key={r.reason} className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
                       <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COLORS[r.reason] ?? "#64748b" }} />
-                      {r.reason}
+                      {label(r.reason)}
                       <span className="text-muted-foreground">({r.count})</span>
                     </span>
                     <span className={signClass(r.pnl)}>{pnlText(r.pnl)}</span>
@@ -96,7 +108,7 @@ export function ExitReasonCard({ filters }: { filters: AnalyticsFilterState }) {
 
             {tpSl && tpSl.trailing.trailingClosedTrades > 0 && (
               <div className="rounded-lg border border-border bg-background/40 px-3 py-2 text-sm">
-                <p className="font-medium text-foreground">Trailing Stop Performance</p>
+                <p className="font-medium text-foreground">Profit locked by the stop-loss</p>
                 <p className="mt-1 text-muted-foreground">
                   {tpSl.trailing.trailingMovements} trailing movements · avg MFE {formatPercent(tpSl.trailing.averageMfePct, 2)} ·
                   avg {formatMoney(tpSl.trailing.averagePnl)} per trailing close · profit protected {formatMoney(tpSl.trailing.profitProtected)}
