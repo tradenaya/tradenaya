@@ -333,6 +333,11 @@ export class PositionStore {
     );
   }
 
+  async updateTakeProfit(id: number, takeProfit: number) {
+    await this.ensureTable();
+    await db.query(`UPDATE automation_positions SET take_profit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`, [takeProfit, id]);
+  }
+
   /** Remember that a trade's trailing stop has been armed (survives restarts and dips back). */
   async markTrailingActivated(id: number) {
     await this.ensureTable();

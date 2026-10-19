@@ -38,7 +38,8 @@ export const EXIT_LOOKBACK = 10;
 export const TREND_EMA = 200;
 export const ATR_PERIOD = 14;
 export const STOP_ATR = 2;
-export const TARGET_R = 10;
+/** Take-profit cap. Replay (14 coins × 2y, live rules): 15R beat 10R in every window; no cap at all was worse. */
+export const TARGET_R = 15;
 /** Signals carry a fixed confidence: the rules are binary, not scored. */
 export const SIGNAL_CONFIDENCE = 0.7;
 export const MIN_CANDLES = TREND_EMA + ENTRY_LOOKBACK + 1;
@@ -207,7 +208,7 @@ export function summarizeBreakout(symbol: string, decision: StrategyDecision): s
 
 /**
  * Plans the order straight from the strategy's levels (LIMIT at the breakout
- * close, 2-ATR stop, 10R cap) and still runs the shared trade validator, so the
+ * close, 2-ATR stop, TARGET_R cap) and still runs the shared trade validator, so the
  * same safety rules apply as for every other strategy (limit side, max stop
  * distance, minimum R:R, confidence).
  */

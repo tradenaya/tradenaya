@@ -372,8 +372,17 @@ export class PositionRecovery {
   }
 
   async emergencyProtect(executionId: number): Promise<boolean> {
-    const execution = await this.executionStore.getExecution(executionId);
-    if (!execution) return false;
+    const planned = await this.executionStore.getExecution(executionId);
+    if (!planned) return false;
+    // Re-protect at the position's CURRENT levels: after a stop-loss trailed
+    // into profit (or a take-profit was pushed out) the planned levels are
+    // stale — re-placing them would give profit back or close a running trade.
+    const position = await this.store.getPositionByExecutionId(executionId).catch(() => null);
+    const execution = {
+      ...planned,
+      stopLoss: position?.stopLoss ?? planned.stopLoss,
+      takeProfit: position?.takeProfit ?? planned.takeProfit,
+    };
 
     const retries = this.config.emergencyRetries ?? 2;
     for (let i = 0; i < retries; i++) {

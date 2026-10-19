@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { coinswitchClient } from "@/automation/executor/client";
 import { withBotMode } from "@/automation/paper/mode";
 import { PositionStore } from "./PositionStore";
-import { TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
+import { TRADENAYA_SMART_ID, TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
 import { TRAIL_ARM_R } from "@/automation/strategy/trend-breakout";
 
 /**
@@ -12,7 +12,7 @@ import { TRAIL_ARM_R } from "@/automation/strategy/trend-breakout";
  * reason, and — for open positions — a live check with the exchange that the
  * current stop and target orders really exist.
  *
- * Only the stop-loss trails; the take-profit stays at the level set when the
+ * Tradenaya Smart can also push its take-profit out in a rally (trailing take-profit); otherwise the take-profit stays at the level set when the
  * trade was opened.
  */
 
@@ -65,7 +65,9 @@ export interface StopHistory {
   closedAt: string | null;
   original: { price: number | null; orderId: string | null; at: string };
   current: { price: number | null; orderId: string | null; check: StopHistoryOrderCheck | null };
-  takeProfit: { price: number | null; orderId: string | null; trails: false; check: StopHistoryOrderCheck | null };
+  takeProfit: { price: number | null; orderId: string | null; trails: boolean; check: StopHistoryOrderCheck | null };
+  /** Every time the take-profit was pushed further out (trailing take-profit). */
+  targetMoves: { at: string; from: number | null; to: number | null }[];
   moves: StopHistoryMove[];
   failures: StopHistoryFailure[];
   /** When the trailing stop was switched on (Trend Breakout: after +1.5R). */
@@ -140,7 +142,7 @@ export async function getStopHistory(
 
   const [eventRows] = await db.query(
     `SELECT type, message, details, created_at FROM automation_position_events
-      WHERE position_id = ? AND type IN ('TRAILING_MOVED', 'TRAILING_FAILED', 'TRAILING_ARMED')
+      WHERE position_id = ? AND type IN ('TRAILING_MOVED', 'TRAILING_FAILED', 'TRAILING_ARMED', 'TARGET_MOVED')
       ORDER BY id`,
     [positionId],
   ).catch(() => [[]]);
@@ -167,10 +169,15 @@ export async function getStopHistory(
   const moves: StopHistoryMove[] = [];
   const failures: StopHistoryFailure[] = [];
   let armed: StopHistory["armed"] = null;
+  const targetMoves: StopHistory["targetMoves"] = [];
   let prevLevel = originalPrice;
   let prevOrderId: string | null = opened?.id ?? null;
   for (const row of eventRows as Array<Record<string, unknown>>) {
     const d = parseDetails(row.details);
+    if (row.type === "TARGET_MOVED") {
+      targetMoves.push({ at: iso(row.created_at), from: num(d?.from), to: num(d?.to) });
+      continue;
+    }
     if (row.type === "TRAILING_ARMED") {
       armed = { at: iso(row.created_at), bestR: num(d?.bestR), best: num(d?.best) };
       continue;
@@ -231,14 +238,17 @@ export async function getStopHistory(
     closedAt,
     original: { price: originalPrice, orderId: opened?.id ?? moves[0]?.oldOrderId ?? (moves.length === 0 ? currentOrderId : null), at: p.exec_created_at ? iso(p.exec_created_at) : openedAt },
     current: { price: num(p.stop_loss), orderId: currentOrderId, check: slCheck },
-    takeProfit: { price: num(p.plan_take_profit) ?? num(p.take_profit), orderId: tpOrderId, trails: false, check: tpCheck },
+    takeProfit: { price: num(p.take_profit) ?? num(p.plan_take_profit), orderId: tpOrderId, trails: String(p.bot_strategy ?? "") === TRADENAYA_SMART_ID, check: tpCheck },
+    targetMoves,
     moves,
     failures,
     armed,
     trailRule:
       String(p.bot_strategy ?? "") === TREND_BREAKOUT_ID
         ? `The stop stays at its original level until the trade is +${TRAIL_ARM_R}R in profit (in profit by ${TRAIL_ARM_R}× the money risked). Then it moves to your entry price, so the trade can no longer lose, and follows the last 10 candles.`
-        : p.trailing_enabled
+        : String(p.bot_strategy ?? "") === TRADENAYA_SMART_ID
+          ? "When the price reaches the take-profit, the trade stays open: the stop-loss moves up to lock profit and the take-profit moves further out, so a rally can keep going until the stop-loss is hit."
+          : p.trailing_enabled
           ? `The stop follows the price ${num(p.trailing_distance_pct) ?? 2}% behind once the trade is ${num(p.trailing_activation_pct) ?? 0.5}% in profit.`
           : "Trailing is off for this trade; the stop stays where it was set.",
   };

@@ -108,7 +108,7 @@ describe("Trend Breakout — signal rules", () => {
     expect(r.signal).toBe("BUY");
   });
 
-  it("strategy decision carries a 2-ATR stop and a 10R target", async () => {
+  it("strategy decision carries a 2-ATR stop and a TARGET_R target", async () => {
     const base = series(260);
     const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
     const candles = series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
@@ -140,17 +140,17 @@ describe("Trend Breakout — planner", () => {
     config: { symbol: "BTCUSDT", timeframe: "4h", capital: 100, leverage: 5, capitalMode: "fixed" as const },
   });
 
-  it("rests a LIMIT at the breakout close with a 10R cap and a one-candle expiry", () => {
+  it("rests a LIMIT at the breakout close with a TARGET_R cap and a one-candle expiry", () => {
     const before = Date.now();
     const plan = new TrendBreakoutPlanner().plan(ctx(100, 97, 100.5));
-    expect(plan).toMatchObject({ action: "BUY", entryType: "LIMIT", limitPrice: 100, stopLoss: 97, takeProfit: 130, riskRewardRatio: 10 });
+    expect(plan).toMatchObject({ action: "BUY", entryType: "LIMIT", limitPrice: 100, stopLoss: 97, takeProfit: 100 + TARGET_R * 3, riskRewardRatio: TARGET_R });
     expect(new Date(plan.expiryTime).getTime() - before).toBeGreaterThanOrEqual(240 * 60_000 - 1000);
   });
 
   it("uses the live price when it already pulled back below the breakout close", () => {
     const plan = new TrendBreakoutPlanner().plan(ctx(100, 97, 99));
     expect(plan.limitPrice).toBe(99);
-    expect(plan.takeProfit).toBeCloseTo(99 + 10 * 2);
+    expect(plan.takeProfit).toBeCloseTo(99 + TARGET_R * 2);
   });
 
   it("keeps the shared safety rules (stop more than 5% away is rejected)", () => {
@@ -200,7 +200,7 @@ describe("Trend Breakout — wiring", () => {
     adapter.setSlice(candles, candles.length);
     const result = await new AutomationEngine(adapter).run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", leverage: 5, capital: 1000, capitalMode: "fixed", maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false, momentumEntriesOnly: true });
     expect(result.signal).toBe("BUY");
-    expect(result.plan?.riskRewardRatio).toBe(10);
+    expect(result.plan?.riskRewardRatio).toBe(TARGET_R);
   });
 
   it("backtest keeps trading in fixed-capital mode after a losing trade", async () => {

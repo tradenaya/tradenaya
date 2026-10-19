@@ -49,7 +49,7 @@ export function StopLossHistory({ positionId, executionId, className }: { positi
         <Box label="Entry price" value={formatWithUnit(h.entryPrice)} />
         <Box label={h.open ? "Current price" : "Exit price"} value={formatWithUnit(h.open ? h.currentPrice : h.exitPrice)} />
         <Box label={h.open ? "Stop-loss now" : "Last stop-loss"} value={formatWithUnit(h.current.price)} sub={<IfHit amount={result(h.current.price)} />} check={h.current.check} exchange={exchange} />
-        <Box label="Take-profit" value={formatWithUnit(h.takeProfit.price)} sub={<IfHit amount={result(h.takeProfit.price)} />} check={h.takeProfit.check} exchange={exchange} />
+        <Box label={h.takeProfit.trails && h.targetMoves.length > 0 ? "Take-profit now" : "Take-profit"} value={formatWithUnit(h.takeProfit.price)} sub={<IfHit amount={result(h.takeProfit.price)} />} check={h.takeProfit.check} exchange={exchange} />
       </div>
 
       {/* Timeline */}
@@ -60,6 +60,18 @@ export function StopLossHistory({ positionId, executionId, className }: { positi
 
         {h.moves.map((m, i) => (
           <Step key={i} at={m.at} dot="bg-emerald-400" title="Stop-loss moved">
+            <span className="inline-flex flex-wrap items-center gap-1">
+              <span className="tabular-nums">{formatWithUnit(m.from)}</span>
+              <ArrowRight size={12} className="text-muted-foreground" />
+              <b className="tabular-nums text-foreground">{formatWithUnit(m.to)}</b>
+            </span>
+            {" · "}
+            <IfHit amount={result(m.to)} />
+          </Step>
+        ))}
+
+        {h.targetMoves.map((m, i) => (
+          <Step key={`t${i}`} at={m.at} dot="bg-emerald-300" title="Take-profit moved up">
             <span className="inline-flex flex-wrap items-center gap-1">
               <span className="tabular-nums">{formatWithUnit(m.from)}</span>
               <ArrowRight size={12} className="text-muted-foreground" />
@@ -85,7 +97,9 @@ export function StopLossHistory({ positionId, executionId, className }: { positi
 
       {h.open && h.moves.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          {h.trailRule.startsWith("The stop stays")
+          {h.trailRule.startsWith("When the price reaches")
+            ? "When the price reaches the take-profit, the trade stays open: the stop-loss moves up to lock profit and the take-profit moves further out."
+            : h.trailRule.startsWith("The stop stays")
             ? "The stop-loss moves only after the trade is in good profit. Then it moves to your entry price, so this trade can no longer lose."
             : h.trailRule}
         </p>
