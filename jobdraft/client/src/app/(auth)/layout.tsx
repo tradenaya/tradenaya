@@ -13,7 +13,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
       <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">{children}</div>
       <p className="mt-6 max-w-sm text-center text-sm text-slate-600">
-        JobDraft finds jobs that accept email applications and prepares drafts in your own Gmail. Nothing is ever sent for you.
+        JobDraft finds jobs that accept email applications and writes a tailored email for each one in your own Gmail. Strong matches are sent automatically, with 30 minutes for you to cancel; the rest wait in your drafts to review and send.
       </p>
     </main>
   );

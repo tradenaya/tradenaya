@@ -178,7 +178,21 @@ pm2 start ecosystem.config.cjs     # jobdraft-server (one instance) + jobdraft-c
 pm2 save
 ```
 
-After later updates: `git pull && cd jobdraft && npm run setup && npm run build && pm2 restart jobdraft-server jobdraft-client`.
+That first setup is done by hand once. After it, **updates deploy automatically**:
+1. Merge to `main`.
+2. Tradenaya's "Deploy to VPS" runs as usual and pulls the code.
+3. When it finishes, **"Deploy JobDraft"** (`.github/workflows/jobdraft-deploy.yml`) runs `jobdraft/scripts/deploy.sh` on the server. The script:
+   - skips quickly if nothing under `jobdraft/` changed;
+   - installs packages only when a lockfile changed;
+   - builds beside the live app, swaps the build in, and restarts `jobdraft-server` / `jobdraft-client`;
+   - health-checks both, and restores the previous build if the new one doesn't answer.
+
+How it stays out of Tradenaya's way:
+- It never runs at the same time as Tradenaya's deploy and never cancels it.
+- It runs no git commands on the server and modifies no tracked file.
+- It reuses the existing `DEPLOY_*` secrets.
+
+To redeploy by hand: **Actions → Deploy JobDraft → Run workflow** (tick "force" to rebuild anyway), or on the server: `bash ~/tradenaya/jobdraft/scripts/deploy.sh`. The last run's log is in `~/tradenaya/jobdraft/.deploy.log`.
 
 Keep `jobdraft-server` at **one instance** so the cron jobs aren't duplicated. DB locks protect against duplicates anyway.
 

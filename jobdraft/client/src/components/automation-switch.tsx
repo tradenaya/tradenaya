@@ -44,7 +44,7 @@ export function AutomationSwitch({ profile, onChange, compact }: { profile: Prof
           </h2>
           <p id="automation-desc" className="mt-1 text-[15px] text-slate-700">
             {a.enabled
-              ? "Every day at your run time, JobDraft finds matching jobs, prepares emails in your Gmail and sends only the strongest matches."
+              ? "Every day at your run time, JobDraft finds matching jobs and prepares emails in your Gmail. Only the strongest matches are sent automatically, after a 30-minute window to cancel; the rest wait in your drafts."
               : a.changedAt
                 ? `Off since ${formatDateIst(a.changedAt)}. Nothing is fetched, drafted or sent until you turn it on.`
                 : "Turn on to start daily runs. Nothing is drafted or sent while it's off."}

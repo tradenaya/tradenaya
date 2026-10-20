@@ -69,7 +69,7 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
   return (
     <Card title="1. Your resume" id="resume">
       <p id="resume-help" className="mb-3 text-[15px] text-slate-600">
-        A text-based PDF up to 5 MB. We read it once to tailor your emails and attach it to every draft.
+        A text-based PDF up to 5 MB. We read it once to tailor your emails and attach it to every application.
       </p>
       {busy && (
         <div className="mb-3">

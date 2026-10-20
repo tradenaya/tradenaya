@@ -13,7 +13,7 @@ import { api, errorMessage } from "@/lib/api";
 import type { Profile } from "@/lib/types";
 
 const GMAIL_RESULT: Record<string, [ok: boolean, message: string]> = {
-  connected: [true, "Gmail connected. Drafts will appear in your Gmail Drafts folder."],
+  connected: [true, "Gmail connected. Your applications will be prepared in this Gmail account."],
   denied: [false, "Gmail was not connected because access was declined."],
   expired: [false, "That Gmail sign-in took too long. Please try again."],
   session: [false, "Please connect Gmail from this browser while logged in to JobDraft."],

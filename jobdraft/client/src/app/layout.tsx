@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "JobDraft",
-  description: "Tailored job application drafts in your own Gmail, twice a day.",
+  description: "Tailored job applications from your own Gmail, once a day at the time you choose.",
 };
 
 export const viewport: Viewport = {

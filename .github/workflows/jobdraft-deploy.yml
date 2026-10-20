@@ -1,0 +1,69 @@
+# Deploy JobDraft (jobdraft/) after Tradenaya's own deploy has finished.
+#
+# Tradenaya's "Deploy to VPS" pulls the repo on the server. This workflow then
+# runs jobdraft/scripts/deploy.sh, which builds JobDraft beside the live app,
+# restarts jobdraft-server / jobdraft-client, checks they answer and rolls back
+# by itself on failure. It skips quickly when nothing under jobdraft/ changed.
+#
+# It never runs at the same time as Tradenaya's deploy (it starts when that one
+# completes), uses its own queue so it can never cancel a Tradenaya deploy, and
+# reuses the same server secrets (DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY,
+# DEPLOY_KNOWN_HOSTS). No extra GitHub settings are needed.
+name: Deploy JobDraft
+
+on:
+  workflow_run:
+    workflows: ["Deploy to VPS"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button in the Actions tab, for a manual redeploy
+    inputs:
+      force:
+        description: "Rebuild and restart even if jobdraft/ didn't change"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-jobdraft
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prepare SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::Missing DEPLOY_SSH_KEY or DEPLOY_KNOWN_HOSTS secret — see DEPLOY.md."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy JobDraft on the server
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          FORCE: ${{ inputs.force && '1' || '0' }}
+        run: |
+          # Runs DETACHED on the server (setsid + nohup) and this job only streams
+          # its log, so a cancelled job or lost connection never kills a deploy
+          # halfway. The result is also in ~/tradenaya/jobdraft/.deploy.log.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          set -e
+          cd ~/tradenaya/jobdraft
+          : > .deploy.log
+          FORCE='$FORCE' setsid nohup bash scripts/deploy.sh > .deploy.log 2>&1 < /dev/null &
+          pid=\$!
+          tail -n +1 -f --pid=\$pid .deploy.log
+          wait \$pid
+          EOF

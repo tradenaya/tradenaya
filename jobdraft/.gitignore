@@ -1,6 +1,7 @@
 # JobDraft — everything generated or secret stays out of git
 node_modules/
 dist/
+dist-*/
 .next/
 .next-*/
 out/
@@ -12,6 +13,11 @@ blob-report/
 next-env.d.ts
 .mock-storage/
 *.log
+
+# Server-side deploy state (scripts/deploy.sh)
+.deploy.lock
+.deploy-state
+.deployed-tree
 
 # Real env files are secret; the examples are committed.
 .env
