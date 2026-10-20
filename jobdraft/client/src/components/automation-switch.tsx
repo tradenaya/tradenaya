@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateIst } from "@/lib/format";
 import type { Profile } from "@/lib/types";
+import { useConfirm } from "./confirm-dialog";
 import { cx } from "./ui";
 
 /** The master switch: "I got a job, stop searching." Large on the dashboard, mirrored on Setup. */
@@ -13,8 +14,24 @@ export function AutomationSwitch({ profile, onChange, compact }: { profile: Prof
   const [busy, setBusy] = useState(false);
   const a = profile.automation;
   const blocked = !a.enabled && a.missing.length > 0;
+  const confirm = useConfirm();
 
   async function toggle() {
+    const ok = await confirm(
+      a.enabled
+        ? {
+            title: "Turn automation off?",
+            body: "JobDraft stops searching, preparing and sending emails. Anything waiting to be sent is cancelled and stays in your Gmail drafts. Your settings and history are kept.",
+            confirmLabel: "Turn off",
+            danger: true,
+          }
+        : {
+            title: "Turn automation on?",
+            body: "Every day at your run time, JobDraft finds matching jobs and prepares emails in your Gmail. The strongest matches are sent automatically, after a 30-minute window in which you can cancel them.",
+            confirmLabel: "Turn on",
+          },
+    );
+    if (!ok) return;
     setBusy(true);
     try {
       const next = await api<Profile>("/api/automation", { method: "PUT", body: { enabled: !a.enabled } });

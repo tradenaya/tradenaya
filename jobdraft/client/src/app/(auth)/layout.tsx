@@ -1,20 +1,14 @@
-import { FileText } from "lucide-react";
+import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <main className="pt-safe pb-safe relative flex min-h-dvh flex-col items-center px-4 py-8 sm:justify-center">
-      <ThemeToggle className="absolute right-3 top-3" />
-      <div className="mb-6 flex items-center gap-2 text-xl font-bold text-slate-900">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-brand-600 text-white">
-          <FileText className="size-6" aria-hidden />
-        </span>
-        JobDraft
-      </div>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">{children}</div>
-      <p className="mt-6 max-w-sm text-center text-sm text-slate-600">
-        JobDraft finds jobs that accept email applications and writes a tailored email for each one in your own Gmail. Strong matches are sent automatically, with 30 minutes for you to cancel; the rest wait in your drafts to review and send.
-      </p>
+    // Centred vertically on every screen size; on short screens it simply scrolls (min-h, not h).
+    <main className="pt-safe pb-safe relative flex min-h-dvh flex-col items-center justify-center px-4 py-16">
+      <ThemeToggle className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))]" />
+      <Logo size="lg" className="mb-6" />
+      <div className="w-full max-w-sm animate-rise rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">{children}</div>
+      <p className="mt-6 max-w-sm animate-rise text-center text-[15px] font-medium text-slate-600 [animation-delay:120ms]">Your job hunt, on autopilot.</p>
     </main>
   );
 }

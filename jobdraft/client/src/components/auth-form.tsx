@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useAuth } from "./auth";
+import { useConfirm } from "./confirm-dialog";
 import { Button, Field, Input, PasswordInput } from "./ui";
 
 type Mode = "login" | "register";
@@ -39,6 +40,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     if (!loading && user && !submitted.current) router.replace(safeNext);
   }, [loading, user, router, safeNext]);
 
+  const confirm = useConfirm();
   const set = (k: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement>) => setValues((v) => ({ ...v, [k]: e.target.value }));
 
   async function submit(e: React.FormEvent) {
@@ -47,6 +49,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setErrors(errs);
     setFormError("");
     if (Object.keys(errs).length) return;
+    if (
+      mode === "register" &&
+      !(await confirm({
+        title: "Create your account?",
+        body: `We'll create a JobDraft account for ${values.email.trim()}. Next, you'll upload your resume and connect Gmail.`,
+        confirmLabel: "Create account",
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const body = mode === "register" ? values : { email: values.email, password: values.password };

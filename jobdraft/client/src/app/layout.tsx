@@ -1,11 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/components/auth";
+import { ConfirmProvider } from "@/components/confirm-dialog";
 import { THEME_INIT_SCRIPT, ThemedToaster } from "@/components/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "JobDraft",
-  description: "Tailored job applications from your own Gmail, once a day at the time you choose.",
+  description: "Your job hunt, on autopilot — tailored applications from your own Gmail.",
 };
 
 export const viewport: Viewport = {
@@ -14,7 +15,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0e1c" },
   ],
 };
 
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="min-h-dvh antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </AuthProvider>
         <ThemedToaster />
       </body>
     </html>

@@ -1,8 +1,9 @@
 "use client";
 
-import { FileText, History, LayoutDashboard, SlidersHorizontal, UserRound } from "lucide-react";
+import { History, LayoutDashboard, SlidersHorizontal, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Logo } from "./logo";
 import { ThemeToggle } from "./theme";
 import { cx } from "./ui";
 
@@ -24,11 +25,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
       <header className="pt-safe sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-4 sm:px-6 lg:px-8">
-          <Link href="/dashboard" className="flex min-h-11 items-center gap-2 font-bold text-slate-900">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-brand-600 text-white">
-              <FileText className="size-5" aria-hidden />
-            </span>
-            JobDraft
+          <Link href="/dashboard" className="flex min-h-11 items-center" aria-label="JobDraft — dashboard">
+            <Logo />
           </Link>
           <div className="flex items-center gap-1">
             {/* Desktop / tablet nav */}

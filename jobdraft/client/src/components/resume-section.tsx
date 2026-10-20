@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, API_URL, errorMessage } from "@/lib/api";
 import { formatYears } from "@/lib/format";
 import type { Profile } from "@/lib/types";
+import { useConfirm } from "./confirm-dialog";
 import { Banner, Card, cx } from "./ui";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -15,11 +16,29 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const resume = profile.resume;
+  const confirm = useConfirm();
 
   async function upload(file: File) {
     setError("");
     if (file.size > MAX_BYTES) return setError("The file is larger than 5 MB.");
     if (!(file.type === "application/pdf" || /\.pdf$/i.test(file.name))) return setError("Please choose a PDF file.");
+    const ok = await confirm(
+      resume
+        ? {
+            title: "Replace your resume?",
+            body: `"${file.name}" will replace your current resume. JobDraft reads it again, updates your summary and refreshes the companies taken from it. Your old file is removed only after the new one is read successfully.`,
+            confirmLabel: "Replace resume",
+          }
+        : {
+            title: "Upload this resume?",
+            body: `JobDraft will read "${file.name}" to tailor your emails, and attach it to every application.`,
+            confirmLabel: "Upload resume",
+          },
+    );
+    if (!ok) {
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     const form = new FormData();
     form.append("resume", file, file.name);
     setBusy(true);

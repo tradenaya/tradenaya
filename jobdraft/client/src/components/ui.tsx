@@ -11,14 +11,14 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:bg-slate-300 disabled:text-slate-600",
+  primary: "bg-brand-gradient text-white shadow-md shadow-brand-600/25 hover:brightness-110 hover:shadow-lg hover:shadow-brand-600/30 active:brightness-95 disabled:bg-none disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none disabled:brightness-100",
   secondary: "bg-white text-slate-900 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 active:bg-slate-100 disabled:text-slate-500",
   ghost: "bg-transparent text-brand-700 hover:bg-brand-50 active:bg-brand-100 disabled:text-slate-500",
   danger: "bg-red-700 text-white hover:bg-red-800 active:bg-red-900 disabled:bg-slate-300 disabled:text-slate-600",
 };
 
 const BASE =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-base font-semibold transition-colors disabled:cursor-not-allowed select-none";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-base font-semibold transition duration-150 enabled:active:scale-[0.98] disabled:cursor-not-allowed select-none";
 
 export const Button = forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; loading?: boolean; full?: boolean }>(
   function Button({ variant = "primary", loading, full, className, children, disabled, ...rest }, ref) {
@@ -48,7 +48,7 @@ export function ButtonLink({ href, variant = "primary", full, external, classNam
 
 export function Card({ title, action, children, className, id }: { title?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <section id={id} className={cx("rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-6", className)} aria-labelledby={title && id ? `${id}-title` : undefined}>
+    <section id={id} className={cx("animate-rise rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-6", className)} aria-labelledby={title && id ? `${id}-title` : undefined}>
       {(title || action) && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           {title && (
@@ -102,7 +102,7 @@ export function PageSkeleton() {
 
 export function PageTitle({ children, subtitle }: { children: React.ReactNode; subtitle?: React.ReactNode }) {
   return (
-    <div className="mb-4">
+    <div className="mb-4 animate-rise">
       <h1 className="text-2xl font-bold tracking-tight text-slate-900">{children}</h1>
       {subtitle && <p className="mt-1 text-slate-600">{subtitle}</p>}
     </div>

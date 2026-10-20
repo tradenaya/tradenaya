@@ -29,6 +29,14 @@ async function pickTime(page: Page, ampm: "AM" | "PM", hour: number, minute: num
   await expect(dialog).toBeHidden();
 }
 
+/** Every important action asks first: check the popup appeared, then confirm it. */
+async function confirmWith(page: Page, label: string) {
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: label, exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
 async function register(page: Page, email: string) {
   await page.goto("/register");
   await page.getByLabel("Name").fill("Priya Sharma");
@@ -37,6 +45,7 @@ async function register(page: Page, email: string) {
   await page.getByRole("button", { name: "Show password" }).click();
   await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Create account" }).click();
+  await confirmWith(page, "Create account");
   await expect(page).toHaveURL(/\/setup/);
 }
 
@@ -70,6 +79,7 @@ test("register → setup → automation ON → run now → dashboard sends → h
 
   // 1. Resume upload + preview (past employers become "companies to skip")
   await page.locator("#resume-file").setInputFiles(RESUME);
+  await confirmWith(page, "Upload resume");
   await expect(page.getByText("If anything is wrong, upload a corrected resume.")).toBeVisible({ timeout: 60_000 });
   await expect(page.locator("#resume")).toContainText("Acme Retail Tech");
   const skip = page.getByRole("list", { name: "Companies to skip" });
@@ -94,10 +104,12 @@ test("register → setup → automation ON → run now → dashboard sends → h
   await pickTime(page, "AM", 6, 15);
   await expect(hint).toContainText("6:15 AM IST");
   await page.getByRole("button", { name: "Save preferences" }).click();
+  await confirmWith(page, "Save preferences");
   await expect(page.getByText("Preferences saved.")).toBeVisible();
 
   // 3. Connect Gmail (mocked OAuth round trip)
   await page.getByRole("button", { name: "Connect Gmail" }).click();
+  await confirmWith(page, "Continue to Google");
   await expect(page.getByText(/Gmail connected/).first()).toBeVisible();
   await expect(page.locator("#gmail")).toContainText("mock.user@gmail.com");
   await expect(page.locator("#gmail")).toContainText("Read email headers only");
@@ -109,11 +121,13 @@ test("register → setup → automation ON → run now → dashboard sends → h
   await expect(automation).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("next-run")).toHaveText("Automation is off");
   await automation.click();
+  await confirmWith(page, "Turn on");
   await expect(automation).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("next-run")).toContainText("6:15 AM IST");
   await expect(page.getByRole("link", { name: "Open Gmail drafts" })).toHaveAttribute("href", "https://mail.google.com/mail/u/0/#drafts");
   await expectNoHorizontalOverflow(page);
   await page.getByRole("button", { name: "Run now" }).click();
+  await confirmWith(page, "Run now");
   await expect(page.locator("#last-run").getByText("Ready to send")).toBeVisible({ timeout: 60_000 });
 
   // Scheduled sends with a countdown and Cancel
@@ -123,6 +137,7 @@ test("register → setup → automation ON → run now → dashboard sends → h
   expect(count).toBeGreaterThanOrEqual(2);
   await expect(upcoming.first()).toContainText(/in (29|30|31) min/);
   await upcoming.first().getByRole("button", { name: /^Cancel application/ }).click();
+  await confirmWith(page, "Cancel email");
   await expect(page.getByText("Cancelled. It stays in your Gmail drafts.")).toBeVisible();
   await expect(upcoming).toHaveCount(count - 1);
   await expectNoHorizontalOverflow(page);
@@ -151,6 +166,7 @@ test("register → setup → automation ON → run now → dashboard sends → h
   // Dashboard → Automation OFF
   await goTo(page, "Dashboard", isMobile);
   await page.getByRole("switch", { name: /Automation/ }).click();
+  await confirmWith(page, "Turn off");
   await expect(page.getByRole("switch", { name: /Automation/ })).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("next-run")).toHaveText("Automation is off");
   await expect(page.getByRole("button", { name: "Run now" })).toBeDisabled();
@@ -186,6 +202,7 @@ test("deactivate account → confirmation screen → register again with the sam
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill("e2e-password-2");
   await page.getByRole("button", { name: "Create account" }).click();
+  await confirmWith(page, "Create account");
   await expect(page).toHaveURL(/\/setup/);
   await expect(page.locator('label[for="resume-file"]')).toContainText("Upload resume (PDF)");
   await expect(page.getByRole("navigation", { name: "Setup progress" })).toContainText("current step");
