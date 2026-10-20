@@ -1,0 +1,817 @@
+{
+ "mumbai": [
+  "mumbai",
+  "bombay"
+ ],
+ "bombay": [
+  "mumbai",
+  "bombay"
+ ],
+ "delhi": [
+  "delhi",
+  "delhi ncr"
+ ],
+ "delhi ncr": [
+  "delhi",
+  "delhi ncr"
+ ],
+ "bengaluru": [
+  "bengaluru",
+  "bangalore"
+ ],
+ "bangalore": [
+  "bengaluru",
+  "bangalore"
+ ],
+ "ahmedabad": [
+  "ahmedabad",
+  "amdavad"
+ ],
+ "amdavad": [
+  "ahmedabad",
+  "amdavad"
+ ],
+ "chennai": [
+  "chennai",
+  "madras"
+ ],
+ "madras": [
+  "chennai",
+  "madras"
+ ],
+ "kolkata": [
+  "kolkata",
+  "calcutta"
+ ],
+ "calcutta": [
+  "kolkata",
+  "calcutta"
+ ],
+ "pune": [
+  "pune",
+  "poona"
+ ],
+ "poona": [
+  "pune",
+  "poona"
+ ],
+ "kanpur": [
+  "kanpur",
+  "cawnpore"
+ ],
+ "cawnpore": [
+  "kanpur",
+  "cawnpore"
+ ],
+ "visakhapatnam": [
+  "visakhapatnam",
+  "vizag",
+  "vishakhapatnam"
+ ],
+ "vizag": [
+  "visakhapatnam",
+  "vizag",
+  "vishakhapatnam"
+ ],
+ "vishakhapatnam": [
+  "visakhapatnam",
+  "vizag",
+  "vishakhapatnam"
+ ],
+ "vadodara": [
+  "vadodara",
+  "baroda"
+ ],
+ "baroda": [
+  "vadodara",
+  "baroda"
+ ],
+ "nashik": [
+  "nashik",
+  "nasik"
+ ],
+ "nasik": [
+  "nashik",
+  "nasik"
+ ],
+ "kalyan dombivli": [
+  "kalyan dombivli",
+  "kalyan",
+  "dombivli"
+ ],
+ "kalyan": [
+  "kalyan dombivli",
+  "kalyan",
+  "dombivli"
+ ],
+ "dombivli": [
+  "kalyan dombivli",
+  "kalyan",
+  "dombivli"
+ ],
+ "vasai virar": [
+  "vasai virar",
+  "vasai",
+  "virar"
+ ],
+ "vasai": [
+  "vasai virar",
+  "vasai",
+  "virar"
+ ],
+ "virar": [
+  "vasai virar",
+  "vasai",
+  "virar"
+ ],
+ "varanasi": [
+  "varanasi",
+  "banaras",
+  "benares"
+ ],
+ "banaras": [
+  "varanasi",
+  "banaras",
+  "benares"
+ ],
+ "benares": [
+  "varanasi",
+  "banaras",
+  "benares"
+ ],
+ "aurangabad": [
+  "aurangabad",
+  "chhatrapati sambhajinagar"
+ ],
+ "chhatrapati sambhajinagar": [
+  "aurangabad",
+  "chhatrapati sambhajinagar"
+ ],
+ "navi mumbai": [
+  "navi mumbai",
+  "new bombay"
+ ],
+ "new bombay": [
+  "navi mumbai",
+  "new bombay"
+ ],
+ "prayagraj": [
+  "prayagraj",
+  "allahabad"
+ ],
+ "allahabad": [
+  "prayagraj",
+  "allahabad"
+ ],
+ "coimbatore": [
+  "coimbatore",
+  "kovai"
+ ],
+ "kovai": [
+  "coimbatore",
+  "kovai"
+ ],
+ "vijayawada": [
+  "vijayawada",
+  "bezawada"
+ ],
+ "bezawada": [
+  "vijayawada",
+  "bezawada"
+ ],
+ "guwahati": [
+  "guwahati",
+  "gauhati"
+ ],
+ "gauhati": [
+  "guwahati",
+  "gauhati"
+ ],
+ "solapur": [
+  "solapur",
+  "sholapur"
+ ],
+ "sholapur": [
+  "solapur",
+  "sholapur"
+ ],
+ "hubballi": [
+  "hubballi",
+  "hubli",
+  "hubli dharwad",
+  "dharwad"
+ ],
+ "hubli": [
+  "hubballi",
+  "hubli",
+  "hubli dharwad",
+  "dharwad"
+ ],
+ "hubli dharwad": [
+  "hubballi",
+  "hubli",
+  "hubli dharwad",
+  "dharwad"
+ ],
+ "dharwad": [
+  "hubballi",
+  "hubli",
+  "hubli dharwad",
+  "dharwad"
+ ],
+ "tiruchirappalli": [
+  "tiruchirappalli",
+  "trichy",
+  "tiruchi"
+ ],
+ "trichy": [
+  "tiruchirappalli",
+  "trichy",
+  "tiruchi"
+ ],
+ "tiruchi": [
+  "tiruchirappalli",
+  "trichy",
+  "tiruchi"
+ ],
+ "mysuru": [
+  "mysuru",
+  "mysore"
+ ],
+ "mysore": [
+  "mysuru",
+  "mysore"
+ ],
+ "tiruppur": [
+  "tiruppur",
+  "tirupur"
+ ],
+ "tirupur": [
+  "tiruppur",
+  "tirupur"
+ ],
+ "gurugram": [
+  "gurugram",
+  "gurgaon"
+ ],
+ "gurgaon": [
+  "gurugram",
+  "gurgaon"
+ ],
+ "jalandhar": [
+  "jalandhar",
+  "jullundur"
+ ],
+ "jullundur": [
+  "jalandhar",
+  "jullundur"
+ ],
+ "mira bhayandar": [
+  "mira bhayandar",
+  "mira road",
+  "bhayandar"
+ ],
+ "mira road": [
+  "mira bhayandar",
+  "mira road",
+  "bhayandar"
+ ],
+ "bhayandar": [
+  "mira bhayandar",
+  "mira road",
+  "bhayandar"
+ ],
+ "thiruvananthapuram": [
+  "thiruvananthapuram",
+  "trivandrum"
+ ],
+ "trivandrum": [
+  "thiruvananthapuram",
+  "trivandrum"
+ ],
+ "jamshedpur": [
+  "jamshedpur",
+  "tatanagar"
+ ],
+ "tatanagar": [
+  "jamshedpur",
+  "tatanagar"
+ ],
+ "kochi": [
+  "kochi",
+  "cochin",
+  "ernakulam"
+ ],
+ "cochin": [
+  "kochi",
+  "cochin",
+  "ernakulam"
+ ],
+ "ernakulam": [
+  "kochi",
+  "cochin",
+  "ernakulam"
+ ],
+ "rourkela": [
+  "rourkela",
+  "raurkela"
+ ],
+ "raurkela": [
+  "rourkela",
+  "raurkela"
+ ],
+ "kalaburagi": [
+  "kalaburagi",
+  "gulbarga"
+ ],
+ "gulbarga": [
+  "kalaburagi",
+  "gulbarga"
+ ],
+ "mangaluru": [
+  "mangaluru",
+  "mangalore"
+ ],
+ "mangalore": [
+  "mangaluru",
+  "mangalore"
+ ],
+ "belagavi": [
+  "belagavi",
+  "belgaum"
+ ],
+ "belgaum": [
+  "belagavi",
+  "belgaum"
+ ],
+ "davanagere": [
+  "davanagere",
+  "davangere"
+ ],
+ "davangere": [
+  "davanagere",
+  "davangere"
+ ],
+ "kozhikode": [
+  "kozhikode",
+  "calicut"
+ ],
+ "calicut": [
+  "kozhikode",
+  "calicut"
+ ],
+ "rajahmundry": [
+  "rajahmundry",
+  "rajamahendravaram"
+ ],
+ "rajamahendravaram": [
+  "rajahmundry",
+  "rajamahendravaram"
+ ],
+ "bokaro": [
+  "bokaro",
+  "bokaro steel city"
+ ],
+ "bokaro steel city": [
+  "bokaro",
+  "bokaro steel city"
+ ],
+ "ballari": [
+  "ballari",
+  "bellary"
+ ],
+ "bellary": [
+  "ballari",
+  "bellary"
+ ],
+ "berhampur": [
+  "berhampur",
+  "brahmapur"
+ ],
+ "brahmapur": [
+  "berhampur",
+  "brahmapur"
+ ],
+ "ahmednagar": [
+  "ahmednagar",
+  "ahilyanagar"
+ ],
+ "ahilyanagar": [
+  "ahmednagar",
+  "ahilyanagar"
+ ],
+ "kollam": [
+  "kollam",
+  "quilon"
+ ],
+ "quilon": [
+  "kollam",
+  "quilon"
+ ],
+ "kadapa": [
+  "kadapa",
+  "cuddapah"
+ ],
+ "cuddapah": [
+  "kadapa",
+  "cuddapah"
+ ],
+ "vijayapura": [
+  "vijayapura",
+  "bijapur"
+ ],
+ "bijapur": [
+  "vijayapura",
+  "bijapur"
+ ],
+ "shivamogga": [
+  "shivamogga",
+  "shimoga"
+ ],
+ "shimoga": [
+  "shivamogga",
+  "shimoga"
+ ],
+ "thrissur": [
+  "thrissur",
+  "trichur"
+ ],
+ "trichur": [
+  "thrissur",
+  "trichur"
+ ],
+ "bardhaman": [
+  "bardhaman",
+  "burdwan"
+ ],
+ "burdwan": [
+  "bardhaman",
+  "burdwan"
+ ],
+ "tumakuru": [
+  "tumakuru",
+  "tumkur"
+ ],
+ "tumkur": [
+  "tumakuru",
+  "tumkur"
+ ],
+ "bathinda": [
+  "bathinda",
+  "bhatinda"
+ ],
+ "bhatinda": [
+  "bathinda",
+  "bhatinda"
+ ],
+ "sonipat": [
+  "sonipat",
+  "sonepat"
+ ],
+ "sonepat": [
+  "sonipat",
+  "sonepat"
+ ],
+ "arrah": [
+  "arrah",
+  "ara"
+ ],
+ "ara": [
+  "arrah",
+  "ara"
+ ],
+ "anantapur": [
+  "anantapur",
+  "anantapuramu"
+ ],
+ "anantapuramu": [
+  "anantapur",
+  "anantapuramu"
+ ],
+ "puducherry": [
+  "puducherry",
+  "pondicherry",
+  "pondy"
+ ],
+ "pondicherry": [
+  "puducherry",
+  "pondicherry",
+  "pondy"
+ ],
+ "pondy": [
+  "puducherry",
+  "pondicherry",
+  "pondy"
+ ],
+ "thoothukudi": [
+  "thoothukudi",
+  "tuticorin"
+ ],
+ "tuticorin": [
+  "thoothukudi",
+  "tuticorin"
+ ],
+ "haridwar": [
+  "haridwar",
+  "hardwar"
+ ],
+ "hardwar": [
+  "haridwar",
+  "hardwar"
+ ],
+ "sri ganganagar": [
+  "sri ganganagar",
+  "ganganagar"
+ ],
+ "ganganagar": [
+  "sri ganganagar",
+  "ganganagar"
+ ],
+ "thanjavur": [
+  "thanjavur",
+  "tanjore"
+ ],
+ "tanjore": [
+  "thanjavur",
+  "tanjore"
+ ],
+ "katni": [
+  "katni",
+  "murwara"
+ ],
+ "murwara": [
+  "katni",
+  "murwara"
+ ],
+ "munger": [
+  "munger",
+  "monghyr"
+ ],
+ "monghyr": [
+  "munger",
+  "monghyr"
+ ],
+ "hosapete": [
+  "hosapete",
+  "hospet"
+ ],
+ "hospet": [
+  "hosapete",
+  "hospet"
+ ],
+ "malda": [
+  "malda",
+  "english bazar"
+ ],
+ "english bazar": [
+  "malda",
+  "english bazar"
+ ],
+ "chhapra": [
+  "chhapra",
+  "chapra"
+ ],
+ "chapra": [
+  "chhapra",
+  "chapra"
+ ],
+ "baharampur": [
+  "baharampur",
+  "berhampore"
+ ],
+ "berhampore": [
+  "baharampur",
+  "berhampore"
+ ],
+ "morbi": [
+  "morbi",
+  "morvi"
+ ],
+ "morvi": [
+  "morbi",
+  "morvi"
+ ],
+ "mahbubnagar": [
+  "mahbubnagar",
+  "mahabubnagar"
+ ],
+ "mahabubnagar": [
+  "mahbubnagar",
+  "mahabubnagar"
+ ],
+ "raebareli": [
+  "raebareli",
+  "rae bareli"
+ ],
+ "rae bareli": [
+  "raebareli",
+  "rae bareli"
+ ],
+ "kanchipuram": [
+  "kanchipuram",
+  "kanchi"
+ ],
+ "kanchi": [
+  "kanchipuram",
+  "kanchi"
+ ],
+ "hisar": [
+  "hisar",
+  "hissar"
+ ],
+ "hissar": [
+  "hisar",
+  "hissar"
+ ],
+ "shimla": [
+  "shimla",
+  "simla"
+ ],
+ "simla": [
+  "shimla",
+  "simla"
+ ],
+ "dharamshala": [
+  "dharamshala",
+  "dharamsala"
+ ],
+ "dharamsala": [
+  "dharamshala",
+  "dharamsala"
+ ],
+ "panaji": [
+  "panaji",
+  "panjim"
+ ],
+ "panjim": [
+  "panaji",
+  "panjim"
+ ],
+ "margao": [
+  "margao",
+  "madgaon"
+ ],
+ "madgaon": [
+  "margao",
+  "madgaon"
+ ],
+ "vasco da gama": [
+  "vasco da gama",
+  "vasco"
+ ],
+ "vasco": [
+  "vasco da gama",
+  "vasco"
+ ],
+ "port blair": [
+  "port blair",
+  "sri vijaya puram"
+ ],
+ "sri vijaya puram": [
+  "port blair",
+  "sri vijaya puram"
+ ],
+ "alappuzha": [
+  "alappuzha",
+  "alleppey"
+ ],
+ "alleppey": [
+  "alappuzha",
+  "alleppey"
+ ],
+ "kannur": [
+  "kannur",
+  "cannanore"
+ ],
+ "cannanore": [
+  "kannur",
+  "cannanore"
+ ],
+ "palakkad": [
+  "palakkad",
+  "palghat"
+ ],
+ "palghat": [
+  "palakkad",
+  "palghat"
+ ],
+ "chengalpattu": [
+  "chengalpattu",
+  "chengalpet"
+ ],
+ "chengalpet": [
+  "chengalpattu",
+  "chengalpet"
+ ],
+ "ooty": [
+  "ooty",
+  "udhagamandalam"
+ ],
+ "udhagamandalam": [
+  "ooty",
+  "udhagamandalam"
+ ],
+ "machilipatnam": [
+  "machilipatnam",
+  "masulipatnam"
+ ],
+ "masulipatnam": [
+  "machilipatnam",
+  "masulipatnam"
+ ],
+ "mehsana": [
+  "mehsana",
+  "mahesana"
+ ],
+ "mahesana": [
+  "mehsana",
+  "mahesana"
+ ],
+ "bharuch": [
+  "bharuch",
+  "broach"
+ ],
+ "broach": [
+  "bharuch",
+  "broach"
+ ],
+ "balasore": [
+  "balasore",
+  "baleshwar"
+ ],
+ "baleshwar": [
+  "balasore",
+  "baleshwar"
+ ],
+ "ayodhya": [
+  "ayodhya",
+  "faizabad"
+ ],
+ "faizabad": [
+  "ayodhya",
+  "faizabad"
+ ],
+ "budaun": [
+  "budaun",
+  "badaun"
+ ],
+ "badaun": [
+  "budaun",
+  "badaun"
+ ],
+ "mohali": [
+  "mohali",
+  "sahibzada ajit singh nagar",
+  "sas nagar"
+ ],
+ "sahibzada ajit singh nagar": [
+  "mohali",
+  "sahibzada ajit singh nagar",
+  "sas nagar"
+ ],
+ "sas nagar": [
+  "mohali",
+  "sahibzada ajit singh nagar",
+  "sas nagar"
+ ],
+ "chittorgarh": [
+  "chittorgarh",
+  "chittaurgarh"
+ ],
+ "chittaurgarh": [
+  "chittorgarh",
+  "chittaurgarh"
+ ],
+ "beed": [
+  "beed",
+  "bid"
+ ],
+ "bid": [
+  "beed",
+  "bid"
+ ],
+ "cooch behar": [
+  "cooch behar",
+  "koch bihar"
+ ],
+ "koch bihar": [
+  "cooch behar",
+  "koch bihar"
+ ],
+ "serampore": [
+  "serampore",
+  "srirampur"
+ ],
+ "srirampur": [
+  "serampore",
+  "srirampur"
+ ],
+ "bidhannagar": [
+  "bidhannagar",
+  "salt lake"
+ ],
+ "salt lake": [
+  "bidhannagar",
+  "salt lake"
+ ]
+}

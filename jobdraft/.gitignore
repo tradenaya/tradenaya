@@ -1,0 +1,19 @@
+# JobDraft — everything generated or secret stays out of git
+node_modules/
+dist/
+.next/
+.next-*/
+out/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+*.tsbuildinfo
+next-env.d.ts
+.mock-storage/
+*.log
+
+# Real env files are secret; the examples are committed.
+.env
+.env.*
+!.env.example

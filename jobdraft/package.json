@@ -1,0 +1,19 @@
+{
+  "name": "jobdraft",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JobDraft: tailored job application drafts in each user's own Gmail, twice a day.",
+  "scripts": {
+    "setup": "npm install && npm install --prefix server && npm install --prefix client",
+    "dev": "concurrently -k -n server,client -c blue,magenta \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix server && npm run build --prefix client",
+    "start": "concurrently -k -n server,client -c blue,magenta \"npm run start --prefix server\" \"npm run start --prefix client\"",
+    "lint": "npm run lint --prefix server && npm run lint --prefix client",
+    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client",
+    "test": "npm run typecheck && npm run lint && npm run test --prefix server",
+    "test:e2e": "npm run test:e2e --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}
