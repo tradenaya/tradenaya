@@ -31,8 +31,16 @@ export async function api<T>(path: string, opts: { method?: string; body?: Body;
     throw new ApiError(0, "Can't reach the JobDraft server. Check your connection and try again.");
   }
   const data = (await res.json().catch(() => ({}))) as { error?: string; fields?: Record<string, string>; code?: string };
-  if (!res.ok) throw new ApiError(res.status, data.error || "Something went wrong. Please try again.", data.fields ?? {}, data.code);
+  if (!res.ok) throw new ApiError(res.status, data.error || proxyMessage(res.status), data.fields ?? {}, data.code);
   return data as T;
 }
 
-export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");
+/** Errors without a JSON body come from the proxy in front of the API, not from JobDraft itself. */
+function proxyMessage(status: number): string {
+  if (status === 413) return "This file is too large for the server to accept.";
+  if (status === 502 || status === 503) return "JobDraft is restarting or unavailable. Please try again in a minute.";
+  if (status === 504) return "The server took too long to respond. Please try again in a minute.";
+  return "Something went wrong. Please try again.";
+}
+
+export const errorMessage =(err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");

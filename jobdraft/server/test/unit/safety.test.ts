@@ -3,7 +3,7 @@ import { mockResume } from "../../src/ai/mock.js";
 import type { JobCheck } from "../../src/ai/schemas.js";
 import type { Job } from "../../src/jobs/types.js";
 import { exclusionKey } from "../../src/matching/exclusions.js";
-import { buildSignature, classifyAutoSend, decideDraft, prepareFollowUpBody, styleProblem, templateFollowUp } from "../../src/runs/safety.js";
+import { buildSignature, classifyAutoSend, decideDraft, humanize, layoutEmail, prepareFollowUpBody, styleProblem, templateFollowUp } from "../../src/runs/safety.js";
 import { wordCount } from "../../src/matching/text.js";
 import { RESUME_LINES } from "../helpers.js";
 
@@ -184,5 +184,52 @@ describe("follow-up bodies", () => {
       expect(t).toContain("Nimbus Analytics Pvt Ltd");
       expect(t).not.toMatch(/[[\]{}<>]/);
     }
+  });
+});
+
+describe("human-sounding emails", () => {
+  it("replaces dashes used as punctuation, keeps hyphenated words", () => {
+    expect(humanize("I build APIs — mostly in Node.js – for a full-stack team")).toBe("I build APIs, mostly in Node.js, for a full-stack team");
+    expect(humanize("Backend Engineer - Payments")).toBe("Backend Engineer, Payments");
+    expect(humanize("From 2019–2021 and 2022 - 2024")).toBe("From 2019 to 2021 and 2022 to 2024");
+    expect(humanize("Node.js-based services")).toBe("Node.js-based services");
+  });
+
+  it("uses plain words and drops stock AI lines", () => {
+    expect(humanize("I leveraged React and utilized Redis to build seamless flows.")).toBe("I used React and used Redis to build smooth flows.");
+    expect(humanize("I spearheaded the migration. Furthermore, I mentored two juniors.")).toBe("I led the migration. Also, I mentored two juniors.");
+    expect(humanize("Dear Hiring Team,\n\nI hope this email finds you well. I am applying for the role.")).toBe("Dear Hiring Team,\n\nI am applying for the role.");
+    expect(humanize("I like clean code; I write tests.")).toBe("I like clean code. I write tests.");
+    expect(humanize("“Quoted” and it’s fine…")).toBe('"Quoted" and it\'s fine...');
+  });
+
+  it("cleans the subject and body of a draft", () => {
+    const d = decide(check({ subject: "Application for Software Engineer – Priya Sharma", body: goodBody.replace("I enjoy", "I hope this email finds you well. I enjoy").replace("where I build", "where — day to day — I build") }));
+    expect(d.kind).toBe("draft");
+    if (d.kind !== "draft") return;
+    expect(d.subject).toBe("Application for Software Engineer, Priya Sharma");
+    expect(d.body).not.toMatch(/[–—]| - /);
+    expect(d.body).not.toContain("finds you well");
+  });
+
+  it("the plain follow-up template has no dashes or stiff phrases", () => {
+    for (const sequence of [1, 2] as const) {
+      const t = templateFollowUp({ sequence, company: "Nimbus Analytics", jobTitle: "Software Engineer", resume });
+      expect(t).not.toMatch(/[–—]| - |I am writing to|keen/);
+    }
+  });
+});
+
+describe("email layout", () => {
+  it("puts the greeting and the closing line on their own paragraphs when the model returns one block", () => {
+    expect(layoutEmail("Dear Hiring Team, I am applying for the role. I build APIs. My resume is attached. Happy to talk if it looks like a fit.")).toBe(
+      "Dear Hiring Team,\n\nI am applying for the role. I build APIs.\n\nMy resume is attached. Happy to talk if it looks like a fit.",
+    );
+  });
+
+  it("leaves well-formed emails alone and adds a greeting when missing", () => {
+    const ok = "Hi Anita,\n\nI am applying for the role.\n\nThanks for your time.";
+    expect(layoutEmail(ok)).toBe(ok);
+    expect(layoutEmail("I am applying for the role.")).toBe("Dear Hiring Team,\n\nI am applying for the role.");
   });
 });

@@ -94,6 +94,64 @@ describe("resume upload", () => {
   });
 });
 
+describe("resume details edit", () => {
+  it("returns everything that was read, and 404 before a resume exists", async () => {
+    const { agent } = await registerUser();
+    await agent.get("/api/profile/resume/details").expect(404);
+    await uploadResume(agent).expect(200);
+    const res = await agent.get("/api/profile/resume/details").expect(200);
+    expect(res.body).toMatchObject({ full_name: "Priya Sharma", email: "priya.sharma@gmail.com" });
+    expect(res.body.roles.length).toBeGreaterThanOrEqual(2);
+    expect(res.body).not.toHaveProperty("projects");
+  });
+
+  it("saves corrections, recomputes experience and syncs only the changed skip-list companies", async () => {
+    const { agent, user } = await registerUser();
+    await uploadResume(agent).expect(200);
+    // The user removed one resume company from the skip list on purpose.
+    await agent.put("/api/profile/preferences").send({ target_roles: ["Backend Engineer"], locations: ["Bengaluru"], expected_salary_lpa: 20, excluded_companies: ["Blue Ocean Systems"] }).expect(200);
+    const details = (await agent.get("/api/profile/resume/details").expect(200)).body;
+    const edited = {
+      ...details,
+      full_name: "Priya S. Sharma",
+      phone: "+91 98765 43210",
+      roles: [
+        { title: "Senior Engineer", company: "Nova Labs", start: "2020-01", end: "", is_current: true, bullets: ["Led payments", ""] },
+        ...details.roles.filter((r: { company: string }) => r.company === "Acme Retail Tech"),
+      ],
+      skills: ["Go", "MySQL"],
+      education: [{ degree: "", institution: "", year: "" }],
+    };
+    const res = await agent.put("/api/profile/resume/details").send(edited).expect(200);
+    expect(res.body.resume).toMatchObject({ fullName: "Priya S. Sharma", phone: "+91 98765 43210", skills: ["Go", "MySQL"], education: [] });
+    expect(res.body.resume.roles[0]).toMatchObject({ title: "Senior Engineer", company: "Nova Labs", end: "Present" });
+    // Blue Ocean (no longer in roles) dropped, Nova Labs (new) added, Acme stays un-skipped as the user chose.
+    expect(await excludedOf(user.id)).toEqual([{ company_name: "Nova Labs", source: "resume" }]);
+    const saved = (await agent.get("/api/profile/resume/details").expect(200)).body;
+    expect(saved.roles[0].bullets).toEqual(["Led payments"]);
+    // Projects and role suggestions read from the PDF are kept.
+    const row = await queryOne<{ resume_data: unknown }>("SELECT resume_data FROM profiles WHERE user_id = ?", [user.id]);
+    const data = typeof row!.resume_data === "string" ? JSON.parse(row!.resume_data) : row!.resume_data;
+    expect(data.suggested_target_roles.length).toBeGreaterThan(0);
+  });
+
+  it("rejects bad input with per-field messages", async () => {
+    const { agent } = await registerUser();
+    await uploadResume(agent).expect(200);
+    const details = (await agent.get("/api/profile/resume/details").expect(200)).body;
+    const res = await agent
+      .put("/api/profile/resume/details")
+      .send({ ...details, full_name: " ", email: "not-an-email", roles: [{ ...details.roles[0], start: "sometime" }], skills: ["Go", "go"] })
+      .expect(400);
+    expect(res.body.fields).toMatchObject({
+      full_name: "Enter your name.",
+      email: "Enter a valid email address.",
+      "roles.0.start": "Use a date like 2024-06, Jun 2024 or 2024.",
+      skills: "Skills must be different.",
+    });
+  });
+});
+
 describe("preferences", () => {
   it("saves roles, locations, salary, run time and companies to skip", async () => {
     const { agent } = await registerUser();

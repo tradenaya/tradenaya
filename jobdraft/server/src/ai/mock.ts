@@ -144,7 +144,7 @@ function mockJobCheck(candidate: MockCandidate, posting: { title: string; compan
     is_staffing_agency: agency,
     application_email: applicationEmail,
     contact_name: "",
-    subject: suitable ? `Application for ${posting.title} – ${candidate.name}` : "",
+    subject: suitable ? `Application for ${posting.title} role` : "",
     body: suitable ? body : "",
   };
 }

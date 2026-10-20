@@ -14,6 +14,26 @@ export interface GenerateRequest {
   system: string;
   prompt: string;
   schema: object;
+  /** Try the quick "lite" models first (simple extraction, a user is waiting). */
+  fast?: boolean;
+  /** Abort a single model call after this long and move on to the next model. */
+  callTimeoutMs?: number;
+  /** Absolute time (epoch ms) after which no new call or retry is started. */
+  deadline?: number;
+}
+
+const DEFAULT_CALL_TIMEOUT_MS = 60_000;
+
+/** For `fast` requests the lite models go first; otherwise the configured order is kept. */
+export function orderModels(models: string[], fast = false): string[] {
+  if (!fast) return models;
+  const lite = (m: string) => /lite/i.test(m);
+  return [...models.filter(lite), ...models.filter((m) => !lite(m))];
+}
+
+function isTimeout(err: unknown): boolean {
+  const e = err as { name?: string; message?: string };
+  return e?.name === "AbortError" || e?.name === "TimeoutError" || /aborted|timed? ?out/i.test(e?.message ?? "");
 }
 
 function statusOf(err: unknown): number {
@@ -30,7 +50,8 @@ let clientKey = "";
 /**
  * Calls Gemini with structured JSON output. Tries each model in GEMINI_MODELS in
  * order: 429/500/503 are retried with exponential backoff, other errors (e.g.
- * unknown model) move on to the next model. Returns the parsed JSON.
+ * unknown model) and calls slower than `callTimeoutMs` move on to the next
+ * model. Nothing new starts after `deadline`. Returns the parsed JSON.
  */
 export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown> {
   const { gemini } = config();
@@ -39,9 +60,13 @@ export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown>
     client = new GoogleGenAI({ apiKey: gemini.apiKey });
     clientKey = gemini.apiKey;
   }
+  const callTimeoutMs = req.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+  const remaining = () => (req.deadline ?? Infinity) - Date.now();
   let lastErr: unknown;
-  for (const model of gemini.models) {
+  outer: for (const model of orderModels(gemini.models, req.fast)) {
     for (let attempt = 1; attempt <= 3; attempt++) {
+      if (remaining() < 3000) break outer;
+      const started = Date.now();
       try {
         const res = await client.models.generateContent({
           model,
@@ -52,6 +77,7 @@ export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown>
             responseJsonSchema: req.schema,
             temperature: 0.2,
             maxOutputTokens: 8192,
+            abortSignal: AbortSignal.timeout(Math.min(callTimeoutMs, remaining())),
           },
         });
         const text = res.text ?? "";
@@ -65,6 +91,10 @@ export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown>
         }
       } catch (err) {
         lastErr = err;
+        if (isTimeout(err)) {
+          log.warn("gemini_call_timeout", { model, attempt, ms: Date.now() - started });
+          break; // too slow right now: next model
+        }
         const status = statusOf(err);
         if (status === 401 || status === 403) {
           log.error("gemini_auth_error", { model, status });
@@ -72,13 +102,18 @@ export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown>
         }
         const retryable = status === 429 || status === 500 || status === 503 || status === 504;
         log.warn("gemini_call_failed", { model, attempt, status, error: errInfo(err) });
-        if (retryable && attempt < 3) {
-          await sleep(Math.min(2000 * 2 ** (attempt - 1), 10000) + Math.floor(Math.random() * 500));
+        const backoff = Math.min(2000 * 2 ** (attempt - 1), 10000) + Math.floor(Math.random() * 500);
+        if (retryable && attempt < 3 && remaining() > backoff + 3000) {
+          await sleep(backoff);
           continue;
         }
         break; // next model
       }
     }
+  }
+  if (remaining() < 3000) {
+    log.error("gemini_deadline_reached", { error: errInfo(lastErr) });
+    throw new AiUnavailableError("The AI is responding slowly right now. Please try again in a few minutes.");
   }
   log.error("gemini_all_models_failed", { error: errInfo(lastErr) });
   throw new AiUnavailableError();

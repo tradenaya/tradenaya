@@ -24,6 +24,19 @@ export interface ResumeSummary {
   suggestedTargetRoles: string[];
 }
 
+/** Everything read from the resume that the user can correct (GET/PUT /api/profile/resume/details). */
+export interface ResumeDetails {
+  full_name: string;
+  email: string;
+  phone: string;
+  linkedin: string;
+  location: string;
+  current_title: string;
+  roles: { title: string; company: string; start: string; end: string; is_current: boolean; bullets: string[] }[];
+  skills: string[];
+  education: { degree: string; institution: string; year: string }[];
+}
+
 export interface ExcludedCompany {
   name: string;
   source: "resume" | "manual";

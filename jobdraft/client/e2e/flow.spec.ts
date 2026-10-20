@@ -80,7 +80,7 @@ test("register → setup → automation ON → run now → dashboard sends → h
   // 1. Resume upload + preview (past employers become "companies to skip")
   await page.locator("#resume-file").setInputFiles(RESUME);
   await confirmWith(page, "Upload resume");
-  await expect(page.getByText("If anything is wrong, upload a corrected resume.")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Something read wrong? Edit the details, or upload a corrected resume.")).toBeVisible({ timeout: 60_000 });
   await expect(page.locator("#resume")).toContainText("Acme Retail Tech");
   const skip = page.getByRole("list", { name: "Companies to skip" });
   await expect(skip).toContainText("Acme Retail Tech");
@@ -176,6 +176,72 @@ test("register → setup → automation ON → run now → dashboard sends → h
   await expect(page.getByRole("button", { name: "Deactivate account" })).toBeVisible();
   await page.getByRole("button", { name: /Switch to (dark|light) mode/ }).click();
   await expectNoHorizontalOverflow(page);
+});
+
+test("resume: size check first, reading animation, then edit the details", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await register(page, `e2e-edit-${testInfo.project.name}-${Date.now()}@example.org`);
+  await expect(page.getByText("PDF only · max 5 MB · text-based, not a scan")).toBeVisible();
+
+  // Too big: rejected straight away with its size — no popup, no upload.
+  let uploads = 0;
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/profile/resume")) uploads++;
+  });
+  await page.locator("#resume-file").setInputFiles({ name: "huge.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(6 * 1024 * 1024, 0x20) });
+  await expect(page.locator("#resume").getByRole("alert")).toContainText('"huge.pdf" is 6.0 MB. The maximum is 5 MB');
+  await expect(page.getByRole("dialog")).toBeHidden();
+  expect(uploads).toBe(0);
+
+  // Reading animation (the mock AI is instant, so hold the response for a few seconds).
+  await page.route("**/api/profile/resume", async (route) => {
+    await new Promise((r) => setTimeout(r, 6000));
+    await route.continue();
+  });
+  await page.locator("#resume-file").setInputFiles(RESUME);
+  await confirmWith(page, "Upload resume");
+  const reading = page.getByTestId("resume-reading");
+  await expect(reading).toBeVisible();
+  await expect(reading).toContainText("Reading your resume");
+  await expect(reading).toContainText("Usually takes 10–30 seconds");
+  await expect(reading.getByText("Reading your experience and skills")).toBeVisible();
+  await page.waitForTimeout(5200);
+  await page.screenshot({ path: testInfo.outputPath("reading.png") });
+  await expect(reading).toBeHidden({ timeout: 30_000 });
+  await page.unroute("**/api/profile/resume");
+  await expect(page.locator("#resume")).toContainText("Priya Sharma");
+
+  // Edit: change the name, a role and skills; Save asks first.
+  await page.getByRole("button", { name: "Edit details" }).click();
+  const editor = page.getByTestId("resume-editor");
+  await expect(editor).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("editor.png"), fullPage: true });
+  await editor.getByLabel("Full name").fill("Priya K. Sharma");
+  await editor.getByLabel("Job title").first().fill("Lead Engineer");
+  await editor.getByPlaceholder("Add a skill, e.g. React").fill("Kubernetes");
+  await editor.getByRole("button", { name: "Add skill" }).click();
+  // A bad date is reported on the field.
+  await editor.getByLabel("Start").first().fill("sometime");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await confirmWith(page, "Save changes");
+  await expect(editor.getByText("Use a date like 2024-06, Jun 2024 or 2024.")).toBeVisible();
+  await editor.getByLabel("Start").first().fill("2019-04");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await confirmWith(page, "Save changes");
+  await expect(editor).toBeHidden();
+  const card = page.locator("#resume");
+  await expect(card).toContainText("Priya K. Sharma");
+  await expect(card).toContainText("Lead Engineer");
+  await expect(card).toContainText("Kubernetes");
+
+  // Cancel with changes asks before throwing them away.
+  await page.getByRole("button", { name: "Edit details" }).click();
+  await editor.getByLabel("Full name").fill("Someone Else");
+  await editor.getByRole("button", { name: "Cancel" }).click();
+  await confirmWith(page, "Discard changes");
+  await expect(editor).toBeHidden();
+  await expect(card).toContainText("Priya K. Sharma");
 });
 
 test("deactivate account → confirmation screen → register again with the same email from scratch", async ({ page }, testInfo) => {
