@@ -17,6 +17,71 @@ const HYPE_RE = /\b(rock ?star|ninja|guru|wizard|world[- ]class|game[- ]changer|
 const EMOJI_RE = /\p{Extended_Pictographic}/u;
 const NO_PRESSURE_RE = /\b(haven'?t heard back|still waiting|as i said|just checking again|kindly respond|urgent(ly)?|asap)\b/i;
 
+/** Machine-sounding words with a plain swap that keeps the sentence grammatical. */
+const PLAIN_WORDS: [RegExp, string][] = [
+  [/\butili[sz](e|es|ed|ing)\b/gi, "us$1"],
+  [/\bleverag(e|es|ed|ing)\b/gi, "us$1"],
+  [/\bspearhead(ed|ing)?\b/gi, "led"],
+  [/\bseamlessly\b/gi, "smoothly"],
+  [/\bseamless\b/gi, "smooth"],
+  [/\bcutting[- ]edge\b/gi, "modern"],
+  [/\bmeticulous(ly)?\b/gi, "careful$1"],
+  [/\b(a )?(plethora|myriad) of\b/gi, "many"],
+  [/(^|[.!?]\s+|\n)(furthermore|moreover|additionally),\s*/gi, "$1Also, "],
+];
+
+/** Sentences that only show up in AI-written emails: dropped whole. */
+const AI_SENTENCE_RE = /\b(hope (this|my) (email|message|note) finds you|delve|tapestry|testament to|i am thrilled|i'?m thrilled|in today'?s (fast[- ]paced|competitive|ever[- ]changing))/i;
+
+/**
+ * Makes the model's text read like a person typed it: no dashes used as
+ * punctuation (a giveaway), straight quotes, plain words, no stock AI lines.
+ * Hyphenated words (full-stack, Node.js-based) are left alone.
+ */
+export function humanize(text: string): string {
+  let s = text
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/…/g, "...")
+    .replace(/(\d)(?:\s*[–—]\s*|[ \t]+-[ \t]+)(\d)/g, "$1 to $2")
+    .replace(/[ \t]*[–—][ \t]*/g, ", ")
+    .replace(/[ \t]+-[ \t]+/g, ", ")
+    .replace(/;[ \t]*/g, ". ");
+  for (const [re, plain] of PLAIN_WORDS) s = s.replace(re, plain);
+  s = s
+    .split("\n")
+    .map((para) =>
+      para
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => !AI_SENTENCE_RE.test(sentence))
+        .join(" "),
+    )
+    .join("\n");
+  return s
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s*([.!?])/g, "$1")
+    .replace(/([.!?] )([a-z])/g, (_, p: string, c: string) => p + c.toUpperCase())
+    .replace(/[ \t]{2,}/g, " ");
+}
+
+/**
+ * Greeting on its own line, then the text. Models sometimes return everything
+ * as one block; then the closing line ("My resume is attached…", "Thanks…")
+ * also gets its own paragraph so it reads like a normal email.
+ */
+export function layoutEmail(body: string): string {
+  let b = body.trim();
+  const greeting = /^((?:dear|hello|hi)\b[^,\n]{0,80},)[ \t]*(?=\S)/i.exec(b);
+  if (greeting) b = `${greeting[1]}\n\n${b.slice(greeting[0].length)}`;
+  else if (!/^(dear|hello|hi)\b/i.test(b)) b = `Dear Hiring Team,\n\n${b}`;
+  const [head, ...rest] = b.split(/\n\n+/);
+  if (rest.length === 1 && !rest[0]!.includes("\n")) {
+    const closing = /\s+((?:my resume is attached|i have attached|i've attached|thanks|thank you|happy to (?:talk|chat|share))\b[\s\S]*)$/i.exec(rest[0]!);
+    if (closing && closing.index > 0) b = `${head}\n\n${rest[0]!.slice(0, closing.index).trim()}\n\n${closing[1]!.trim()}`;
+  }
+  return b;
+}
+
 const clean = (s: string) => s.replace(/\r/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 
 /** Signature built in code from the extracted resume, never from the model. */
@@ -90,20 +155,23 @@ export function decideDraft(args: DecideArgs): DraftDecision {
   const email = verifyApplicationEmail(check.application_email, postingText);
   if (!email.ok) return { kind: "link_only", reason: email.reason };
 
-  const subject = check.subject.replace(/[\r\n]+/g, " ").trim();
+  const subject = humanize(check.subject.replace(/[\r\n]+/g, " "))
+    .replace(/\s*\|\s*/g, ", ")
+    .replace(/[\s.,]+$/, "")
+    .trim();
   if (!subject) return { kind: "link_only", reason: "empty subject" };
   if (PLACEHOLDER_RE.test(subject)) return { kind: "link_only", reason: "placeholder in subject" };
 
-  let body = clean(check.body).replace(SIGNOFF_RE, "");
+  let body = clean(humanize(check.body)).replace(SIGNOFF_RE, "");
   if (PLACEHOLDER_RE.test(body)) return { kind: "link_only", reason: "placeholder in body" };
   body = clean(removeSalarySentences(body));
-  if (!/^(dear|hello|hi)\b/i.test(body)) body = `Dear Hiring Team,\n\n${body}`;
+  body = layoutEmail(body);
 
   const company = companyCoreName(job.company).toLowerCase();
   if (!body.toLowerCase().includes(company)) return { kind: "link_only", reason: "body does not name the company" };
   if (!mentionsTitle(body, job.title)) return { kind: "link_only", reason: "body does not name the role" };
   const words = wordCount(body);
-  if (words < 90 || words > 230) return { kind: "link_only", reason: `body length ${words} words` };
+  if (words < 55 || words > 190) return { kind: "link_only", reason: `body length ${words} words` };
   if (overstatesExperience(body, experienceYears)) return { kind: "link_only", reason: "overstated experience" };
   const style = styleProblem(`${subject}\n${body}`, [...resume.skills, job.title, job.company]);
   if (style) return { kind: "link_only", reason: `style: ${style}` };
@@ -157,10 +225,10 @@ export const FOLLOWUP_WORDS: Record<1 | 2, [number, number]> = { 1: [50, 105], 2
 
 /** Same fact/style rules as first emails, plus "no pressure". Returns the body with the code-built signature, or a problem. */
 export function prepareFollowUpBody(args: { body: string; sequence: 1 | 2; company: string; jobTitle: string; resume: ResumeData }): { ok: true; body: string } | { ok: false; reason: string } {
-  let body = clean(args.body).replace(SIGNOFF_RE, "");
+  let body = clean(humanize(args.body)).replace(SIGNOFF_RE, "");
   if (PLACEHOLDER_RE.test(body)) return { ok: false, reason: "placeholder" };
   body = clean(removeSalarySentences(body));
-  if (!/^(dear|hello|hi)\b/i.test(body)) body = `Dear Hiring Team,\n\n${body}`;
+  body = layoutEmail(body);
   if (!body.toLowerCase().includes(companyCoreName(args.company).toLowerCase())) return { ok: false, reason: "company not named" };
   if (!mentionsTitle(body, args.jobTitle)) return { ok: false, reason: "role not named" };
   const [min, max] = FOLLOWUP_WORDS[args.sequence];
@@ -178,7 +246,7 @@ export function templateFollowUp(args: { sequence: 1 | 2; company: string; jobTi
   const title = args.resume.current_title;
   const text =
     args.sequence === 1
-      ? `Dear Hiring Team,\n\nI am writing to follow up on my application for the ${args.jobTitle} role at ${args.company}, sent last week. I remain keen on the position${strength ? `, and my work with ${strength}` : ""}${title ? ` as ${/^[aeiou]/i.test(title) ? "an" : "a"} ${title}` : ""} fits the role well. Have you had a chance to review my application, or is there a next step I could prepare for? Thank you for your time.`
-      : `Dear Hiring Team,\n\nI would like to close the loop on my application for the ${args.jobTitle} role at ${args.company}. I am still interested and happy to share anything else that would help. Thank you for your time and consideration.`;
+      ? `Dear Hiring Team,\n\nI applied for the ${args.jobTitle} role at ${args.company} last week and wanted to check if you had a chance to look at my application. I'm still very interested${strength ? `, and my work with ${strength}${title ? ` as ${/^[aeiou]/i.test(title) ? "an" : "a"} ${title}` : ""} is a good fit for the role` : ""}. Is there a next step I can prepare for? Thanks for your time.`
+      : `Dear Hiring Team,\n\nI'm writing one last time about my application for the ${args.jobTitle} role at ${args.company}. I'm still interested and happy to share anything else that helps. Thanks for your time and consideration.`;
   return `${text}\n\n${buildSignature(args.resume)}`;
 }

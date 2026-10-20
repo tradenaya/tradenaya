@@ -7,6 +7,7 @@ import { clock } from "../lib/clock.js";
 import { HttpError } from "../lib/errors.js";
 import { istDate, nextRunAt, normalizeRunTime } from "../lib/time.js";
 import { MAX_RESUME_BYTES } from "../resume/pdf.js";
+import { editableResume, resumeEditSchema, saveResumeEdits } from "../resume/edit.js";
 import { replaceResume } from "../resume/service.js";
 import {
   hasAllScopes,
@@ -117,6 +118,26 @@ export function profileRouter() {
     h(async (req, res) => {
       if (!req.file) throw new HttpError(400, "Please choose a PDF file.", "validation", { resume: "Choose a PDF file." });
       await replaceResume(userOf(req).id, req.file);
+      res.json(await profilePayload(userOf(req).id));
+    }),
+  );
+
+  // Everything the AI read from the resume, for the "Edit details" form.
+  r.get(
+    "/resume/details",
+    h(async (req, res) => {
+      const p = await loadProfile(userOf(req).id);
+      if (!p?.resume || !p.resumePublicId) throw new HttpError(404, "Upload your resume first.");
+      res.json(editableResume(p.resume));
+    }),
+  );
+
+  // The user's corrections to what was read; the PDF itself is not changed.
+  r.put(
+    "/resume/details",
+    h(async (req, res) => {
+      const body = parse(resumeEditSchema, req.body);
+      await saveResumeEdits(userOf(req).id, body);
       res.json(await profilePayload(userOf(req).id));
     }),
   );

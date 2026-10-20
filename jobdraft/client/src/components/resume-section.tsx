@@ -1,37 +1,56 @@
 "use client";
 
-import { ExternalLink, FileUp, RefreshCw } from "lucide-react";
+import { ExternalLink, FileUp, Pencil, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, API_URL, errorMessage } from "@/lib/api";
+import { api, API_URL, ApiError, errorMessage } from "@/lib/api";
 import { formatYears } from "@/lib/format";
-import type { Profile } from "@/lib/types";
+import type { Profile, ResumeDetails } from "@/lib/types";
 import { useConfirm } from "./confirm-dialog";
-import { Banner, Card, cx } from "./ui";
+import { ResumeEditor } from "./resume-editor";
+import { ResumeReading } from "./resume-reading";
+import { Banner, Button, Card, cx } from "./ui";
 
-const MAX_BYTES = 5 * 1024 * 1024;
+/** Same limit as the server (it rejects anything larger). */
+const MAX_MB = 5;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
+
+const formatSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+/** Checked before anything else (no confirmation, no upload) — returns the problem or "". */
+export function resumeFileProblem(file: File): string {
+  if (file.size === 0) return `"${file.name}" is empty. Please choose another file.`;
+  if (file.size > MAX_BYTES) return `"${file.name}" is ${formatSize(file.size)}. The maximum is ${MAX_MB} MB — please upload a smaller PDF (for example, export it again without large images).`;
+  if (!(file.type === "application/pdf" || /\.pdf$/i.test(file.name))) return `"${file.name}" isn't a PDF. Please choose a PDF file.`;
+  return "";
+}
 
 export function ResumeSection({ profile, onChange }: { profile: Profile; onChange: (p: Profile) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<ResumeDetails | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const resume = profile.resume;
   const confirm = useConfirm();
 
   async function upload(file: File) {
     setError("");
-    if (file.size > MAX_BYTES) return setError("The file is larger than 5 MB.");
-    if (!(file.type === "application/pdf" || /\.pdf$/i.test(file.name))) return setError("Please choose a PDF file.");
+    const problem = resumeFileProblem(file);
+    if (problem) {
+      if (inputRef.current) inputRef.current.value = "";
+      return setError(problem);
+    }
     const ok = await confirm(
       resume
         ? {
             title: "Replace your resume?",
-            body: `"${file.name}" will replace your current resume. JobDraft reads it again, updates your summary and refreshes the companies taken from it. Your old file is removed only after the new one is read successfully.`,
+            body: `"${file.name}" (${formatSize(file.size)}) will replace your current resume. JobDraft reads it again, updates your summary and refreshes the companies taken from it. Your old file is removed only after the new one is read successfully.`,
             confirmLabel: "Replace resume",
           }
         : {
             title: "Upload this resume?",
-            body: `JobDraft will read "${file.name}" to tailor your emails, and attach it to every application.`,
+            body: `JobDraft will read "${file.name}" (${formatSize(file.size)}) to tailor your emails, and attach it to every application.`,
             confirmLabel: "Upload resume",
           },
     );
@@ -41,17 +60,32 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
     }
     const form = new FormData();
     form.append("resume", file, file.name);
-    setBusy(true);
+    setBusy(file);
+    setEditing(null);
     try {
       const next = await api<Profile>("/api/profile/resume", { body: form });
       onChange(next);
       toast.success(resume ? "Resume replaced." : "Resume uploaded and read.");
     } catch (err) {
-      setError(errorMessage(err));
-      toast.error(errorMessage(err));
+      // Status 0: the connection dropped mid-upload (network or proxy), not "server down".
+      const msg = err instanceof ApiError && err.status === 0 ? "The upload was cut off before JobDraft could read your resume. Please try again." : errorMessage(err);
+      setError(msg);
+      toast.error(msg);
     } finally {
-      setBusy(false);
+      setBusy(null);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  async function startEditing() {
+    setError("");
+    setLoadingDetails(true);
+    try {
+      setEditing(await api<ResumeDetails>("/api/profile/resume/details"));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingDetails(false);
     }
   }
 
@@ -64,7 +98,7 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
         type="file"
         accept="application/pdf,.pdf"
         className="sr-only"
-        disabled={busy}
+        disabled={!!busy}
         aria-describedby="resume-help"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -88,13 +122,12 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
   return (
     <Card title="1. Your resume" id="resume">
       <p id="resume-help" className="mb-3 text-[15px] text-slate-600">
-        A text-based PDF up to 5 MB. We read it once to tailor your emails and attach it to every application.
+        We read it once to tailor your emails and attach it to every application.
+        <span className="mt-1 block font-medium text-slate-700">PDF only · max {MAX_MB} MB · text-based, not a scan</span>
       </p>
       {busy && (
         <div className="mb-3">
-          <Banner tone="info" title="Reading your resume…">
-            This usually takes 10–30 seconds. Please keep this page open.
-          </Banner>
+          <ResumeReading fileName={busy.name} />
         </div>
       )}
       {error && (
@@ -102,8 +135,17 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
           <Banner tone="error">{error}</Banner>
         </div>
       )}
-      {!resume ? (
+      {busy ? null : !resume ? (
         picker
+      ) : editing ? (
+        <ResumeEditor
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(p) => {
+            onChange(p);
+            setEditing(null);
+          }}
+        />
       ) : (
         <div className="space-y-4">
           <dl className="grid gap-3 sm:grid-cols-2">
@@ -152,8 +194,12 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
               </ul>
             </div>
           )}
-          <p className="rounded-xl bg-amber-50 p-3 text-[15px] text-amber-900 ring-1 ring-inset ring-amber-200">If anything is wrong, upload a corrected resume.</p>
+          <p className="rounded-xl bg-amber-50 p-3 text-[15px] text-amber-900 ring-1 ring-inset ring-amber-200">Something read wrong? Edit the details, or upload a corrected resume.</p>
           <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" onClick={() => void startEditing()} loading={loadingDetails}>
+              {!loadingDetails && <Pencil className="size-5" aria-hidden />}
+              Edit details
+            </Button>
             {picker}
             <a
               href={`${API_URL}/api/profile/resume/file`}

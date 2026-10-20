@@ -19,6 +19,27 @@
   --animate-dash-in: dash-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-whoosh: whoosh 1.8s ease-in-out infinite;
+  /* Resume "reading" animation: a beam sweeping down the page, lines lighting up in turn. */
+  --animate-scan: scan 2.4s ease-in-out infinite alternate;
+  --animate-line-glow: line-glow 2s ease-in-out infinite;
+
+  @keyframes scan {
+    from {
+      transform: translateY(-0.5rem);
+    }
+    to {
+      transform: translateY(8.5rem);
+    }
+  }
+  @keyframes line-glow {
+    0%,
+    100% {
+      background-color: var(--color-slate-200);
+    }
+    50% {
+      background-color: var(--color-brand-100);
+    }
+  }
 
   @keyframes dash-in {
     0% {
