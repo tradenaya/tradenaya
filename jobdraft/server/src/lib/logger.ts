@@ -40,5 +40,20 @@ export function errInfo(err: unknown): { name: string; message: string; code?: s
     const code = (err as { code?: string | number }).code;
     return { name: err.name, message: err.message.slice(0, 300), ...(code !== undefined ? { code } : {}) };
   }
+  // Some SDKs (e.g. Cloudinary) reject with plain objects like { message, http_code }.
+  if (err && typeof err === "object") {
+    const o = err as { name?: unknown; message?: unknown; http_code?: unknown; code?: unknown; error?: { message?: unknown } };
+    const message = typeof o.message === "string" ? o.message : typeof o.error?.message === "string" ? o.error.message : safeJson(o);
+    const code = [o.http_code, o.code].find((c): c is string | number => typeof c === "string" || typeof c === "number");
+    return { name: typeof o.name === "string" ? o.name : "Unknown", message: message.slice(0, 300), ...(code !== undefined ? { code } : {}) };
+  }
   return { name: "Unknown", message: String(err).slice(0, 300) };
+}
+
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -193,10 +194,23 @@ test("resume: size check first, reading animation, then edit the details", async
   await expect(page.getByRole("dialog")).toBeHidden();
   expect(uploads).toBe(0);
 
-  // Reading animation (the mock AI is instant, so hold the response for a few seconds).
+  // A slow AI read: the upload answers 202 and the page polls the status until it's done
+  // (the mock AI is instant, so the browser is told "still reading" for a few polls).
+  let saved: unknown = null;
+  let polls = 0;
   await page.route("**/api/profile/resume", async (route) => {
-    await new Promise((r) => setTimeout(r, 6000));
-    await route.continue();
+    // Really upload (same session cookie), but tell the page it's still being read.
+    const res = await page.request.post(`${API}/api/profile/resume`, {
+      multipart: { resume: { name: "resume.pdf", mimeType: "application/pdf", buffer: fs.readFileSync(RESUME) } },
+    });
+    expect(res.status()).toBe(200);
+    saved = await res.json();
+    await route.fulfill({ status: 202, json: { status: "reading" } });
+  });
+  await page.route("**/api/profile/resume/status", async (route) => {
+    polls++;
+    if (polls < 6 || !saved) return route.fulfill({ json: { status: "reading", fileName: "resume.pdf", seconds: 3 * polls } });
+    await route.fulfill({ json: { status: "done", profile: saved } });
   });
   await page.locator("#resume-file").setInputFiles(RESUME);
   await confirmWith(page, "Upload resume");
@@ -205,10 +219,16 @@ test("resume: size check first, reading animation, then edit the details", async
   await expect(reading).toContainText("Reading your resume");
   await expect(reading).toContainText("Usually takes 10–30 seconds");
   await expect(reading.getByText("Reading your experience and skills")).toBeVisible();
-  await page.waitForTimeout(5200);
   await page.screenshot({ path: testInfo.outputPath("reading.png") });
+  // Refreshing mid-read picks the read back up.
+  await expect.poll(() => polls).toBeGreaterThanOrEqual(2);
+  await page.reload();
+  await expect(reading).toBeVisible();
+  await expect(reading).toContainText("resume.pdf");
   await expect(reading).toBeHidden({ timeout: 30_000 });
+  expect(polls).toBeGreaterThanOrEqual(6);
   await page.unroute("**/api/profile/resume");
+  await page.unroute("**/api/profile/resume/status");
   await expect(page.locator("#resume")).toContainText("Priya Sharma");
 
   // Edit: change the name, a role and skills; Save asks first.

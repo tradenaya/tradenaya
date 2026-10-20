@@ -21,6 +21,11 @@ export interface UploadedFile {
  * every step succeeds.
  */
 export async function replaceResume(userId: number, file: UploadedFile): Promise<void> {
+  await saveResume(userId, file, await readResumeFile(userId, file));
+}
+
+/** The quick part, done while the user waits: size, type and text extraction. */
+export async function readResumeFile(userId: number, file: UploadedFile): Promise<string> {
   if (file.size > MAX_RESUME_BYTES) throw new HttpError(400, "The file is larger than 5 MB.");
   if (!looksLikePdf(file.buffer, file.mimetype, file.originalname)) throw new HttpError(400, "Please upload a PDF file.");
 
@@ -34,7 +39,11 @@ export async function replaceResume(userId: number, file: UploadedFile): Promise
   if (text.replace(/\s+/g, "").length < MIN_TEXT_CHARS) {
     throw new HttpError(400, "This looks like a scanned/image PDF. Please upload a text-based PDF.");
   }
+  return text;
+}
 
+/** The slow part (the AI read), which may run in the background: parse → upload → save. */
+export async function saveResume(userId: number, file: UploadedFile, text: string): Promise<void> {
   const store = storage(); // throws "not configured" before spending an AI call
   let data: ResumeData;
   try {
