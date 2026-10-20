@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // JobDraft is a separate app with its own lint config.
+    "jobdraft/**",
   ]),
 ]);
 

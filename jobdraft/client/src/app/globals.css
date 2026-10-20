@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+/* `dark:` utilities follow the .dark class on <html> (set by the theme toggle). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-600: #4338ca;
+  --color-brand-700: #3730a3;
+  --color-brand-800: #312e81;
+}
+
+:root {
+  --page-bg: #f8fafc;
+  --focus-ring: #4338ca;
+  color-scheme: light;
+}
+
+/*
+ * Dark theme. Components use light-theme classes (bg-white, text-slate-900,
+ * bg-emerald-50 text-emerald-900, …). Here the colour variables those classes
+ * read are swapped for dark equivalents, so every screen switches at once and
+ * keeps the same contrast pairs (light text on dark tints). Only shades the UI
+ * uses are listed.
+ */
+.dark {
+  --page-bg: #020617;
+  --focus-ring: #818cf8;
+  color-scheme: dark;
+
+  --color-white: #0f172a; /* cards, inputs, text on primary buttons */
+  --color-slate-50: #172033;
+  --color-slate-100: #1e293b;
+  --color-slate-200: #2b3a52;
+  --color-slate-300: #475569;
+  --color-slate-400: #64748b;
+  --color-slate-500: #94a3b8;
+  --color-slate-600: #a8b5c8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+
+  --color-brand-50: #1e1b4b;
+  --color-brand-100: #312e81;
+  --color-brand-600: #818cf8;
+  --color-brand-700: #a5b4fc;
+  --color-brand-800: #c7d2fe;
+
+  --color-sky-50: #082f49;
+  --color-sky-100: #0c4a6e;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-sky-600: #38bdf8;
+  --color-sky-900: #e0f2fe;
+
+  --color-amber-50: #451a03;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-900: #fef3c7;
+
+  --color-red-50: #450a0a;
+  --color-red-100: #7f1d1d;
+  --color-red-200: #991b1b;
+  --color-red-300: #b91c1c;
+  --color-red-600: #f87171;
+  --color-red-700: #f87171;
+  --color-red-800: #fca5a5;
+  --color-red-900: #fee2e2;
+
+  --color-emerald-50: #022c22;
+  --color-emerald-100: #064e3b;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-700: #34d399;
+  --color-emerald-900: #d1fae5;
+
+  --color-violet-50: #2e1065;
+  --color-violet-100: #4c1d95;
+  --color-violet-200: #5b21b6;
+  --color-violet-300: #6d28d9;
+  --color-violet-900: #ede9fe;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--page-bg);
+}
+
+body {
+  /* 16px base so iOS never zooms into inputs */
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--page-bg);
+  color: var(--color-slate-900);
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Tailwind's reset gives buttons the default arrow cursor: show a hand on everything clickable. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="option"],
+  summary,
+  label[for],
+  select {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+/* Visible keyboard focus everywhere */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(2 6 23 / 0.6);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
