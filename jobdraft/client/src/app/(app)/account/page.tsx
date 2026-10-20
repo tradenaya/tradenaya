@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth";
+import { useConfirm } from "@/components/confirm-dialog";
 import { GmailSection } from "@/components/gmail-section";
 import { Button, Card, Field, Input, PageSkeleton, PageTitle, PasswordInput } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
@@ -17,6 +18,7 @@ export default function AccountPage() {
   const [nameError, setNameError] = useState("");
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => {
     api<Profile>("/api/profile").then(setProfile, (err) => toast.error(errorMessage(err)));
@@ -26,6 +28,8 @@ export default function AccountPage() {
     e.preventDefault();
     if (!name.trim()) return setNameError("Enter your name.");
     setNameError("");
+    const ok = await confirm({ title: "Change your name?", body: `Your name will be changed to "${name.trim()}".`, confirmLabel: "Save name" });
+    if (!ok) return;
     setSaving(true);
     try {
       const res = await api<{ user: User }>("/api/account", { method: "PATCH", body: { name } });
@@ -40,6 +44,12 @@ export default function AccountPage() {
   }
 
   async function doLogout() {
+    const ok = await confirm({
+      title: "Log out?",
+      body: "You'll need your email and password to log back in. Automation keeps running on its daily schedule while you're logged out.",
+      confirmLabel: "Log out",
+    });
+    if (!ok) return;
     await logout();
     router.replace("/login");
   }
@@ -48,8 +58,9 @@ export default function AccountPage() {
   return (
     <div>
       <PageTitle>Account</PageTitle>
+      {/* Phones: Profile → Gmail → Deactivate (danger last). Desktop: Profile + Deactivate left, Gmail right. */}
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
+        <div className="lg:col-start-1 lg:row-start-1">
           <Card title="Profile" id="profile">
             <form onSubmit={saveName} noValidate className="space-y-4">
               <Field label="Name" htmlFor="account-name" error={nameError}>
@@ -59,12 +70,23 @@ export default function AccountPage() {
                 <p className="font-medium text-slate-900">Email</p>
                 <p className="break-all text-slate-700">{user.email}</p>
               </div>
-              <Button type="submit" loading={saving} disabled={name.trim() === user.name}>
+              <Button type="submit" loading={saving} disabled={!name.trim() || name.trim() === user.name}>
                 Save name
               </Button>
             </form>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+              <p className="text-[15px] text-slate-600">Signed in as {user.name}</p>
+              <Button variant="secondary" onClick={doLogout}>
+                <LogOut className="size-5" aria-hidden />
+                Log out
+              </Button>
+            </div>
           </Card>
-
+        </div>
+        <div className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          {profile ? <GmailSection profile={profile} onChange={setProfile} title="Gmail connection" /> : <PageSkeleton />}
+        </div>
+        <div className="lg:col-start-1 lg:row-start-2">
           <DeactivateAccount
             email={user.email}
             onDeleted={() => {
@@ -72,17 +94,6 @@ export default function AccountPage() {
               window.location.assign("/register?deactivated=1");
             }}
           />
-        </div>
-
-        <div className="space-y-4">
-          {profile ? <GmailSection profile={profile} onChange={setProfile} title="Gmail" /> : <PageSkeleton />}
-
-          <Card>
-            <Button variant="secondary" full onClick={doLogout} className="sm:w-auto">
-              <LogOut className="size-5" aria-hidden />
-              Log out
-            </Button>
-          </Card>
         </div>
       </div>
     </div>

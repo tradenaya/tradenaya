@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { formatRunTime, plural } from "@/lib/format";
 import type { ExcludedCompany, Profile } from "@/lib/types";
 import { ChipInput } from "./chip-input";
+import { useConfirm } from "./confirm-dialog";
 import { LocationPicker } from "./location-picker";
 import { RunTimeField } from "./run-time-field";
 import { SkipCompanies } from "./skip-companies";
@@ -63,6 +65,8 @@ export function PreferencesForm({ profile, onChange }: { profile: Profile; onCha
     });
   }
 
+  const confirm = useConfirm();
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate(form);
@@ -71,6 +75,13 @@ export function PreferencesForm({ profile, onChange }: { profile: Profile; onCha
       toast.error("Please fix the highlighted fields.");
       return;
     }
+    const timeChanged = form.runTime !== profile.preferences.runTime;
+    const ok = await confirm({
+      title: "Save your preferences?",
+      body: `JobDraft will look for ${plural(form.roles.length, "role")} in ${plural(form.locations.length, "location")}, paying at least ${form.salary} LPA, and skip ${plural(form.skip.length, "company", "companies")}.${timeChanged ? ` Daily runs move to ${formatRunTime(form.runTime)} IST.` : ""}`,
+      confirmLabel: "Save preferences",
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       const next = await api<Profile>("/api/profile/preferences", {

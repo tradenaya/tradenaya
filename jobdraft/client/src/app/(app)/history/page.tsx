@@ -3,7 +3,7 @@
 import { ChevronDown, ExternalLink, History as HistoryIcon, Link2, Mail } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog";
 import { ApplicationChip, StatusBadge } from "@/components/status";
 import { Banner, Button, cx, EmptyState, PageTitle, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -199,6 +199,29 @@ function RunCard({ run }: { run: Run }) {
 function ApplicationRow({ app, onChanged }: { app: Application; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  const confirm = useConfirm();
+
+  async function cancelSend() {
+    const ok = await confirm({
+      title: `Cancel the email to ${app.company}?`,
+      body: "It won't be sent automatically. It stays in your Gmail drafts, so you can still review and send it yourself.",
+      confirmLabel: "Cancel email",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (ok) await post(`/api/items/${app.id}/cancel`, "Cancelled. It stays in your Gmail drafts.");
+  }
+
+  async function cancelFollowUp(fu: FollowUp) {
+    const ok = await confirm({
+      title: `Cancel follow-up ${fu.sequence} to ${app.company}?`,
+      body: `This follow-up won't be sent.${fu.sequence === 1 ? " Follow-up 2 won't be created either." : ""}`,
+      confirmLabel: "Cancel follow-up",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (ok) await post(`/api/followups/${fu.id}/cancel`, "Follow-up cancelled.");
+  }
 
   async function post(path: string, ok: string) {
     setBusy(true);
@@ -231,12 +254,12 @@ function ApplicationRow({ app, onChanged }: { app: Application; onChanged: () =>
       <div className="mt-1 flex flex-wrap items-center gap-x-1">
         {app.jobUrl && <JobLink href={app.jobUrl} />}
         {app.canCancel && (
-          <Button variant="ghost" loading={busy} onClick={() => void post(`/api/items/${app.id}/cancel`, "Cancelled. It stays in your Gmail drafts.")} className="text-red-700 hover:bg-red-50">
+          <Button variant="ghost" loading={busy} onClick={() => void cancelSend()} className="text-red-700 hover:bg-red-50">
             Cancel send
           </Button>
         )}
         {scheduledFu && (
-          <Button variant="ghost" loading={busy} onClick={() => void post(`/api/followups/${scheduledFu.id}/cancel`, "Follow-up cancelled.")} className="text-red-700 hover:bg-red-50">
+          <Button variant="ghost" loading={busy} onClick={() => void cancelFollowUp(scheduledFu)} className="text-red-700 hover:bg-red-50">
             Cancel follow-up
           </Button>
         )}

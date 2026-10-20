@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AutomationSwitch } from "@/components/automation-switch";
-import { startGmailConnect } from "@/components/gmail-section";
+import { useConfirm } from "@/components/confirm-dialog";
+import { gmailConnectConfirm, startGmailConnect } from "@/components/gmail-section";
 import { StatusBadge } from "@/components/status";
 import { Banner, Button, ButtonLink, Card, PageSkeleton, PageTitle } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
@@ -61,7 +62,15 @@ export default function DashboardPage() {
     return () => clearTimeout(t);
   }, [cooldownAt, load]);
 
+  const confirm = useConfirm();
+
   async function runNow() {
+    const ok = await confirm({
+      title: "Run now?",
+      body: "JobDraft searches for new jobs now and prepares emails in your Gmail. The strongest matches are sent automatically 30 minutes after the run unless you cancel them; the rest wait in your drafts.",
+      confirmLabel: "Run now",
+    });
+    if (!ok) return;
     setStarting(true);
     try {
       await api("/api/runs", { method: "POST" });
@@ -75,6 +84,17 @@ export default function DashboardPage() {
   }
 
   async function cancel(u: UpcomingSend) {
+    const email = u.kind === "email";
+    const ok = await confirm({
+      title: email ? `Cancel the email to ${u.company}?` : `Cancel this follow-up to ${u.company}?`,
+      body: email
+        ? "It won't be sent automatically. It stays in your Gmail drafts, so you can still review and send it yourself."
+        : `This follow-up won't be sent.${u.label.startsWith("Follow-up 1") ? " Follow-up 2 won't be created either." : ""}`,
+      confirmLabel: email ? "Cancel email" : "Cancel follow-up",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api(u.kind === "email" ? `/api/items/${u.itemId}/cancel` : `/api/followups/${u.id}/cancel`, { method: "POST" });
       toast.success(u.kind === "email" ? "Cancelled. It stays in your Gmail drafts." : "Follow-up cancelled.");
@@ -85,6 +105,14 @@ export default function DashboardPage() {
   }
 
   async function cancelAll(runId: number) {
+    const ok = await confirm({
+      title: "Cancel all scheduled emails?",
+      body: "None of this run's scheduled emails will be sent automatically. They stay in your Gmail drafts, so you can still send any of them yourself.",
+      confirmLabel: "Cancel all",
+      cancelLabel: "Keep them",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await api<{ cancelled: number }>(`/api/runs/${runId}/cancel-all`, { method: "POST" });
       toast.success(`${plural(res.cancelled, "email")} cancelled and kept as drafts.`);
@@ -112,7 +140,10 @@ export default function DashboardPage() {
     setData({ ...data, profile: p, automation: p.automation, nextRunAt: p.nextRunAt });
     void load();
   };
-  const reconnect = () => void startGmailConnect().catch((e) => toast.error(errorMessage(e)));
+  const reconnect = async () => {
+    if (!(await confirm(gmailConnectConfirm(true)))) return;
+    await startGmailConnect().catch((e) => toast.error(errorMessage(e)));
+  };
 
   return (
     <div className="space-y-4">
@@ -207,7 +238,7 @@ export default function DashboardPage() {
               <ul className="divide-y divide-slate-200" aria-label="Scheduled emails">
                 {data.upcoming.map((u) => (
                   <li key={`${u.kind}-${u.id}`} className="flex items-start gap-3 py-3 first:pt-0" data-testid="upcoming-item">
-                    <Send className="mt-1 size-5 shrink-0 text-brand-700" aria-hidden />
+                    <Send className="mt-1 size-5 shrink-0 animate-whoosh text-brand-700" aria-hidden />
                     <div className="min-w-0 flex-1">
                       <p className="break-words font-semibold text-slate-900">
                         {u.company} <span className="font-normal text-slate-600">· {u.label}</span>
