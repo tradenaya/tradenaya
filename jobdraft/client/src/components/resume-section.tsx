@@ -1,7 +1,7 @@
 "use client";
 
 import { ExternalLink, FileUp, Pencil, RefreshCw } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, API_URL, ApiError, errorMessage } from "@/lib/api";
 import { formatYears } from "@/lib/format";
@@ -25,14 +25,82 @@ export function resumeFileProblem(file: File): string {
   return "";
 }
 
+type UploadReply = Profile | { status: "reading" };
+type StatusReply =
+  | { status: "none" }
+  | { status: "reading"; fileName: string; seconds: number }
+  | { status: "failed"; error: string }
+  | { status: "done"; profile: Profile };
+
+const POLL_MS = 2500;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export function ResumeSection({ profile, onChange }: { profile: Profile; onChange: (p: Profile) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState<File | null>(null);
+  const [busy, setBusy] = useState<{ fileName: string; startedAt: number } | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<ResumeDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const resume = profile.resume;
   const confirm = useConfirm();
+  const alive = useRef(true);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+
+  /** The server reads the resume in the background when the AI is slow: poll until it's done. */
+  async function waitForRead(): Promise<Profile | null> {
+    let misses = 0;
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline) {
+      await sleep(POLL_MS);
+      if (!alive.current) return null;
+      let s: StatusReply;
+      try {
+        s = await api<StatusReply>("/api/profile/resume/status");
+        misses = 0;
+      } catch (err) {
+        if (++misses >= 5) throw err; // a few network blips are fine
+        continue;
+      }
+      if (s.status === "done") return s.profile;
+      if (s.status === "failed") throw new ApiError(422, s.error);
+      if (s.status === "none") throw new ApiError(410, "Reading was interrupted because the server restarted. Please upload your resume again.");
+    }
+    throw new ApiError(408, "Reading is taking unusually long. Please refresh this page in a minute to see if it finished.");
+  }
+
+  // Picks up a read still running (or finished) after a refresh or coming back to this page.
+  useEffect(() => {
+    alive.current = true;
+    void (async () => {
+      try {
+        const s = await api<StatusReply>("/api/profile/resume/status");
+        if (s.status === "reading") {
+          setBusy({ fileName: s.fileName, startedAt: Date.now() - s.seconds * 1000 });
+          try {
+            const next = await waitForRead();
+            if (next) {
+              onChangeRef.current(next);
+              toast.success("Resume read.");
+            }
+          } finally {
+            if (alive.current) setBusy(null);
+          }
+        } else if (s.status === "done") {
+          onChangeRef.current(s.profile);
+        } else if (s.status === "failed") {
+          setError(s.error);
+        }
+      } catch (err) {
+        if (alive.current) setError(errorMessage(err));
+      }
+    })();
+    return () => {
+      alive.current = false;
+    };
+  }, []); // once on mount
 
   async function upload(file: File) {
     setError("");
@@ -60,19 +128,22 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
     }
     const form = new FormData();
     form.append("resume", file, file.name);
-    setBusy(file);
+    setBusy({ fileName: file.name, startedAt: Date.now() });
     setEditing(null);
     try {
-      const next = await api<Profile>("/api/profile/resume", { body: form });
+      const reply = await api<UploadReply>("/api/profile/resume", { body: form });
+      const next = "status" in reply ? await waitForRead() : reply;
+      if (!next) return; // left the page; the read continues and shows up on return
       onChange(next);
       toast.success(resume ? "Resume replaced." : "Resume uploaded and read.");
     } catch (err) {
       // Status 0: the connection dropped mid-upload (network or proxy), not "server down".
       const msg = err instanceof ApiError && err.status === 0 ? "The upload was cut off before JobDraft could read your resume. Please try again." : errorMessage(err);
+      if (!alive.current) return;
       setError(msg);
       toast.error(msg);
     } finally {
-      setBusy(null);
+      if (alive.current) setBusy(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -127,7 +198,7 @@ export function ResumeSection({ profile, onChange }: { profile: Profile; onChang
       </p>
       {busy && (
         <div className="mb-3">
-          <ResumeReading fileName={busy.name} />
+          <ResumeReading fileName={busy.fileName} startedAt={busy.startedAt} />
         </div>
       )}
       {error && (

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { execute, queryOne } from "../db/pool.js";
 import { HttpError } from "../lib/errors.js";
 import { errInfo, log } from "../lib/logger.js";
+import { clearResumeJob } from "../resume/jobs.js";
 import { storage } from "../storage/index.js";
 import { clearSessionCookie, h, parse, requireAuth, userOf } from "./common.js";
 import { disconnectGmail } from "./gmail-routes.js";
@@ -44,6 +45,8 @@ export function accountRouter() {
       }
       await disconnectGmail(userId).catch((err) => log.warn("account_delete_revoke_failed", { userId, error: errInfo(err) }));
       await execute("DELETE FROM users WHERE id = ?", [userId]);
+      // A resume still being read can't be saved any more (no user row); forget its status.
+      clearResumeJob(userId);
       clearSessionCookie(res);
       log.info("account_deleted", { userId });
       res.json({ ok: true });

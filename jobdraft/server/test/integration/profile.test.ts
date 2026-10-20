@@ -1,5 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setGeneratorForTests } from "../../src/ai/index.js";
+import { AiUnavailableError, setGeneratorForTests } from "../../src/ai/index.js";
+import { mockGenerateJson } from "../../src/ai/mock.js";
+import { sleep } from "../../src/lib/errors.js";
+import { RESUME_WAIT } from "../../src/resume/jobs.js";
 import { config } from "../../src/config/env.js";
 import { closePool, query, queryOne } from "../../src/db/pool.js";
 import { GMAIL_COMPOSE, mockGmail } from "../../src/gmail/index.js";
@@ -91,6 +94,62 @@ describe("resume upload", () => {
       { company_name: "Orchid Robotics", source: "resume" },
       { company_name: "Sister Co Analytics", source: "manual" },
     ]);
+  });
+});
+
+describe("resume read in the background", () => {
+  afterEach(() => {
+    RESUME_WAIT.ms = 20_000;
+  });
+
+  const pollUntilFinished = async (agent: Awaited<ReturnType<typeof registerUser>>["agent"]) => {
+    for (let i = 0; i < 50; i++) {
+      const s = (await agent.get("/api/profile/resume/status").expect(200)).body;
+      if (s.status !== "reading") return s;
+      await sleep(100);
+    }
+    throw new Error("still reading");
+  };
+
+  it("a slow read answers 202, keeps going, and the status endpoint reports it done (once)", async () => {
+    const { agent } = await registerUser();
+    RESUME_WAIT.ms = 50;
+    setGeneratorForTests(async (req) => {
+      await sleep(400);
+      return mockGenerateJson(req);
+    });
+    const res = await uploadResume(agent).expect(202);
+    expect(res.body).toEqual({ status: "reading" });
+    const reading = (await agent.get("/api/profile/resume/status").expect(200)).body;
+    expect(reading).toMatchObject({ status: "reading", fileName: "Priya Sharma Resume.pdf" });
+    // A second upload while the first is still being read is refused.
+    expect((await uploadResume(agent).expect(409)).body.error).toMatch(/still being read/);
+    const done = await pollUntilFinished(agent);
+    expect(done.status).toBe("done");
+    expect(done.profile.resume.fullName).toBe("Priya Sharma");
+    expect((await agent.get("/api/profile/resume/status").expect(200)).body).toEqual({ status: "none" });
+  });
+
+  it("a background read that fails is reported with a clear message and the old resume is kept", async () => {
+    const { agent } = await registerUser();
+    await uploadResume(agent).expect(200);
+    RESUME_WAIT.ms = 50;
+    setGeneratorForTests(async () => {
+      await sleep(300);
+      throw new AiUnavailableError("The AI is responding slowly right now. Please try again in a few minutes.");
+    });
+    await uploadResume(agent, undefined, "New.pdf").expect(202);
+    const failed = await pollUntilFinished(agent);
+    expect(failed).toEqual({ status: "failed", error: "The AI is responding slowly right now. Please try again in a few minutes." });
+    expect((await agent.get("/api/profile").expect(200)).body.resume.fileName).toBe("Priya Sharma Resume.pdf");
+  });
+
+  it("quick problems (not a PDF, scanned) are still answered straight away", async () => {
+    const { agent } = await registerUser();
+    RESUME_WAIT.ms = 50;
+    const scanned = await uploadResume(agent, await makePdf(["Scan 001"])).expect(400);
+    expect(scanned.body.error).toMatch(/scanned/);
+    expect((await agent.get("/api/profile/resume/status").expect(200)).body).toEqual({ status: "none" });
   });
 });
 

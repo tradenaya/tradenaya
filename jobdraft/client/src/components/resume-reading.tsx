@@ -6,7 +6,8 @@ import { cx } from "./ui";
 
 /**
  * Shown while a resume is uploaded and read. The server doesn't report its
- * progress, so the steps follow typical timings (≈10–30 s; it gives up at ~1 min).
+ * progress, so the steps follow typical timings (≈10–30 s; up to ~3 min when
+ * the AI is busy — the read then continues in the background).
  */
 const STEPS = [
   { at: 0, label: "Uploading your PDF" },
@@ -16,18 +17,18 @@ const STEPS = [
   { at: 26, label: "Finishing up" },
 ];
 
-export function ResumeReading({ fileName }: { fileName: string }) {
-  const [seconds, setSeconds] = useState(0);
+export function ResumeReading({ fileName, startedAt }: { fileName: string; startedAt: number }) {
+  const elapsed = () => Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const [seconds, setSeconds] = useState(elapsed);
   useEffect(() => {
-    const started = Date.now();
-    const t = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 250);
+    const t = setInterval(() => setSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000))), 250);
     return () => clearInterval(t);
-  }, []);
+  }, [startedAt]);
 
   const current = STEPS.reduce((acc, s, i) => (seconds >= s.at ? i : acc), 0);
   // Eases towards 95% and never claims to be done before the server answers.
-  const progress = Math.min(95, Math.round(100 * (1 - Math.exp(-seconds / 16))));
-  const slow = seconds >= 40;
+  const progress = Math.min(95, Math.round(100 * (1 - Math.exp(-seconds / 25))));
+  const slow = seconds >= 45;
 
   return (
     <div role="status" aria-live="polite" className="overflow-hidden rounded-2xl bg-brand-50 p-4 ring-1 ring-inset ring-brand-100 sm:p-5" data-testid="resume-reading">
@@ -75,7 +76,10 @@ export function ResumeReading({ fileName }: { fileName: string }) {
             </div>
           </div>
           <p className="mt-2 text-sm text-slate-600">
-            {slow ? "Taking a little longer than usual — hang tight." : "Usually takes 10–30 seconds, at most about a minute."} Please keep this page open.
+            {slow
+              ? "The AI is busy right now, so this is taking longer than usual. It can take up to 2–3 minutes."
+              : "Usually takes 10–30 seconds. When the AI is busy, it can take up to 2–3 minutes."}{" "}
+            You can leave this page; your details will appear here when they&apos;re ready.
           </p>
         </div>
       </div>

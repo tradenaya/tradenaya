@@ -8,7 +8,8 @@ import { HttpError } from "../lib/errors.js";
 import { istDate, nextRunAt, normalizeRunTime } from "../lib/time.js";
 import { MAX_RESUME_BYTES } from "../resume/pdf.js";
 import { editableResume, resumeEditSchema, saveResumeEdits } from "../resume/edit.js";
-import { replaceResume } from "../resume/service.js";
+import { clearResumeJob, resumeJob, startResumeJob } from "../resume/jobs.js";
+import { readResumeFile } from "../resume/service.js";
 import {
   hasAllScopes,
   hasScheduledRunOn,
@@ -117,8 +118,39 @@ export function profileRouter() {
     upload.single("resume"),
     h(async (req, res) => {
       if (!req.file) throw new HttpError(400, "Please choose a PDF file.", "validation", { resume: "Choose a PDF file." });
-      await replaceResume(userOf(req).id, req.file);
-      res.json(await profilePayload(userOf(req).id));
+      const userId = userOf(req).id;
+      // Quick checks answer straight away; the AI read may continue in the background.
+      const text = await readResumeFile(userId, req.file);
+      storage(); // "not configured" now, not after the AI call
+      const finished = await startResumeJob(userId, req.file, text);
+      if (!finished) {
+        res.status(202).json({ status: "reading" });
+        return;
+      }
+      const job = resumeJob(userId)!;
+      clearResumeJob(userId);
+      if (job.status === "failed") throw new HttpError(job.httpStatus ?? 500, job.error ?? "Reading the resume failed.");
+      res.json(await profilePayload(userId));
+    }),
+  );
+
+  // Polled by the page while a resume is read in the background (and on page load, to pick up a read in progress).
+  r.get(
+    "/resume/status",
+    h(async (req, res) => {
+      const userId = userOf(req).id;
+      const job = resumeJob(userId);
+      if (!job) {
+        res.json({ status: "none" });
+        return;
+      }
+      if (job.status === "reading") {
+        res.json({ status: "reading", fileName: job.fileName, seconds: Math.floor((Date.now() - job.startedAt) / 1000) });
+        return;
+      }
+      clearResumeJob(userId); // a finished read is reported once
+      if (job.status === "failed") res.json({ status: "failed", error: job.error });
+      else res.json({ status: "done", profile: await profilePayload(userId) });
     }),
   );
 

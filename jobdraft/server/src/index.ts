@@ -1,4 +1,10 @@
+import dns from "node:dns";
 import { ensureSecrets, loadEnvFile } from "./config/env.js";
+
+// Connect over IPv4 first. On the production VPS IPv6 is broken: Node tried
+// IPv6 first and every Cloudinary upload and many Gemini calls hung until
+// they timed out. IPv4-first is harmless where IPv6 works.
+dns.setDefaultResultOrder("ipv4first");
 
 loadEnvFile();
 ensureSecrets();
