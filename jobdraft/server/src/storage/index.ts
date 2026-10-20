@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import https from "node:https";
 import path from "node:path";
 import { v2 as cloudinary } from "cloudinary";
 import { config, features } from "../config/env.js";
@@ -21,6 +22,13 @@ export interface ResumeStorage {
 const RAW = { resource_type: "raw" as const, type: "authenticated" as const };
 const SIGNED_URL_TTL_SECONDS = 300;
 
+/**
+ * Cloudinary's SDK opens its own HTTPS connections; force IPv4 on them (the
+ * production VPS has broken IPv6, and DNS ordering alone didn't fix uploads)
+ * and allow 2 minutes for a resume upload instead of the SDK's 60 s.
+ */
+const CLOUDINARY_REQUEST = { agent: new https.Agent({ family: 4, keepAlive: true }), timeout: 120_000 };
+
 function configureCloudinary() {
   const c = config().cloudinary;
   cloudinary.config({ cloud_name: c.cloudName, api_key: c.apiKey, api_secret: c.apiSecret, secure: true });
@@ -32,7 +40,7 @@ const cloudinaryStorage: ResumeStorage = {
     const publicId = `resume-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`;
     const result = await new Promise<{ public_id: string; secure_url: string }>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
-        { ...RAW, folder: `jobdraft/resumes/${userId}`, public_id: publicId, overwrite: false, use_filename: false },
+        { ...RAW, ...CLOUDINARY_REQUEST, folder: `jobdraft/resumes/${userId}`, public_id: publicId, overwrite: false, use_filename: false },
         (err, res) => (err || !res ? reject(err ?? new Error("Upload failed")) : resolve(res as { public_id: string; secure_url: string })),
       );
       stream.end(content);
@@ -41,7 +49,7 @@ const cloudinaryStorage: ResumeStorage = {
   },
   async remove(publicId) {
     configureCloudinary();
-    await cloudinary.uploader.destroy(publicId, { ...RAW, invalidate: true });
+    await cloudinary.uploader.destroy(publicId, { ...RAW, ...CLOUDINARY_REQUEST, invalidate: true });
   },
   async signedUrl(publicId) {
     configureCloudinary();

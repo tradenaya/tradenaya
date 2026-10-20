@@ -1,10 +1,13 @@
 import dns from "node:dns";
+import net from "node:net";
 import { ensureSecrets, loadEnvFile } from "./config/env.js";
 
-// Connect over IPv4 first. On the production VPS IPv6 is broken: Node tried
-// IPv6 first and every Cloudinary upload and many Gemini calls hung until
-// they timed out. IPv4-first is harmless where IPv6 works.
+// Connect over IPv4. On the production VPS IPv6 is broken: Cloudinary uploads
+// and many Gemini calls hung until they timed out. IPv4 first alone wasn't
+// enough: Node 22 also races IPv6 when IPv4 takes over 250 ms to connect
+// ("happy eyeballs"), so that racing is turned off. Harmless where IPv6 works.
 dns.setDefaultResultOrder("ipv4first");
+net.setDefaultAutoSelectFamily(false);
 
 loadEnvFile();
 ensureSecrets();
