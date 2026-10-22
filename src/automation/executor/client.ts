@@ -574,6 +574,14 @@ export class CoinSwitchClient {
     if (Array.isArray(inner)) return inner;
     if (Array.isArray(inner?.positions)) return inner.positions;
     if (Array.isArray(inner?.orders)) return inner.orders;
+    // "Nothing open" can come back as { data: { orders: null } }, { data: {} }
+    // or { data: null } — that is an empty list, not a failed read.
+    const emptyInner =
+      body != null && typeof body === "object" && "data" in body &&
+      (inner == null || (typeof inner === "object" && !Array.isArray(inner) &&
+        (inner.orders == null && inner.positions == null) &&
+        Object.values(inner).every((v) => v == null || (Array.isArray(v) && v.length === 0) || typeof v !== "object")));
+    if (emptyInner) return [];
     if (strict) throw new Error(`unexpected exchange response shape: ${JSON.stringify(data)?.slice(0, 200)}`);
     return [];
   }

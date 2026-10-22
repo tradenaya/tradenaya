@@ -71,7 +71,7 @@ export function describeIdleScan(summary: AutoScanSummary | null): string {
 
 /** Risk rejections that come from the account, not the coin (every coin would fail the same way). */
 export function isAccountLevelRejection(reason: string): boolean {
-  return /daily loss limit|daily trade limit|maximum.*(positions|bots)|wallet balance|available balance|capital must be greater/i.test(reason);
+  return /daily loss limit|daily trade limit|maximum.*(positions|bots)|wallet balance|available balance|free balance|capital must be greater/i.test(reason);
 }
 
 function normalizeErrorMessage(message: string): string {
@@ -450,8 +450,14 @@ export class AnalysisCycleRunner {
     this.logCandidateDetails(cycleSymbol, plan, risk.decision);
 
     if (!risk.decision.approved || risk.decision.positionSize <= 0) {
-      this.rejectCandidate(bot, cycleSymbol, index, risk.decision.reason, "risk");
-      return { status: "CONTINUE", reason: risk.decision.reason };
+      // Wallet-% bots share the wallet: with nothing free right now (the money is
+      // in other bots' trades) say so plainly — it is a wait, not an error.
+      const reason =
+        config.capitalMode === "percent" && !(risk.allocatedCapital > 0)
+          ? "No free balance in the wallet right now (the money is in other open trades or orders) — this bot will trade as soon as some is freed"
+          : risk.decision.reason;
+      this.rejectCandidate(bot, cycleSymbol, index, reason, "risk");
+      return { status: "CONTINUE", reason };
     }
     liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "risk", message: `Risk check passed — position size ${risk.decision.positionSize}.` });
     console.log(`[scan] CANDIDATE #${index} (${cycleSymbol}) → PASSED — proceeding to order submission`);
@@ -520,6 +526,16 @@ export class AnalysisCycleRunner {
         await this.handoff(bot);
         return { status: "DONE", result: { executed: true, state: "POSITION_OPEN", action: "TRADE_EXECUTED", message: "Entry filled but unprotected; Position Manager will attempt emergency protection" } };
       case "CANCELLED":
+        // Refused BEFORE any order reached the exchange (below the minimum order
+        // for this coin at the bot's risk, no safe leverage, not enough free
+        // margin…). That says nothing about the other coins — try the next one.
+        // Previously this ended the whole cycle, so a top-ranked coin the
+        // account can't afford (BTC) blocked the bot from every other coin.
+        if (!executionResult.executionId && !executionResult.entryOrderId) {
+          await this.deps.stateManager.transition(bot.id, "ORDER_PENDING", "RUNNING");
+          await this.deps.stateManager.transition(bot.id, "RUNNING", "ANALYZING");
+          return { status: "CONTINUE", reason: executionResult.message };
+        }
         await this.completeAnalysis(bot, "CANCELLED", executionResult.message);
         return { status: "DONE", result: { executed: true, state: "RUNNING", action: "ANALYZED", message: executionResult.message } };
       case "FAILED":
