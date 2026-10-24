@@ -33,7 +33,7 @@ import { usdt } from "@/lib/currency/usdt-text";
 import { TRADENAYA_SMART_ID, TREND_BREAKOUT_ID } from "@/automation/strategy/catalog";
 import { BREAKEVEN_BUFFER, EXIT_LOOKBACK, TRAIL_ARM_R, channelStop } from "@/automation/strategy/trend-breakout";
 import { closedCandles } from "@/automation/indicators/candle-resampler";
-import { withBotMode } from "@/automation/paper/mode";
+import { tradingModeOfBot, withBotMode } from "@/automation/paper/mode";
 import { runWithTradingMode } from "@/automation/paper/mode";
 
 const ACTIVE_STATES = new Set(["WAITING_ENTRY", "ENTRY_PENDING", "ENTRY_EXECUTED", "PROTECTED", "TRAILING", "UNPROTECTED", "CLOSING"]);
@@ -226,7 +226,11 @@ export class PositionMonitor {
     const sameSymbol = (await this.store.getActivePositions().catch(() => [])).filter(
       (p) => p.id !== position.id && p.userId === position.userId && p.symbol.toLowerCase() === position.symbol.toLowerCase(),
     );
-    if (sameSymbol.length > 0) return;
+    // Only a bot on the SAME exchange (paper or live) shares these orders.
+    const myMode = await tradingModeOfBot(position.botId);
+    for (const other of sameSymbol) {
+      if ((await tradingModeOfBot(other.botId)) === myMode) return;
+    }
 
     const trigger = (o: ExchangeOrder) => Number(o.raw?.trigger_price ?? o.raw?.stop_price ?? NaN);
     const isLong = position.side === "BUY";
