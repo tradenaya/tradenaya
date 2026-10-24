@@ -17,7 +17,7 @@ describe("a full daily run", () => {
     setIst("2026-11-01T20:00"); // set up the evening before
     const { user, agent } = await readyUser();
     setIst("2026-11-02T09:00");
-    expect(await runDueUsers()).toEqual({ claimed: 1, skipped: 0 });
+    expect(await runDueUsers()).toEqual({ claimed: 1, skipped: 0, blocked: 0 });
 
     const run = await queryOne<{ id: number; status: string; trigger: string; drafts_count: number; auto_send_count: number; link_only_count: number; scheduled_for: Date }>(
       "SELECT * FROM runs WHERE user_id = ?",
@@ -51,6 +51,55 @@ describe("a full daily run", () => {
     expect(dash.body.lastRun.status).toBe("ready_to_send");
     expect(dash.body.upcoming.length).toBe(run!.auto_send_count);
     expect(dash.body.upcoming[0]).toMatchObject({ kind: "email", label: "Application" });
+  });
+
+  it("records a funnel that matches what was created; screens in batches of 5, at most 15 per run", async () => {
+    const screens: number[] = [];
+    let writes = 0;
+    setGeneratorForTests(async (req) => {
+      if (req.task === "screen") screens.push((req.input as { postings: unknown[] }).postings.length);
+      if (req.task === "job_check") writes++;
+      return mockGenerateJson(req);
+    });
+    setIst("2026-11-01T20:00");
+    const { user, agent } = await readyUser();
+    setIst("2026-11-02T09:00");
+    await runDueUsers();
+
+    const list = await agent.get("/api/runs").expect(200);
+    const run = list.body.runs[0];
+    const f = run.funnel;
+    const all = await items(user.id);
+    // Counts agree with the items that exist.
+    expect(f.drafted).toBe(all.filter((i) => i.type === "draft").length);
+    expect(f.autoSent).toBe(all.filter((i) => i.type === "auto_send").length);
+    expect(f.linkOnly).toBe(all.filter((i) => i.type === "link_only").length);
+    expect(f.drafted + f.autoSent).toBeGreaterThanOrEqual(1);
+    expect(f.linkOnly).toBeGreaterThanOrEqual(1);
+    expect(run.jobsConsidered).toBe(f.fetched);
+    // Every filter step that the demo postings exercise is counted.
+    expect(f.removed.excluded).toBeGreaterThanOrEqual(1); // past employers
+    expect(f.removed.agency).toBeGreaterThanOrEqual(1);
+    expect(f.removed.seniority).toBeGreaterThanOrEqual(1); // internship
+    expect(f.removed.experience).toBeGreaterThanOrEqual(1); // principal, 12+ years
+    const removed = Object.values(f.removed as Record<string, number>).reduce((a, b) => a + b, 0);
+    expect(f.afterFilters).toBeLessThanOrEqual(f.fetched);
+    expect(f.fetched - removed).toBeLessThanOrEqual(f.afterFilters + (f.removed.excluded ?? 0));
+    // AI: batches of ≤5, ≤15 postings per run, emails written only for suitable postings with an address.
+    expect(screens.every((n) => n <= 5)).toBe(true);
+    expect(f.aiChecked).toBe(screens.reduce((a, b) => a + b, 0));
+    expect(f.aiChecked).toBeLessThanOrEqual(15);
+    expect(f.notChecked).toBe(f.afterFilters - f.aiChecked);
+    expect(f.suitable).toBeLessThanOrEqual(f.aiChecked);
+    expect(f.emailsFound).toBeLessThanOrEqual(f.suitable);
+    expect(writes).toBeLessThanOrEqual(f.emailsFound);
+    expect(f.variants.plain.fetched).toBe(f.fetched);
+    expect(f.variants.plain.emailApply).toBe(f.emailsFound);
+    // Each link-only item keeps its apply URL; items remember the search variant.
+    for (const i of await query<{ job_url: string; query_variant: string }>("SELECT job_url, query_variant FROM run_items WHERE user_id = ?", [user.id])) {
+      expect(i.job_url).toMatch(/^https:\/\//);
+      expect(i.query_variant).toBe("plain");
+    }
   });
 
   it("never drafts or sends to current or past employers (name, portal client, web domain)", async () => {
@@ -127,7 +176,7 @@ describe("automation switch", () => {
 
     const cacheBefore = await query("SELECT * FROM job_cache");
     setIst("2026-11-03T09:00");
-    expect(await runDueUsers()).toEqual({ claimed: 0, skipped: 0 });
+    expect(await runDueUsers()).toEqual({ claimed: 0, skipped: 0, blocked: 0 });
     expect(aiCalls).toBe(callsAfterFirstRun);
     expect(await query("SELECT * FROM job_cache")).toHaveLength(cacheBefore.length);
     const dash = await agent.get("/api/dashboard").expect(200);
@@ -143,7 +192,7 @@ describe("automation switch", () => {
     setIst("2026-11-02T10:00"); // after today's 09:00
     const on = await agent.put("/api/automation").send({ enabled: true }).expect(200);
     expect(on.body.nextRunAt).toBe(new Date("2026-11-03T03:30:00Z").toISOString());
-    expect(await runDueUsers()).toEqual({ claimed: 0, skipped: 0 });
+    expect(await runDueUsers()).toEqual({ claimed: 0, skipped: 0, blocked: 0 });
     setIst("2026-11-03T09:00");
     expect((await runDueUsers()).claimed).toBe(1);
     expect(await queryOne("SELECT id FROM runs WHERE user_id = ? AND `trigger` = 'scheduled'", [user.id])).not.toBeNull();

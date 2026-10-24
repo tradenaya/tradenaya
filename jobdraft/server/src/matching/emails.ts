@@ -26,7 +26,12 @@ export function isDisallowedEmail(email: string): boolean {
   return false;
 }
 
-export type EmailCheck = { ok: true; email: string } | { ok: false; reason: string };
+/** Real, reply-able addresses written in the posting (code-extracted, never guessed). */
+export function applicationEmailsIn(text: string): string[] {
+  return extractEmails(text).filter((e) => isValidEmailFormat(e) && !isDisallowedEmail(e));
+}
+
+export type EmailCheck ={ ok: true; email: string } | { ok: false; reason: string };
 
 /** The model's email must appear verbatim in the posting and be a real, reply-able address. */
 export function verifyApplicationEmail(candidate: string | null | undefined, postingText: string): EmailCheck {

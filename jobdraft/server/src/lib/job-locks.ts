@@ -26,11 +26,26 @@ export async function releaseLock(name: string, owner: string): Promise<void> {
   await execute("UPDATE job_locks SET locked_until = '1970-01-01 00:00:01' WHERE name = ? AND owner = ?", [name, owner]);
 }
 
-/** Runs `fn` only if the lock is free. Keeps the lock alive while `fn` runs. */
-export async function withJobLock<T>(name: string, ttlMs: number, fn: () => Promise<T>): Promise<{ ran: true; result: T } | { ran: false }> {
+/**
+ * Runs `fn` only if the lock is free. Keeps the lock alive while `fn` runs, but
+ * for at most `maxHoldMs`: if `fn` hangs, renewal stops and the lock expires,
+ * so one stuck job can never block every later execution.
+ */
+export async function withJobLock<T>(
+  name: string,
+  ttlMs: number,
+  fn: () => Promise<T>,
+  maxHoldMs = 2 * 60 * 60 * 1000,
+): Promise<{ ran: true; result: T } | { ran: false }> {
   const owner = `${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
   if (!(await tryAcquireLock(name, ttlMs, owner))) return { ran: false };
+  const startedAt = Date.now();
   const heartbeat = setInterval(() => {
+    if (Date.now() - startedAt > maxHoldMs) {
+      clearInterval(heartbeat);
+      log.error("lock_hold_exceeded", { name, maxHoldMs });
+      return;
+    }
     tryAcquireLock(name, ttlMs, owner).catch((err) => log.warn("lock_renew_failed", { name, error: errInfo(err) }));
   }, Math.max(1000, Math.floor(ttlMs / 3)));
   heartbeat.unref();

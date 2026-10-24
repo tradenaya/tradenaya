@@ -4,6 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { config } from "../config/env.js";
 import { execute, isDuplicateKey, queryOne } from "../db/pool.js";
+import { checkGeminiKey, geminiKeySchema, saveGeminiKey } from "../ai/user-key.js";
 import { HttpError } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
 import { clearSessionCookie, h, parse, requireAuth, setSessionCookie, userOf } from "./common.js";
@@ -19,6 +20,8 @@ const registerSchema = z.object({
   email,
   // bcrypt only uses the first 72 bytes.
   password: z.string().min(8, "Password must be at least 8 characters.").max(72, "Password must be at most 72 characters."),
+  // Each user brings their own key (the server has none): used for their resume, job checks and emails.
+  geminiKey: geminiKeySchema,
 });
 const loginSchema = z.object({ email, password: z.string().min(1, "Enter your password.").max(200) });
 
@@ -37,6 +40,8 @@ export function authRouter() {
     limiter,
     h(async (req, res) => {
       const body = parse(registerSchema, req.body);
+      // Checked with Google first, so nobody ends up with an account whose AI can't work.
+      await checkGeminiKey(body.geminiKey);
       const hash = await bcrypt.hash(body.password, BCRYPT_COST);
       let userId: number;
       try {
@@ -47,6 +52,7 @@ export function authRouter() {
         throw err;
       }
       await execute("INSERT IGNORE INTO profiles (user_id) VALUES (?)", [userId]);
+      await saveGeminiKey(userId, body.geminiKey);
       setSessionCookie(res, userId);
       log.info("user_registered", { userId });
       res.status(201).json({ user: { id: userId, name: body.name, email: body.email } });

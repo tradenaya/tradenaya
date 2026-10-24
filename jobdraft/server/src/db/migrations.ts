@@ -1,6 +1,10 @@
 // Ordered migrations. Append new entries with the next version number; never
 // edit an applied one. Every statement must be safe to re-run.
 import { migrationV2 } from "./migration-v2.js";
+import { migrationV3 } from "./migration-v3.js";
+import { migrationV4 } from "./migration-v4.js";
+import { migrationV5 } from "./migration-v5.js";
+import { migrationV6 } from "./migration-v6.js";
 
 export interface Migration {
   version: number;
@@ -138,4 +142,8 @@ export const migrations: Migration[] = [
     ],
   },
   migrationV2,
+  migrationV3,
+  migrationV4,
+  migrationV5,
+  migrationV6,
 ];

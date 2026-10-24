@@ -64,7 +64,7 @@ These are the choices made while building JobDraft without being able to ask, wi
 | Due users are processed two at a time, each isolated. Nobody is skipped under load: a user stays due for 3 hours, so the next minute's pass picks them up. | As specified. |
 | Fetched postings are reused across users for **6 hours** per (source, query, location). Manual runs use the same cache. | As specified. Saves the small JSearch quota. |
 
-## Sending policy (v2, fixed)
+## Sending policy (v2; per-user sending modes added in v4, see below)
 
 | Decision | Why |
 |---|---|
@@ -115,3 +115,83 @@ These are the choices made while building JobDraft without being able to ask, wi
 |---|---|
 | `GEMINI_MODELS` = `gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash-lite`. | Your aliases first, then the stable IDs Google's model page currently recommends, as fallbacks. |
 | Structured output (`responseJsonSchema`, temperature 0.2) + zod. 429/5xx errors are retried with backoff before moving to the next model; 401/403 stop immediately. A 1.5 s delay between job checks. | Reliable JSON within free-tier limits. |
+
+## v3: missing runs, run funnel, more productive search
+
+### Why History showed no runs
+
+| Finding | What changed |
+|---|---|
+| The full scheduler path was traced: cron registration in the production entry point (`index.ts` → `startScheduler`, not dev-only), the per-minute pass, Asia/Kolkata handling, the due rule, the run claim and errors. Cron itself works: a real `node-cron` per-minute task fired on time with the process timezone set to UTC. IST maths, the TIME column parsing and the unique per-day claim were correct, and the existing tests covered them. | Added tests for IST with `TZ=UTC`, stale-lock reclaim and stuck runs. |
+| **The gap: the scheduler's due-user query only selected users whose Gmail status was `connected`.** A user with automation ON whose Google access expired or was revoked (`invalid_grant` → status `error`; Google expires tokens after 7 days while the OAuth app is in Testing mode), or who lacked a permission, was skipped **silently every minute**: no run row, no History card, no log line, automation still showing ON. Incomplete setup was skipped the same silent way. This matches "History shows nothing at all" for a user with automation ON. I can't read the production database from here, so `npm run diagnose` (below) confirms the exact cause on the VPS. | The scheduler now starts from **every** automation-ON user. If the run time comes and setup or Gmail blocks the run, it records a **failed run card** for that day saying what to fix ("Today's run couldn't start: reconnect gmail (access expired)…"). It is reported once per day, never silently skipped. |
+| A hung network call inside a run held the `scheduler` lock forever (the heartbeat kept renewing it), which would block every user's runs. googleapis calls had no timeout. | Runs are **claimed** under the lock (quick) and **processed outside** it (2 at a time per process). Locks stop renewing after 2 hours (`maxHoldMs`), Gmail calls time out after 60 s, a run stops itself after 20 minutes, and every pass closes runs stuck in "running" for over 45 minutes (before, only a restart did). |
+| Nothing showed how many users were due or why others were skipped. | Startup logs every registered cron job. `LOG_LEVEL=debug` logs each minute: automation-ON users, due, blocked, waiting (by reason). `npm run diagnose` prints a per-user explanation: run time, Gmail state, permissions, what blocks them, next run, last 3 runs, plus locks and today's job-source usage. Read-only, IDs only. |
+| JSearch had been returning zero jobs: the code read jobs from `data`, while v5 returns them in `data.jobs`. | Rewritten to the verified v5 shape (below). |
+
+### Funnel
+
+| Decision | Why |
+|---|---|
+| Stored as JSON on `runs.funnel` (migration v3); `run_items.query_variant` records which search found each job. | One read for History; no extra tables per step. |
+| Steps: fetched (per source and per search, with errors and notes), removed per filter step, AI-screened, suitable, with an email, drafted, auto-sent, link-only, left for the next run, and per search variant: fetched / with an email. At most 80 searches are stored per run. | What the spec asked for, with enough detail to answer "why nothing?". |
+| A run that fetched nothing stores a one-line reason (per source: not configured, error with HTTP status, daily cap, quota exhausted, returned 0) as its message, shown on the card. | "If 0 jobs are fetched, the run card must say why." |
+
+### Adzuna
+
+| Decision | Why |
+|---|---|
+| **The role goes in `title_only`, not `what`.** Remote searches keep `what=remote` / `what=work from home`. | Measured on the live API (Product Manager, Pune, 7 days, 50 newest): `what` returned 9 relevant of 50 (the rest were "Relationship Manager – Phone Banking", "Data Engineer"…, of 129 broad matches); `title_only` returned all 14 relevant postings in one call. Same number of calls, far better results. |
+| One search per (role, area). Areas: Bengaluru + Bangalore, Mumbai + Navi Mumbai + Thane, Pune + Pimpri-Chinchwad, Hyderabad + Secunderabad (also Delhi/New Delhi, Gurugram/Gurgaon). Location matching accepts the same areas. `max_days_old=7`, `results_per_page=50`, `sort_by=date`. | As specified. |
+| Daily cap 230 calls (IST day) across all users, counted atomically in `api_usage` (`ADZUNA_DAILY_CAP`). Cache 6 hours, shared by all users; identical searches from different users are made once. HTTP 401/403 stops further Adzuna calls in that run. | Free plan: 250 calls/day. |
+
+### JSearch
+
+| Decision | Why |
+|---|---|
+| Request and response exactly as verified: `country=in`, `date_posted=week`, `num_pages=1`, `language=en`; `status === "OK"`; jobs in `data.jobs`; `data.cursor` for page 2. A non-OK status is an error, not "0 jobs". | Defaults return old, US jobs. |
+| India only: `job_country === "IN"`, or remote with no country / mentioning India. Dedupe on `job_uid`, then `job_id`. Apply link: a direct `apply_options` entry first, else `job_apply_link`. Posted date: `job_posted_at_datetime_utc`, else the timestamp, else unknown (kept). Salary only for Indian postings. | As specified. |
+| Variants: plain, "startup", "hiring immediate joiner", "send resume", "walk-in" (no remote walk-ins). | Email-apply postings come mostly from small employers. |
+| Cap: `JSEARCH_DAILY_CAP` (default 6) across all users, plus `JSEARCH_MAX_CALLS_PER_RUN` (default 4) per run, so one user's run can't use the whole day. Cache 12 hours. Rotation: cached searches first (free), then the **least recently searched** (role, city, variant), never-searched first, plain variants before the others. A second page only when the first page had at least 5 postings that pass the title and location checks. HTTP 429 marks the day exhausted; 401/403 stops JSearch for the run. A missing key is noted, not an error. | Least-recently-searched rotation covers every combination over the days without a schedule table. At 6 calls a day, all combinations are covered within a week when there are at most 42 (e.g. 2 roles × 5 cities × 4–5 variants); more combinations take proportionally longer. |
+
+### Matching
+
+| Decision | Why |
+|---|---|
+| Role families (product, project, delivery, business analyst, implementation, customer success, scrum, team lead) on top of token matching: "Product Owner", "Associate PM" and "PM" match Product Manager; "Technical Program Manager" and "Project Coordinator" match Project Manager; and so on. A bare "PM" counts as product only when the title isn't a project/program title. Families never cross ("Project Manager" ≠ "Product Manager"). | Broader without mixing different jobs. |
+| A non-software domain word in the title (civil, mechanical, construction, pharma, veterinary, ruminant, manufacturing, solar…) never matches a role that doesn't contain it. For generic titles with no software word, the description decides: 2+ non-software domain words and at most 1 software word → removed as "not a software / IT role". | "Civil Project Manager" and "Product Manager – Ruminant (veterinary)" must not match. |
+| Seniority: only director / head / VP / principal (and C-level) titles are skipped, and only for users under 5 years. "Senior", "Senior Associate" and "Lead" are allowed; the stated minimum experience decides. Internships (1+ year) and junior titles (5+ years) are still skipped. | As specified. |
+| Experience: the smallest stated minimum ("7+ years", "3-5 years", "3 to 5 yrs", "15+ Years" in a title) must be at most your experience + 2; unstated is kept. Company age ("25+ years of excellence") is ignored. | As specified, avoiding a common false match. |
+| AI: up to **15 postings screened per run, 5 per Gemini call** (suitability, confidence, scam/agency, real employer). Postings that contain an email address are screened first. An email is then written (one more call) only for suitable postings whose own text contains a real address, and every existing safety check (verbatim address, excluded companies, caps, auto-send rules) still applies. Two AI failures in a row stop the run with what it has. | More postings checked per AI call, and email-apply jobs aren't crowded out. |
+| Suitable postings without an email (or over the 10-email cap) go to **Apply via link** with their apply URL (cap 15 per run, unchanged). | "It must appear in the Apply via link list." |
+
+### Setup page
+
+| Decision | Why |
+|---|---|
+| Under Target roles, besides "Suggested from your resume", a "Related roles you could also target" group: for product/project/analyst/consultant-type resumes, Associate Project Manager, Project Coordinator, Business Analyst, Implementation Consultant, Technical Account Manager, Customer Success Manager, Scrum Master, Delivery Manager; for engineering resumes, neighbouring developer roles. One tap adds a tag. | The spec's list fits management profiles; showing it to a developer would be noise. |
+
+## v4: sending modes (override the v2 sending policy where they differ)
+
+| Decision | Why |
+|---|---|
+| `profiles.send_mode` ENUM('drafts_only','smart','send_all','send_all_instant') default `smart`, plus `send_mode_changed_at` (migration v4, applied on startup). Existing users get `smart`, the previous behaviour, and existing emails are marked `smart`. | As specified. |
+| One table of per-mode rules (`SEND_MODES` in `runs/safety.ts`): Drafts only → nothing auto-sent; Smart send → confidence ≥ 85, 5 per run, 8 per IST day, 30-min window; Send all → any suitable email that passed the hard checks, 15 per day, 30-min window; Send all instantly → the same with no window. In the send-all modes the per-run limit is the existing 10 new emails per run. | The spec gives daily caps for the send-all modes and no per-run cap; Smart send keeps its existing 5-per-run limit. |
+| "Suitable email that passes all hard safety checks" = what already becomes an email: suitable, not scam/agency (those are never even drafted by the safety checks), a verbatim application address and every body check passed. Scam/agency flags are also checked again at classification, so they can never be auto-sent in any mode. | Every existing safety check is kept; the mode only decides auto-send vs draft for emails that passed them. |
+| The mode is read again right before each email is classified, and stored on the item (`run_items.send_mode`). If it changes to Drafts only during a run, the run's auto-sends are cancelled when it finishes. | "Changing the mode affects only emails created after the change." |
+| Send all instantly: `send_at` = the run's finish time; the queue still sends one email per 2–4 minutes per user. | "Queued to send immediately… still with the 2–4 minute gap." |
+| Changing the mode needs automation ON (`PUT /api/automation/send-mode`, 400 "Turn on automation to use sending modes." otherwise); the saved value is kept while OFF. Switching to Drafts only cancels every scheduled send and follow-up at once (kept as drafts). Switching to a send mode never touches existing drafts. | As specified. |
+| The send queue re-reads the profile on every pass, so it always sees the **current** mode: Drafts only → the email or follow-up is skipped with the reason "mode changed to drafts only". | Also covers a mode changed from another device or tab between passes. |
+| `run_items.sent_by` ('auto' / 'user'): the queue sets `auto` when it sends; Gmail tracking sets `user` when it finds a draft sent by hand. Backfill for older rows: `auto` if it was an auto-send the queue attempted, otherwise `user`. A crash-recovered send (draft gone after the queue claimed it) counts as `auto`. History shows "Sent automatically", "Sent by you", "Will be sent automatically" or "Draft – waiting for you". | Telling these apart needs to know who sent it; nothing recorded that before. |
+| Follow-ups: auto only when the original's follow-up mode is auto **and** the queue sent it (`sent_by = 'auto'`); always drafts in Drafts only (checked when each follow-up is created, and again before sending). Auto follow-up window: 30 min in Smart send and Send all, none in Send all instantly (the follow-up still waits for its 10:00–11:30 weekday slot). | As specified ("auto if its original email was sent automatically"). An auto-send the user sent by hand during its window counts as sent by the user. |
+| UI: four toggle cards in a radio group directly under the automation switch on Setup (`#send-mode`), each with a title and one line; the selected card has a check and a brand outline; "Recommended" badge on Smart send; every card is at least 44px tall. Disabled with "Turn on automation to use. Your choice is kept." while automation is OFF. The dashboard shows "Sending mode: … · Change" inside the automation card. The automation switch's text and its "Turn on" confirmation describe the selected mode. | As specified. |
+| **Every** mode change asks for confirmation, not only Send all instantly. Send all instantly uses the exact text "Emails will be sent without a chance to cancel. Continue?" (red Continue button); Drafts only says scheduled sends will be cancelled. | You asked for confirmation popups on every important create/update/delete action; changing what gets sent from your Gmail is one. |
+| Found while testing: after connecting Gmail, Setup removed `?gmail=connected` from the address with `router.replace`, and later links to `/setup` (such as the dashboard's "Change") landed back on the old `?gmail=connected` address, showing the "Gmail connected" toast again. It now uses `window.history.replaceState`, which the App Router supports. | The dashboard "Change" link has to land on the Sending mode section. |
+
+## v5–v6: own Gemini key, reschedule today
+
+| Decision | Why |
+|---|---|
+| Each user brings their own Gemini key: required at registration (checked with Google before the account is created) and managed on Setup (replace / remove, with a "Get your free key" link to aistudio.google.com/apikey and 3 steps). Stored AES-256-GCM encrypted; only the last 4 characters are shown. `GEMINI_API_KEY` in the server .env is no longer used. | One shared key would hit its limit with many users. |
+| Format check is deliberately loose (any 20–300 characters without spaces); Google decides whether a key works. | Google key formats change; a strict pattern rejected a real key. |
+| Missing key → resume reading refused, automation blocked, "couldn't start" card. Key rejected during a run → run stops at once (no retries), key marked invalid, Setup asks for a new one. Quota limits are tracked per key. | Clear, never silent. |
+| A scheduled run is unique per user per IST day **and run time** (migration v6). After a 9:00 run, moving the time to a later time today runs today at the new time; a time already past waits for tomorrow; the same time never runs twice. | Requested: changing the time to later today should apply today. |

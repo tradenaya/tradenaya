@@ -10,6 +10,8 @@
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "diagnose": "node dist/cli/diagnose.js",
+    "diagnose:dev": "tsx src/cli/diagnose.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

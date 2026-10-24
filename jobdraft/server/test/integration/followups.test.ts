@@ -241,8 +241,8 @@ describe("follow-ups: at most 2 per application, ever", () => {
       mockGmail.userSendsDraft(d.draftId);
       await execute(
         `INSERT INTO run_items (run_id, user_id, type, company, company_key, job_title, location, job_url, source, to_email, subject, gmail_draft_id, gmail_thread_id, gmail_message_id, rfc_message_id,
-           send_state, sent_at, followup_mode, created_at)
-         VALUES (?, ?, 'auto_send', ?, ?, 'Software Engineer', 'Bengaluru', ?, 'mock', ?, 'Application for Software Engineer – Priya Sharma', ?, ?, ?, ?, 'sent', ?, 'auto', ?)`,
+           send_state, sent_by, sent_at, followup_mode, created_at)
+         VALUES (?, ?, 'auto_send', ?, ?, 'Software Engineer', 'Bengaluru', ?, 'mock', ?, 'Application for Software Engineer – Priya Sharma', ?, ?, ?, ?, 'sent', 'auto', ?, 'auto', ?)`,
         [runId, user.id, `Company ${k}`, `company ${k}`, `https://company${k}.in/jobs`, `hr${k}@company${k}.in`, d.draftId, d.threadId, d.messageId, messageId, sentAt, sentAt],
       );
     }

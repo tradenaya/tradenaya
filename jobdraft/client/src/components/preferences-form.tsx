@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { formatRunTime, plural } from "@/lib/format";
+import { relatedRoles } from "@/lib/roles";
 import type { ExcludedCompany, Profile } from "@/lib/types";
 import { ChipInput } from "./chip-input";
 import { useConfirm } from "./confirm-dialog";
@@ -115,6 +116,7 @@ export function PreferencesForm({ profile, onChange }: { profile: Profile; onCha
             onChange={(roles) => setForm({ ...form, roles })}
             max={8}
             suggestions={profile.resume?.suggestedTargetRoles ?? []}
+            related={hasResume ? relatedRoles(profile.resume, form.roles, profile.resume?.suggestedTargetRoles ?? []) : []}
             invalid={!!errors.target_roles}
             describedBy={describe("target_roles", "target_roles-hint")}
           />

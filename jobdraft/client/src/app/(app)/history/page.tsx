@@ -4,6 +4,7 @@ import { ChevronDown, ExternalLink, History as HistoryIcon, Link2, Mail } from "
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog";
+import { FunnelDetails, FunnelSummary } from "@/components/run-funnel";
 import { ApplicationChip, StatusBadge } from "@/components/status";
 import { Banner, Button, cx, EmptyState, PageTitle, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -137,15 +138,25 @@ function RunCard({ run }: { run: Run }) {
                 {plural(r.draftsCount + r.autoSendCount, "email")} · {r.sentCount} sent · {r.linkOnlyCount} via link
               </span>
             </div>
+            {r.funnel ? (
+              <FunnelSummary funnel={r.funnel} className="mt-2" />
+            ) : (
+              r.errorMessage && <span className={cx("mt-2 block text-sm", r.status === "failed" ? "text-red-800" : "text-slate-700")}>{r.errorMessage}</span>
+            )}
           </div>
           <ChevronDown className={cx("mt-1 size-6 shrink-0 text-slate-500 transition-transform", open && "rotate-180")} aria-hidden />
         </button>
       </h2>
       {open && (
         <div id={panelId} className="border-t border-slate-200 p-4">
-          {r.errorMessage && (
+          {r.errorMessage && r.errorMessage !== r.funnel?.note && (
             <div className="mb-3">
               <Banner tone={r.status === "failed" ? "error" : "warn"}>{r.errorMessage}</Banner>
+            </div>
+          )}
+          {r.funnel && (
+            <div className="mb-4">
+              <FunnelDetails funnel={r.funnel} />
             </div>
           )}
           {error && <Banner tone="error">{error}</Banner>}
@@ -246,6 +257,11 @@ function ApplicationRow({ app, onChanged }: { app: Application; onChanged: () =>
       </div>
       <p className="break-words text-slate-800">{app.jobTitle}</p>
       {app.location && <p className="text-sm text-slate-600">{app.location}</p>}
+      {app.handling.label !== app.status.label && (
+        <p className={cx("mt-1 text-sm font-semibold", HANDLING_TONE[app.handling.key])} data-testid="handling">
+          {app.handling.label}
+        </p>
+      )}
       <p className="mt-1 break-all text-[15px] text-slate-700">
         To: <span className="font-medium">{app.toEmail}</span>
       </p>
@@ -282,6 +298,14 @@ function ApplicationRow({ app, onChanged }: { app: Application; onChanged: () =>
     </li>
   );
 }
+
+const HANDLING_TONE: Record<Application["handling"]["key"], string> = {
+  auto: "text-violet-900",
+  user: "text-emerald-700",
+  scheduled: "text-sky-900",
+  draft: "text-amber-900",
+  removed: "text-slate-600",
+};
 
 const FU_STATE: Record<FollowUp["state"], string> = {
   scheduled: "scheduled",

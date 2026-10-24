@@ -73,19 +73,29 @@ describe("daily scheduling (Asia/Kolkata)", () => {
     expect((await scheduledRuns(tooLate.user.id)).map((r) => r.run_date)).toEqual(["2026-11-03"]);
   });
 
-  it("changing the time after today's run doesn't cause a second run today; it applies from tomorrow", async () => {
+  it("after today's 9:00 run, moving the time to a later time today runs today at the new time; a time already past waits for tomorrow", async () => {
     setIst("2026-11-01T20:00");
     const { user, agent } = await readyUser();
     setIst("2026-11-02T09:00");
     await runDueUsers();
+    const prefs = (run_time: string) =>
+      agent.put("/api/profile/preferences").send({ target_roles: ["Software Engineer", "Backend Developer"], locations: ["Bengaluru, Karnataka"], expected_salary_lpa: 12, run_time }).expect(200);
     setIst("2026-11-02T10:00");
-    const res = await agent.put("/api/profile/preferences").send({ target_roles: ["Software Engineer", "Backend Developer"], locations: ["Bengaluru, Karnataka"], expected_salary_lpa: 12, run_time: "15:00" }).expect(200);
-    expect(istFmt(res.body.nextRunAt)).toBe("2026-11-03 15:00");
+    // The "Next run" preview and the saved result agree: today at 3 PM.
+    expect(istFmt((await agent.get("/api/profile/next-run?run_time=15:00").expect(200)).body.at)).toBe("2026-11-02 15:00");
+    expect(istFmt((await prefs("15:00")).body.nextRunAt)).toBe("2026-11-02 15:00");
     await tickEveryMinute("2026-11-02T14:58", "2026-11-02T15:03");
-    expect(await scheduledRuns(user.id)).toHaveLength(1);
-    setIst("2026-11-03T15:00");
-    await runDueUsers();
-    expect((await scheduledRuns(user.id)).map((r) => istFmt(r.scheduled_for))).toEqual(["2026-11-02 09:00", "2026-11-03 15:00"]);
+    expect((await scheduledRuns(user.id)).map((r) => istFmt(r.scheduled_for))).toEqual(["2026-11-02 09:00", "2026-11-02 15:00"]);
+    // The same time slot never runs twice: back to 9:00 (already ran today) → tomorrow.
+    setIst("2026-11-02T15:30");
+    expect(istFmt((await prefs("09:00")).body.nextRunAt)).toBe("2026-11-03 09:00");
+    // A later slot today that hasn't come yet still works…
+    expect(istFmt((await prefs("18:00")).body.nextRunAt)).toBe("2026-11-02 18:00");
+    // …but a time that has already passed today waits for tomorrow (never an immediate run).
+    setIst("2026-11-02T18:30");
+    expect(istFmt((await prefs("17:00")).body.nextRunAt)).toBe("2026-11-03 17:00");
+    await tickEveryMinute("2026-11-02T18:30", "2026-11-02T18:35");
+    expect(await scheduledRuns(user.id)).toHaveLength(2);
   });
 
   it("time moved later today (before today's run) → runs today at the new time; earlier than now → tomorrow", async () => {

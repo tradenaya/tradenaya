@@ -1,9 +1,10 @@
 import { config } from "../config/env.js";
 import { sha1 } from "../lib/crypto.js";
-import { cityOf, isRemoteLocation } from "../matching/locations.js";
 import { inrToLpa } from "../matching/parse.js";
 import { stripHtml } from "../matching/text.js";
-import type { Job, SearchPair } from "./types.js";
+import { SourceHttpError } from "./errors.js";
+import type { AdzunaQuery } from "./queries.js";
+import type { Job } from "./types.js";
 
 interface AdzunaResult {
   id?: string | number;
@@ -17,6 +18,8 @@ interface AdzunaResult {
   company?: { display_name?: string };
   location?: { display_name?: string; area?: string[] };
 }
+
+const REMOTE_TEXT_RE = /\b(remote|work from home|work-from-home|wfh)\b/i;
 
 export function normalizeAdzuna(r: AdzunaResult): Job | null {
   const title = stripHtml(r.title ?? "").trim();
@@ -32,7 +35,7 @@ export function normalizeAdzuna(r: AdzunaResult): Job | null {
     title,
     company,
     location,
-    isRemote: /\bremote|work from home\b/i.test(`${title} ${location} ${description}`),
+    isRemote: REMOTE_TEXT_RE.test(`${title} ${location} ${description}`),
     description,
     url: r.redirect_url,
     postedAt: r.created ?? null,
@@ -41,24 +44,37 @@ export function normalizeAdzuna(r: AdzunaResult): Job | null {
   };
 }
 
-/** Adzuna India: newest postings from the last 3 days for one (role, location). */
-export async function fetchAdzuna(pair: SearchPair): Promise<Job[]> {
-  const { adzuna } = config();
+/** Query string for one Adzuna search: role words in the title, newest first, last 7 days, 50 per page. */
+export function adzunaParams(q: AdzunaQuery, creds = config().adzuna): URLSearchParams {
   const params = new URLSearchParams({
-    app_id: adzuna.appId,
-    app_key: adzuna.appKey,
+    app_id: creds.appId,
+    app_key: creds.appKey,
     results_per_page: "50",
-    max_days_old: "3",
+    max_days_old: "7",
     sort_by: "date",
-    what: isRemoteLocation(pair.location) ? `${pair.role} remote` : pair.role,
+    title_only: q.titleOnly,
     "content-type": "application/json",
   });
-  if (!isRemoteLocation(pair.location)) params.set("where", cityOf(pair.location));
-  const res = await fetch(`https://api.adzuna.com/v1/api/jobs/in/search/1?${params}`, {
+  if (q.what) params.set("what", q.what);
+  if (q.where) params.set("where", q.where);
+  return params;
+}
+
+/** Remote searches keep only postings that actually say remote / work from home / WFH. */
+export function keepForQuery(job: Job, q: Pick<AdzunaQuery, "remoteOnly">): boolean {
+  return !q.remoteOnly || REMOTE_TEXT_RE.test(`${job.title} ${job.location} ${job.description}`);
+}
+
+/** Adzuna India, one page. Descriptions are excerpts, so most results end up "apply via link". */
+export async function fetchAdzuna(q: AdzunaQuery): Promise<Job[]> {
+  const res = await fetch(`https://api.adzuna.com/v1/api/jobs/in/search/1?${adzunaParams(q)}`, {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(20000),
   });
-  if (!res.ok) throw new Error(`Adzuna HTTP ${res.status}`);
+  if (!res.ok) throw new SourceHttpError("adzuna", res.status, `Adzuna error ${res.status}`);
   const body = (await res.json()) as { results?: AdzunaResult[] };
-  return (body.results ?? []).map(normalizeAdzuna).filter((j): j is Job => j !== null);
+  return (body.results ?? [])
+    .map(normalizeAdzuna)
+    .filter((j): j is Job => j !== null)
+    .map((j) => ({ ...j, variant: q.variant }));
 }

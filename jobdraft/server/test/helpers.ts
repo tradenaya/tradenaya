@@ -44,7 +44,10 @@ export function setIst(iso: string): Date {
 
 export const istFmt = (d: Date | string | null) => (d ? DateTime.fromJSDate(new Date(d), { zone: "Asia/Kolkata" }).toFormat("yyyy-MM-dd HH:mm") : null);
 
-const TABLES = ["followups", "run_items", "runs", "seen_jobs", "contacted_companies", "contacted_emails", "excluded_companies", "gmail_connections", "profiles", "job_cache", "job_locks", "users"];
+const TABLES = [
+  "followups", "run_items", "runs", "seen_jobs", "contacted_companies", "contacted_emails", "excluded_companies", "gmail_connections", "profiles",
+  "job_cache", "job_locks", "api_usage", "search_rotation", "users",
+];
 
 export async function resetDb() {
   await execute("SET FOREIGN_KEY_CHECKS = 0");
@@ -59,10 +62,13 @@ export function newAgent() {
 }
 export type Agent = ReturnType<typeof newAgent>;
 
+/** A well-formed (fake) Gemini key: in mock mode keys are not checked with Google. */
+export const TEST_GEMINI_KEY = "AIzaTestKey_0123456789abcdefghijklmnop";
+
 let counter = 0;
-export async function registerUser(agent = newAgent(), overrides: Partial<{ name: string; email: string; password: string }> = {}) {
+export async function registerUser(agent = newAgent(), overrides: Partial<{ name: string; email: string; password: string; geminiKey: string }> = {}) {
   counter++;
-  const body = { name: "Priya Sharma", email: `user${counter}-${Date.now()}@example.org`, password: "correct-horse-1", ...overrides };
+  const body = { name: "Priya Sharma", email: `user${counter}-${Date.now()}@example.org`, password: "correct-horse-1", geminiKey: TEST_GEMINI_KEY, ...overrides };
   const res = await agent.post("/api/auth/register").send(body).expect(201);
   return { agent, user: res.body.user as { id: number; name: string; email: string }, password: body.password };
 }

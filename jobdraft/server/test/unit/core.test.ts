@@ -88,7 +88,7 @@ describe("resume JSON validation", () => {
   it("retries once on invalid output, then succeeds", async () => {
     let calls = 0;
     setGeneratorForTests(async () => (++calls === 1 ? { nonsense: true } : valid));
-    const data = await parseResumeText("text");
+    const data = await parseResumeText("text", null);
     expect(calls).toBe(2);
     expect(data.full_name).toBe("Priya Sharma");
   });
@@ -99,13 +99,13 @@ describe("resume JSON validation", () => {
       calls++;
       return { full_name: 42 };
     });
-    await expect(parseResumeText("text")).rejects.toThrow(/unexpected format/);
+    await expect(parseResumeText("text", null)).rejects.toThrow(/unexpected format/);
     expect(calls).toBe(2);
   });
 
   it("dedupes and caps suggested roles at 8", async () => {
     setGeneratorForTests(async () => ({ ...valid, suggested_target_roles: ["A1", "a1", "B2", "C3", "D4", "E5", "F6", "G7", "H8", "I9"] }));
-    expect((await parseResumeText("x")).suggested_target_roles).toEqual(["A1", "B2", "C3", "D4", "E5", "F6", "G7", "H8"]);
+    expect((await parseResumeText("x", null)).suggested_target_roles).toEqual(["A1", "B2", "C3", "D4", "E5", "F6", "G7", "H8"]);
   });
 });
 

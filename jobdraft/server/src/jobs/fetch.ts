@@ -1,3 +1,7 @@
+// Collects postings for one run from every configured source. Results are
+// cached per (source, query, location) and shared by all users; free-tier call
+// limits are counted in api_usage; every query and error is reported for the
+// run funnel.
 import { config, features } from "../config/env.js";
 import { execute, json, query } from "../db/pool.js";
 import { clock, HOUR } from "../lib/clock.js";
@@ -5,20 +9,19 @@ import { errInfo, log } from "../lib/logger.js";
 import { istDate } from "../lib/time.js";
 import { isRemoteLocation } from "../matching/locations.js";
 import { normalize } from "../matching/text.js";
-import { fetchAdzuna } from "./adzuna.js";
-import { fetchJSearch } from "./jsearch.js";
+import { MAX_QUERY_REPORTS, type QueryReport, type SourceReport } from "../runs/funnel.js";
+import { fetchAdzuna, keepForQuery } from "./adzuna.js";
+import { SourceHttpError, isQuotaStatus } from "./errors.js";
+import { fetchJSearchPage } from "./jsearch.js";
 import { mockJobsFor } from "./mock.js";
-import type { Job, SearchPair } from "./types.js";
+import { adzunaLabel, adzunaQueries, jsearchCombos, type JSearchQuery } from "./queries.js";
+import type { Job, SearchPair, SourceName } from "./types.js";
+import { markExhausted, reserveCall } from "./usage.js";
 
-export class NoJobSourcesError extends Error {
-  constructor() {
-    super("No job sources are configured (add Adzuna or JSearch keys).");
-    this.name = "NoJobSourcesError";
-  }
-}
-
-/** Cached postings are shared across users for this long. */
-export const CACHE_TTL_MS = 6 * HOUR;
+/** How long cached postings are reused (across users). */
+export const CACHE_TTL_MS: Record<SourceName, number> = { adzuna: 6 * HOUR, mock: 6 * HOUR, jsearch: 12 * HOUR };
+/** A second JSearch page is fetched only when the first had this many relevant postings. */
+export const JSEARCH_SECOND_PAGE_MIN_RELEVANT = 5;
 
 const queryKey = (p: SearchPair) => normalize(p.role).slice(0, 190);
 const locationKey = (p: SearchPair) => (isRemoteLocation(p.location) ? "remote" : normalize(p.location).slice(0, 190));
@@ -30,67 +33,244 @@ export function uniquePairs(pairs: SearchPair[]): SearchPair[] {
   return [...map.values()];
 }
 
-export interface FetchStats {
-  pairs: number;
-  fromCache: number;
-  apiCalls: number;
-  errors: number;
+async function readCache(source: SourceName, q: string, loc: string, now: Date): Promise<Job[] | null> {
+  const [row] = await query<{ payload: unknown }>("SELECT payload FROM job_cache WHERE source = ? AND query = ? AND location = ? AND fetched_at > ?", [
+    source,
+    q.slice(0, 190),
+    loc.slice(0, 190),
+    new Date(now.getTime() - CACHE_TTL_MS[source]),
+  ]);
+  return row ? json<Job[]>(row.payload, []) : null;
 }
 
-type Source = "adzuna" | "jsearch" | "mock";
+async function writeCache(source: SourceName, q: string, loc: string, jobs: Job[], now: Date) {
+  await execute(
+    `INSERT INTO job_cache (source, query, location, payload, fetched_at) VALUES (?, ?, ?, CAST(? AS JSON), ?)
+     ON DUPLICATE KEY UPDATE payload = VALUES(payload), fetched_at = VALUES(fetched_at)`,
+    [source, q.slice(0, 190), loc.slice(0, 190), JSON.stringify(jobs), now],
+  );
+}
 
-async function fetchFrom(source: Source, pair: SearchPair, now: Date): Promise<Job[]> {
-  if (source === "mock") return mockJobsFor(pair, istDate(now));
-  if (source === "adzuna") return fetchAdzuna(pair);
-  return fetchJSearch(pair);
+function report(source: SourceName, configured: boolean): SourceReport {
+  return { source, configured, calls: 0, cached: 0, fetched: 0, errors: [] };
+}
+
+function recordError(rep: SourceReport, err: unknown) {
+  const status = err instanceof SourceHttpError ? err.status : undefined;
+  const message = err instanceof Error ? err.message : String(err);
+  if (rep.errors.length < 5) rep.errors.push({ ...(status && status !== 200 ? { status } : {}), message: message.slice(0, 200) });
+  log.warn("job_source_error", { source: rep.source, status, error: errInfo(err) });
+}
+
+export interface CollectOptions {
+  now?: Date;
+  /** Used to decide whether a second JSearch page is worth a call. */
+  isRelevant?: (job: Job) => boolean;
+}
+
+export interface CollectResult {
+  /** Unique postings (by source key). */
+  jobs: Job[];
+  sources: SourceReport[];
+  queries: QueryReport[];
+}
+
+class Collector {
+  readonly jobs = new Map<string, Job>();
+  readonly queries: QueryReport[] = [];
+  add(list: Job[]) {
+    for (const j of list) if (!this.jobs.has(j.key)) this.jobs.set(j.key, j);
+  }
+  log(q: QueryReport) {
+    if (this.queries.length < MAX_QUERY_REPORTS) this.queries.push(q);
+  }
+}
+
+type MockSource = (pair: SearchPair, runDate: string) => Job[] | Promise<Job[]>;
+let mockSource: MockSource | null = null;
+/** Tests can make the demo source return nothing or fail. */
+export function setMockJobsForTests(fn: MockSource | null) {
+  mockSource = fn;
+}
+
+async function collectMock(pairs: SearchPair[], now: Date, c: Collector): Promise<SourceReport> {
+  const rep = report("mock", true);
+  for (const pair of pairs) {
+    let jobs = await readCache("mock", queryKey(pair), locationKey(pair), now);
+    const fromCache = !!jobs;
+    let error: string | undefined;
+    if (jobs) rep.cached++;
+    else {
+      rep.calls++;
+      try {
+        jobs = (await (mockSource ?? mockJobsFor)(pair, istDate(now))).map((j) => ({ ...j, variant: "plain" as const }));
+        await writeCache("mock", queryKey(pair), locationKey(pair), jobs, now);
+      } catch (err) {
+        recordError(rep, err);
+        error = err instanceof Error ? err.message : "error";
+        jobs = [];
+      }
+    }
+    rep.fetched += jobs.length;
+    c.add(jobs);
+    c.log({ source: "mock", variant: "plain", role: pair.role, location: pair.location, query: pair.role, fetched: jobs.length, fromCache, error });
+  }
+  return rep;
+}
+
+/** One query per (role, area); remote = keyword searches. Stops at the daily cap or on rejected keys. */
+async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Promise<SourceReport> {
+  const rep = report("adzuna", true);
+  const cap = config().adzunaDailyCap;
+  let skippedForCap = 0;
+  let stopped: string | null = null;
+  for (const q of adzunaQueries(pairs)) {
+    const cq = normalize(adzunaLabel(q));
+    const cl = q.where ? normalize(q.where) : "india";
+    let jobs = await readCache("adzuna", cq, cl, now);
+    const fromCache = !!jobs;
+    let error: string | undefined;
+    if (jobs) rep.cached++;
+    else {
+      if (stopped) {
+        skippedForCap++;
+        continue;
+      }
+      if (!(await reserveCall("adzuna", cap, now))) {
+        stopped = `Daily limit reached (${cap} calls/day across all users)`;
+        skippedForCap++;
+        continue;
+      }
+      rep.calls++;
+      try {
+        jobs = await fetchAdzuna(q);
+        await writeCache("adzuna", cq, cl, jobs, now);
+      } catch (err) {
+        recordError(rep, err);
+        error = err instanceof Error ? err.message : "error";
+        jobs = [];
+        if (err instanceof SourceHttpError && (err.status === 401 || err.status === 403)) stopped = `Keys rejected (HTTP ${err.status})`;
+      }
+    }
+    const kept = jobs.filter((j) => keepForQuery(j, q));
+    rep.fetched += kept.length;
+    c.add(kept);
+    c.log({ source: "adzuna", variant: q.variant, role: q.role, location: q.location, query: adzunaLabel(q), where: q.where, fetched: kept.length, fromCache, error });
+  }
+  if (stopped) rep.note = skippedForCap ? `${stopped}; ${skippedForCap} searches skipped` : stopped;
+  return rep;
 }
 
 /**
- * Postings for each (role, location) pair. job_cache rows younger than 6 hours
- * are reused — another user's run may already have fetched them — and only
- * missing or stale (source, query, location) entries are fetched.
+ * JSearch has a small free quota, so: cached searches (12 h) first, then the
+ * least recently searched (role, city, variant) combinations — which rotates
+ * through every combination over the days — within this run's share and the
+ * daily cap. A second page only when the first had enough relevant postings.
  */
-export async function fetchJobsForPairs(pairs: SearchPair[], now = clock.now()): Promise<{ jobs: Map<string, Job[]>; stats: FetchStats }> {
-  const f = features();
-  if (!f.mock && !f.adzuna && !f.jsearch) throw new NoJobSourcesError();
-  const sources: Source[] = f.mock ? ["mock"] : [...(f.adzuna ? (["adzuna"] as const) : []), ...(f.jsearch ? (["jsearch"] as const) : [])];
-  const result = new Map<string, Job[]>();
-  const stats: FetchStats = { pairs: 0, fromCache: 0, apiCalls: 0, errors: 0 };
-  let jsearchCalls = 0;
-  const fresh = new Date(now.getTime() - CACHE_TTL_MS);
+async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, isRelevant?: (job: Job) => boolean): Promise<SourceReport> {
+  const cfg = config();
+  const rep = report("jsearch", !!cfg.rapidApiKey);
+  if (!cfg.rapidApiKey) {
+    rep.note = "Not configured (add RAPIDAPI_KEY)";
+    return rep;
+  }
+  const combos = jsearchCombos(pairs);
+  const stale: JSearchQuery[] = [];
+  for (const combo of combos) {
+    const jobs = await readCache("jsearch", combo.comboKey, "in", now);
+    if (!jobs) {
+      stale.push(combo);
+      continue;
+    }
+    rep.cached++;
+    rep.fetched += jobs.length;
+    c.add(jobs);
+    c.log({ source: "jsearch", variant: combo.variant, role: combo.role, location: combo.location, query: combo.query, fetched: jobs.length, fromCache: true });
+  }
+  if (!stale.length) return rep;
 
-  for (const pair of uniquePairs(pairs)) {
-    stats.pairs++;
-    const jobs: Job[] = [];
-    for (const source of sources) {
-      const [cached] = await query<{ payload: unknown }>(
-        "SELECT payload FROM job_cache WHERE source = ? AND query = ? AND location = ? AND fetched_at > ?",
-        [source, queryKey(pair), locationKey(pair), fresh],
-      );
-      if (cached) {
-        jobs.push(...json<Job[]>(cached.payload, []));
-        stats.fromCache++;
-        continue;
+  // Never searched first, then oldest; ties keep the priority order (plain variants first).
+  const lastRows = await query<{ combo_key: string; last_queried_at: Date }>(
+    "SELECT combo_key, last_queried_at FROM search_rotation WHERE source = 'jsearch' AND combo_key IN (?)",
+    [stale.map((s) => s.comboKey)],
+  );
+  const last = new Map(lastRows.map((r) => [r.combo_key, new Date(r.last_queried_at).getTime()]));
+  const order = new Map(stale.map((s, i) => [s.comboKey, i]));
+  stale.sort((a, b) => (last.get(a.comboKey) ?? 0) - (last.get(b.comboKey) ?? 0) || order.get(a.comboKey)! - order.get(b.comboKey)!);
+
+  const cap = cfg.jsearchDailyCap;
+  const perRun = cfg.jsearchMaxCallsPerRun;
+  let runCalls = 0;
+  let stopped: string | null = null;
+  let deferred = 0;
+  const take = async () => {
+    if (stopped || runCalls >= perRun) return false;
+    if (!(await reserveCall("jsearch", cap, now))) {
+      stopped = `Daily cap reached (${cap} calls/day across all users)`;
+      return false;
+    }
+    runCalls++;
+    rep.calls++;
+    return true;
+  };
+
+  for (const combo of stale) {
+    if (!(await take())) {
+      deferred++;
+      continue;
+    }
+    let jobs: Job[] = [];
+    let error: string | undefined;
+    try {
+      const first = await fetchJSearchPage(combo);
+      jobs = first.jobs;
+      const relevant = isRelevant ? jobs.filter(isRelevant).length : jobs.length;
+      if (first.cursor && relevant >= JSEARCH_SECOND_PAGE_MIN_RELEVANT && (await take())) {
+        try {
+          const second = await fetchJSearchPage(combo, first.cursor);
+          const have = new Set(jobs.map((j) => j.key));
+          jobs = [...jobs, ...second.jobs.filter((j) => !have.has(j.key))];
+        } catch (err) {
+          recordError(rep, err);
+        }
       }
-      if (source === "jsearch" && jsearchCalls >= config().jsearchMaxCallsPerRun) continue;
-      try {
-        if (source === "jsearch") jsearchCalls++;
-        stats.apiCalls++;
-        const got = await fetchFrom(source, pair, now);
-        jobs.push(...got);
-        await execute(
-          `INSERT INTO job_cache (source, query, location, payload, fetched_at) VALUES (?, ?, ?, CAST(? AS JSON), ?)
-           ON DUPLICATE KEY UPDATE payload = VALUES(payload), fetched_at = VALUES(fetched_at)`,
-          [source, queryKey(pair), locationKey(pair), JSON.stringify(got), now],
-        );
-      } catch (err) {
-        stats.errors++;
-        log.warn("job_source_error", { source, error: errInfo(err) });
+      await writeCache("jsearch", combo.comboKey, "in", jobs, now);
+    } catch (err) {
+      recordError(rep, err);
+      error = err instanceof Error ? err.message : "error";
+      if (err instanceof SourceHttpError && isQuotaStatus(err.status)) {
+        await markExhausted("jsearch", now);
+        stopped = "Quota exhausted (HTTP 429), skipped until tomorrow";
+      } else if (err instanceof SourceHttpError && (err.status === 401 || err.status === 403)) {
+        stopped = `Key rejected or not subscribed to JSearch (HTTP ${err.status})`;
       }
     }
-    result.set(pairKey(pair), jobs);
+    await execute(
+      "INSERT INTO search_rotation (source, combo_key, last_queried_at) VALUES ('jsearch', ?, ?) ON DUPLICATE KEY UPDATE last_queried_at = VALUES(last_queried_at)",
+      [combo.comboKey, now],
+    );
+    rep.fetched += jobs.length;
+    c.add(jobs);
+    c.log({ source: "jsearch", variant: combo.variant, role: combo.role, location: combo.location, query: combo.query, fetched: jobs.length, fromCache: false, error });
   }
-  return { jobs: result, stats };
+  if (stopped) rep.note = deferred ? `${stopped}; ${deferred} searches left for later runs` : stopped;
+  else if (deferred) rep.note = `${deferred} searches rotated to later runs (free quota)`;
+  return rep;
+}
+
+export async function collectJobs(pairs: SearchPair[], opts: CollectOptions = {}): Promise<CollectResult> {
+  const now = opts.now ?? clock.now();
+  const f = features();
+  const unique = uniquePairs(pairs);
+  const c = new Collector();
+  const sources: SourceReport[] = [];
+  if (f.mock) {
+    sources.push(await collectMock(unique, now, c));
+  } else {
+    sources.push(f.adzuna ? await collectAdzuna(unique, now, c) : { ...report("adzuna", false), note: "Not configured (add ADZUNA_APP_ID / ADZUNA_APP_KEY)" });
+    sources.push(await collectJSearch(unique, now, c, opts.isRelevant));
+  }
+  return { jobs: [...c.jobs.values()], sources, queries: c.queries };
 }
 
 export async function pruneJobCache(now = clock.now()): Promise<void> {

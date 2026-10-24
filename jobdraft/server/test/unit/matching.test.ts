@@ -54,13 +54,17 @@ describe("title matching", () => {
 });
 
 describe("seniority", () => {
-  it("excludes senior/principal/director/head/VP titles for juniors", () => {
-    expect(seniorityMismatch("Senior Software Engineer", 3)).toBe("too senior");
-    expect(seniorityMismatch("Principal Engineer", 4.9)).toBe("too senior");
-    expect(seniorityMismatch("Director of Engineering", 6)).toMatch(/executive/);
-    expect(seniorityMismatch("Head of Product", 2)).toMatch(/executive/);
-    expect(seniorityMismatch("VP Engineering", 7)).toMatch(/executive/);
-    expect(seniorityMismatch("Senior Software Engineer", 5)).toBeNull();
+  it("excludes director/head/VP/principal titles only for users under 5 years", () => {
+    expect(seniorityMismatch("Principal Engineer", 4.9)).toMatch(/too senior/);
+    expect(seniorityMismatch("Head of Product", 2)).toMatch(/too senior/);
+    expect(seniorityMismatch("VP Engineering", 3)).toMatch(/too senior/);
+    expect(seniorityMismatch("Director of Engineering", 6)).toBeNull();
+    expect(seniorityMismatch("Principal Engineer", 5)).toBeNull();
+  });
+  it("allows Senior, Senior Associate and Lead titles (the stated minimum experience decides)", () => {
+    expect(seniorityMismatch("Senior Software Engineer", 3)).toBeNull();
+    expect(seniorityMismatch("Senior Associate - Project Management", 2)).toBeNull();
+    expect(seniorityMismatch("Team Lead", 2)).toBeNull();
   });
   it("excludes internships unless experience is 0", () => {
     expect(seniorityMismatch("Software Engineering Intern", 2)).toBe("internship");
@@ -132,7 +136,9 @@ describe("rule filter", () => {
   it("applies every rule with a reason", () => {
     expect(rejectReason(job({ location: "Chennai" }), ctx())).toBe("location");
     expect(rejectReason(job({ title: "Graphic Designer" }), ctx())).toBe("title");
-    expect(rejectReason(job({ title: "Senior Software Engineer" }), ctx())).toBe("too senior");
+    expect(rejectReason(job({ title: "Head of Software Engineering" }), ctx({ experienceYears: 3 }))).toMatch(/too senior/);
+    expect(rejectReason(job({ title: "Senior Software Engineer" }), ctx())).toBeNull(); // no stated minimum → kept
+    expect(rejectReason(job({ title: "Senior Software Engineer", description: "7+ years of experience" }), ctx({ experienceYears: 2 }))).toBe("experience required too high");
     expect(rejectReason(job({ description: "Minimum 8 years of experience" }), ctx())).toBe("experience required too high");
     expect(rejectReason(job({ description: "Minimum 6 years of experience" }), ctx())).toBeNull();
     expect(rejectReason(job({ salaryMaxLpa: 8 }), ctx())).toBe("salary below expectation");

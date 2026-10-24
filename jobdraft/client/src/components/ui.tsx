@@ -125,9 +125,9 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
   );
 });
 
-/** Password input with an eye button to show or hide what was typed. */
-export const PasswordInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> & { invalid?: boolean }>(function PasswordInput(
-  { className, ...rest },
+/** Password input with an eye button to show or hide what was typed (`what` names it for screen readers). */
+export const PasswordInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> & { invalid?: boolean; what?: string }>(function PasswordInput(
+  { className, what = "password", ...rest },
   ref,
 ) {
   const [visible, setVisible] = useState(false);
@@ -137,7 +137,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAt
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? "Hide password" : "Show password"}
+        aria-label={visible ? `Hide ${what}` : `Show ${what}`}
         aria-pressed={visible}
         className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-slate-600 hover:text-slate-900"
       >

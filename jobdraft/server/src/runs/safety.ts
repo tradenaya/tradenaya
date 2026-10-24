@@ -187,8 +187,9 @@ function formatLpa(n: number) {
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "");
 }
 
-/** Fixed anti-spam sending policy (not configurable). */
+/** Fixed anti-spam sending policy, the same in every sending mode. */
 export const SEND_POLICY = {
+  /** Smart send's thresholds (kept here for older callers; see SEND_MODES). */
   autoSendMinConfidence: 85,
   maxAutoSendsPerRun: 5,
   maxAutoSendsPerDay: 8,
@@ -202,6 +203,32 @@ export const SEND_POLICY = {
   maxLinkOnlyPerRun: 15,
 };
 
+/** The user's sending mode (profiles.send_mode). Only applies while automation is ON. */
+export type SendMode = "drafts_only" | "smart" | "send_all" | "send_all_instant";
+export const SEND_MODE_VALUES: SendMode[] = ["drafts_only", "smart", "send_all", "send_all_instant"];
+export const DEFAULT_SEND_MODE: SendMode = "smart";
+/** Reason recorded when a send is stopped because the user switched to drafts only. */
+export const DRAFTS_ONLY_REASON = "mode changed to drafts only";
+
+export interface SendModePolicy {
+  /** Anything auto-sent at all? */
+  autoSend: boolean;
+  /** Minimum confidence to auto-send (0 = every suitable, safe email). */
+  minConfidence: number;
+  maxAutoSendsPerRun: number;
+  /** Per user per IST day; items beyond it stay drafts. */
+  maxAutoSendsPerDay: number;
+  /** Minutes to cancel before an auto-send (and an auto follow-up) goes out. */
+  cancelWindowMinutes: number;
+}
+
+export const SEND_MODES: Record<SendMode, SendModePolicy> = {
+  drafts_only: { autoSend: false, minConfidence: 101, maxAutoSendsPerRun: 0, maxAutoSendsPerDay: 0, cancelWindowMinutes: 30 },
+  smart: { autoSend: true, minConfidence: 85, maxAutoSendsPerRun: 5, maxAutoSendsPerDay: 8, cancelWindowMinutes: 30 },
+  send_all: { autoSend: true, minConfidence: 0, maxAutoSendsPerRun: SEND_POLICY.maxNewEmailsPerRun, maxAutoSendsPerDay: 15, cancelWindowMinutes: 30 },
+  send_all_instant: { autoSend: true, minConfidence: 0, maxAutoSendsPerRun: SEND_POLICY.maxNewEmailsPerRun, maxAutoSendsPerDay: 15, cancelWindowMinutes: 0 },
+};
+
 export interface AutoSendInput {
   confidence: number;
   scam: boolean;
@@ -210,13 +237,21 @@ export interface AutoSendInput {
   gmailConnected: boolean;
   autoSendsThisRun: number;
   autoSendsToday: number;
+  /** Defaults to smart send. */
+  mode?: SendMode;
 }
 
-/** An item is auto-sent only if it is a strong match and every limit allows it; otherwise it stays a draft. */
+/**
+ * Whether an email that passed every hard check is auto-sent or kept as a draft.
+ * In every mode: never for scam- or agency-flagged items, never while automation
+ * is off or Gmail is unusable, and never beyond the mode's daily/run caps.
+ */
 export function classifyAutoSend(i: AutoSendInput): "auto_send" | "draft" {
-  if (i.confidence < SEND_POLICY.autoSendMinConfidence || i.scam || i.agency) return "draft";
+  const policy = SEND_MODES[i.mode ?? DEFAULT_SEND_MODE];
+  if (!policy.autoSend || i.scam || i.agency) return "draft";
+  if (i.confidence < policy.minConfidence) return "draft";
   if (!i.automationOn || !i.gmailConnected) return "draft";
-  if (i.autoSendsThisRun >= SEND_POLICY.maxAutoSendsPerRun || i.autoSendsToday >= SEND_POLICY.maxAutoSendsPerDay) return "draft";
+  if (i.autoSendsThisRun >= policy.maxAutoSendsPerRun || i.autoSendsToday >= policy.maxAutoSendsPerDay) return "draft";
   return "auto_send";
 }
 

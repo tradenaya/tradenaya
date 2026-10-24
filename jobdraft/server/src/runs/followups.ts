@@ -13,7 +13,8 @@ import { errInfo, log } from "../lib/logger.js";
 import { istDate, istDayStart, isWeekendIst, nextWeekdayWindow } from "../lib/time.js";
 import { findExcluded } from "../matching/exclusions.js";
 import { gmailUsable, listExcluded, loadProfile, refreshTokenOf, type RunnableProfile } from "./profile.js";
-import { prepareFollowUpBody, SEND_POLICY, templateFollowUp } from "./safety.js";
+import { geminiKeyOf } from "../ai/user-key.js";
+import { prepareFollowUpBody, SEND_MODES, templateFollowUp, type SendMode } from "./safety.js";
 import { refreshRunStatus } from "./status.js";
 import { stopPendingFollowUps, trackItem, type TrackedItem } from "./tracking.js";
 
@@ -37,6 +38,7 @@ interface Candidate extends TrackedItem {
   to_email: string;
   subject: string;
   followup_mode: "auto" | "draft";
+  sent_by: "auto" | "user" | null;
   followups_stopped: number;
   followup_count: number;
   fu1_sent_at: Date | null;
@@ -52,7 +54,7 @@ export async function dueFollowUpCandidates(now = clock.now()): Promise<Candidat
   const maxAge = new Date(now.getTime() - FOLLOWUP_POLICY.maxAgeDays * DAY);
   const rows = await query<Candidate>(
     `SELECT i.id, i.run_id, i.user_id, i.gmail_thread_id, i.gmail_draft_id, i.rfc_message_id, i.send_state, i.sent_at, i.reply_state, i.outcome,
-            i.company, i.company_key, i.job_title, i.job_url, i.to_email, i.subject, i.followup_mode, i.followups_stopped, i.followup_count,
+            i.company, i.company_key, i.job_title, i.job_url, i.to_email, i.subject, i.followup_mode, i.sent_by, i.followups_stopped, i.followup_count,
             f1.sent_at AS fu1_sent_at,
             IF(f1.id IS NULL, 1, 2) AS next_sequence
      FROM run_items i
@@ -74,6 +76,12 @@ export async function dueFollowUpCandidates(now = clock.now()): Promise<Candidat
   });
 }
 
+/** A follow-up is sent automatically only if its original was, and never in drafts-only mode. */
+export function followUpMode(c: { followup_mode: "auto" | "draft"; sent_by: "auto" | "user" | null }, sendMode: SendMode): "auto" | "draft" {
+  if (sendMode === "drafts_only") return "draft";
+  return c.followup_mode === "auto" && c.sent_by === "auto" ? "auto" : "draft";
+}
+
 /** Re-checked at creation and again right before sending. */
 export function followUpBlocker(c: { send_state: string; reply_state: string; outcome: string; followups_stopped: number; sent_at: Date | null }, p: RunnableProfile, now: Date): string | null {
   if (c.send_state !== "sent") return "original not sent";
@@ -91,9 +99,9 @@ async function followUpsCreatedOn(userId: number, now: Date): Promise<number> {
   return Number(row?.n ?? 0);
 }
 
-async function writeBody(c: Candidate, sequence: 1 | 2, resume: ResumeData, experienceYears: number): Promise<string> {
+async function writeBody(c: Candidate, sequence: 1 | 2, resume: ResumeData, experienceYears: number, apiKey: string | null): Promise<string> {
   try {
-    const draft = await generateFollowUp({ sequence, company: c.company, jobTitle: c.job_title, resume, experienceYears });
+    const draft = await generateFollowUp({ apiKey, sequence, company: c.company, jobTitle: c.job_title, resume, experienceYears });
     const checked = prepareFollowUpBody({ body: draft, sequence, company: c.company, jobTitle: c.job_title, resume });
     if (checked.ok) return checked.body;
     log.warn("followup_text_rejected", { itemId: c.id, sequence, reason: checked.reason });
@@ -124,8 +132,10 @@ export async function createFollowUp(c: Candidate, profile: RunnableProfile, now
   // A random minute in today's 10:00–11:30 window, never before now or before base + 7 days.
   const earliest = new Date(new Date(sequence === 1 ? c.sent_at! : c.fu1_sent_at!).getTime() + FOLLOWUP_POLICY.daysBetween * DAY);
   const dueAt = nextWeekdayWindow(new Date(Math.max(now.getTime(), earliest.getTime())), random);
-  const mode = c.followup_mode;
-  const sendAt = mode === "auto" ? new Date(Math.max(dueAt.getTime(), now.getTime() + SEND_POLICY.cancelWindowMinutes * MINUTE)) : null;
+  // Auto only if the original was sent automatically, and never in drafts-only mode.
+  const mode = followUpMode(c, profile.sendMode);
+  const cancelWindow = SEND_MODES[profile.sendMode].cancelWindowMinutes; // none in "send all instantly"
+  const sendAt = mode === "auto" ? new Date(Math.max(dueAt.getTime(), now.getTime() + cancelWindow * MINUTE)) : null;
 
   // Layer 3: claim the sequence number first. A duplicate worker loses here.
   let followupId: number;
@@ -148,7 +158,8 @@ export async function createFollowUp(c: Candidate, profile: RunnableProfile, now
     const references = [...new Set(refs)];
     const inReplyTo = latest?.headers["message-id"] || c.rfc_message_id || undefined;
     const messageId = generateMessageId(profile.gmailAddress);
-    const body = await writeBody(c, sequence, profile.resume, profile.experienceYears);
+    // Without a usable key the plain template is used (the follow-up still goes out as planned).
+    const body = await writeBody(c, sequence, profile.resume, profile.experienceYears, geminiKeyOf(profile));
     const subject = replySubject(c.subject);
     const raw = buildMimeMessage({ from: profile.gmailAddress, to: c.to_email, replyTo: profile.gmailAddress, subject, body, messageId, inReplyTo, references });
     const draft = await gmail().createDraft(token, toBase64Url(raw), c.gmail_thread_id);

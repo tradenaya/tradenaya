@@ -45,8 +45,8 @@ export interface NextRunInput {
   now: Date;
   runTime: string | null;
   automationEnabled: boolean;
-  /** A scheduled run already exists for today's IST date. */
-  ranToday: boolean;
+  /** A scheduled run already happened today (IST) at THIS run time. */
+  slotRanToday: boolean;
   /** Latest of run_time_changed_at / automation_changed_at. */
   settingsChangedAt: Date | null;
 }
@@ -55,10 +55,12 @@ export interface NextRunInput {
  * When this user's next scheduled run happens — used by BOTH the scheduler
  * (due = nextRun ≤ now) and the UI hint, so they always agree.
  *
- * Today's slot counts only if no scheduled run happened today, the slot was
- * set up before it came round (changing the time or turning automation on
- * never triggers an immediate run), and it is less than 3 hours old (missed
- * runs are caught up once, then skipped). Otherwise: tomorrow at run time.
+ * Today's slot counts only if it hasn't run yet today (each run time runs at
+ * most once a day, so after a 9:00 run, moving the time to 15:00 still runs
+ * today at 15:00), the slot was set up before it came round (changing the
+ * time or turning automation on never triggers an immediate run), and it is
+ * less than 3 hours old (missed runs are caught up once, then skipped).
+ * Otherwise: tomorrow at run time.
  */
 export function nextRunAt(input: NextRunInput): Date | null {
   if (!input.automationEnabled) return null;
@@ -67,7 +69,7 @@ export function nextRunAt(input: NextRunInput): Date | null {
   const todayAt = istInstant(today, runTime);
   const setUpBeforeSlot = !input.settingsChangedAt || input.settingsChangedAt.getTime() < todayAt.getTime();
   const notTooLate = input.now.getTime() < todayAt.getTime() + CATCH_UP_HOURS * HOUR;
-  if (!input.ranToday && setUpBeforeSlot && notTooLate) return todayAt;
+  if (!input.slotRanToday && setUpBeforeSlot && notTooLate) return todayAt;
   const tomorrow = ist(input.now).plus({ days: 1 }).toFormat("yyyy-MM-dd");
   return istInstant(tomorrow, runTime);
 }

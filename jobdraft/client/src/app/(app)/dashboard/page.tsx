@@ -149,7 +149,7 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <PageTitle>Dashboard</PageTitle>
 
-      <AutomationSwitch profile={profile} onChange={onAutomation} />
+      <AutomationSwitch profile={profile} onChange={onAutomation} showMode />
 
       {data.mock && <Banner tone="info" title="Demo mode">External services are simulated (MOCK_EXTERNAL=true). No real emails or drafts are created.</Banner>}
       {data.notConfigured.map((m) => (

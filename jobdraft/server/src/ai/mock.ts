@@ -4,7 +4,7 @@ import { extractEmails } from "../matching/emails.js";
 import { isStaffingAgencyName } from "../matching/filters.js";
 import type { ResumeData } from "./schemas.js";
 
-type Req = { task: "resume" | "job_check" | "followup"; input: unknown };
+type Req = { task: "resume" | "job_check" | "screen" | "followup"; input: unknown };
 
 interface MockCandidate {
   name: string;
@@ -20,8 +20,27 @@ interface MockCandidate {
 export async function mockGenerateJson(req: Req): Promise<unknown> {
   if (req.task === "resume") return mockResume((req.input as { text: string }).text);
   if (req.task === "followup") return mockFollowUp(req.input as { sequence: 1 | 2; company: string; job_title: string; candidate: MockCandidate });
+  if (req.task === "screen") return mockScreen(req.input as { candidate: MockCandidate; postings: { index: number; title: string; company: string; description: string }[] });
   const { candidate, posting } = req.input as { candidate: MockCandidate; posting: { title: string; company: string; location: string; description: string } };
   return mockJobCheck(candidate, posting);
+}
+
+/** Batch suitability screen: the same signals as the single job check, per posting. */
+function mockScreen({ candidate, postings }: { candidate: MockCandidate; postings: { index: number; title: string; company: string; description: string }[] }) {
+  return {
+    results: postings.map((p) => {
+      const c = mockJobCheck(candidate, p);
+      return {
+        index: p.index,
+        suitable: c.suitable,
+        reason: c.reason,
+        confidence: c.confidence,
+        real_employer_name: c.real_employer_name,
+        scam_or_spam_signals: c.scam_or_spam_signals,
+        is_staffing_agency: c.is_staffing_agency,
+      };
+    }),
+  };
 }
 
 function mockFollowUp({ sequence, company, job_title, candidate }: { sequence: 1 | 2; company: string; job_title: string; candidate: MockCandidate }) {

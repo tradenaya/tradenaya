@@ -108,8 +108,8 @@ export function config() {
       apiKey: e.CLOUDINARY_API_KEY || "",
       apiSecret: e.CLOUDINARY_API_SECRET || "",
     },
+    // No server-wide key: every user brings their own Gemini API key (GEMINI_API_KEY is ignored).
     gemini: {
-      apiKey: e.GEMINI_API_KEY || "",
       models: (e.GEMINI_MODELS || DEFAULT_GEMINI_MODELS.join(","))
         .split(",")
         .map((m) => m.trim())
@@ -122,7 +122,12 @@ export function config() {
       redirectUri: e.GOOGLE_REDIRECT_URI || `http://localhost:${port}/api/gmail/callback`,
     },
     adzuna: { appId: e.ADZUNA_APP_ID || "", appKey: e.ADZUNA_APP_KEY || "" },
+    /** Adzuna's free plan allows 250 calls a day across all users; stop short of it. */
+    adzunaDailyCap: int(e.ADZUNA_DAILY_CAP, 230),
     rapidApiKey: e.RAPIDAPI_KEY || "",
+    /** JSearch's free plan has a small monthly quota: calls per day across all users. */
+    jsearchDailyCap: int(e.JSEARCH_DAILY_CAP, 6),
+    /** One run's share of the JSearch daily cap, so one user can't use the whole day. */
     jsearchMaxCallsPerRun: int(e.JSEARCH_MAX_CALLS_PER_RUN, 4),
     mockExternal: bool(e.MOCK_EXTERNAL, false),
     schedulerEnabled: bool(e.SCHEDULER_ENABLED, true),
@@ -140,7 +145,6 @@ export function features() {
   const m = c.mockExternal;
   return {
     mock: m,
-    gemini: m || !!c.gemini.apiKey,
     cloudinary: m || !!(c.cloudinary.cloudName && c.cloudinary.apiKey && c.cloudinary.apiSecret),
     gmail: m || !!(c.google.clientId && c.google.clientSecret && c.google.redirectUri),
     adzuna: m || !!(c.adzuna.appId && c.adzuna.appKey),
@@ -151,7 +155,6 @@ export function features() {
 export function missingFeatureMessages(): string[] {
   const f = features();
   const out: string[] = [];
-  if (!f.gemini) out.push("AI (Gemini) is not configured — resume reading and job checks are unavailable.");
   if (!f.cloudinary) out.push("Resume storage (Cloudinary) is not configured — resume upload is unavailable.");
   if (!f.gmail) out.push("Google sign-in is not configured — Gmail cannot be connected.");
   if (!f.adzuna && !f.jsearch) out.push("No job sources are configured (Adzuna or JSearch) — runs will find no jobs.");

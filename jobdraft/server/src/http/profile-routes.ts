@@ -7,12 +7,13 @@ import { clock } from "../lib/clock.js";
 import { HttpError } from "../lib/errors.js";
 import { istDate, nextRunAt, normalizeRunTime } from "../lib/time.js";
 import { MAX_RESUME_BYTES } from "../resume/pdf.js";
+import { checkGeminiKey, GEMINI_KEY_URL, geminiKeySchema, removeGeminiKey, saveGeminiKey } from "../ai/user-key.js";
 import { editableResume, resumeEditSchema, saveResumeEdits } from "../resume/edit.js";
 import { clearResumeJob, resumeJob, startResumeJob } from "../resume/jobs.js";
 import { readResumeFile } from "../resume/service.js";
 import {
   hasAllScopes,
-  hasScheduledRunOn,
+  hasScheduledRunAt,
   listExcluded,
   loadProfile,
   missingForAutomation,
@@ -21,7 +22,8 @@ import {
   saveExclusions,
   settingsChangedAt,
 } from "../runs/profile.js";
-import { setAutomation } from "../runs/runner.js";
+import { setAutomation, setSendMode } from "../runs/runner.js";
+import { DEFAULT_SEND_MODE, SEND_MODE_VALUES, type SendMode } from "../runs/safety.js";
 import { storage } from "../storage/index.js";
 import { h, parse, requireAuth, userOf } from "./common.js";
 
@@ -88,6 +90,9 @@ export async function profilePayload(userId: number) {
     automation: {
       enabled: !!p?.automationEnabled,
       changedAt: p?.automationChangedAt ?? null,
+      /** Kept while automation is OFF; only applies while it is ON. */
+      sendMode: p?.sendMode ?? DEFAULT_SEND_MODE,
+      sendModeChangedAt: p?.sendModeChangedAt ?? null,
       missing: missingForAutomation(p),
     },
     nextRunAt: p ? await nextRunFor(p, now) : null,
@@ -99,7 +104,16 @@ export async function profilePayload(userId: number) {
       allScopes: p ? hasAllScopes(p) : false,
       sendPausedUntil: g?.send_paused_until && new Date(g.send_paused_until) > now ? g.send_paused_until : null,
     },
+    // Never the key itself: whether one is saved, its last 4 characters and whether Google accepts it.
+    geminiKey: {
+      saved: !!p?.geminiKeyEnc,
+      hint: p?.geminiKeyHint ?? null,
+      status: p?.geminiKeyStatus ?? null,
+      updatedAt: p?.geminiKeyUpdatedAt ?? null,
+      getKeyUrl: GEMINI_KEY_URL,
+    },
     complete: {
+      geminiKey: !!p?.geminiKeyEnc && p.geminiKeyStatus !== "invalid",
       resume: !!resume,
       preferences: (p?.targetRoles.length ?? 0) > 0 && (p?.locations.length ?? 0) > 0 && p?.expectedSalaryLpa != null,
       gmail: status === "connected" && (p ? hasAllScopes(p) : false),
@@ -121,6 +135,8 @@ export function profileRouter() {
       const userId = userOf(req).id;
       // Quick checks answer straight away; the AI read may continue in the background.
       const text = await readResumeFile(userId, req.file);
+      // Reading needs the user's own AI key.
+      if (!(await loadProfile(userId))?.geminiKeyEnc) throw new HttpError(400, "Add your Gemini API key first (Setup → Gemini API key), then upload your resume.", "gemini_key");
       storage(); // "not configured" now, not after the AI call
       const finished = await startResumeJob(userId, req.file, text);
       if (!finished) {
@@ -151,6 +167,25 @@ export function profileRouter() {
       clearResumeJob(userId); // a finished read is reported once
       if (job.status === "failed") res.json({ status: "failed", error: job.error });
       else res.json({ status: "done", profile: await profilePayload(userId) });
+    }),
+  );
+
+  // The user's own Gemini API key: checked with Google, then stored encrypted.
+  r.put(
+    "/gemini-key",
+    h(async (req, res) => {
+      const { key } = parse(z.object({ key: geminiKeySchema }), req.body);
+      await checkGeminiKey(key, "key");
+      await saveGeminiKey(userOf(req).id, key);
+      res.json(await profilePayload(userOf(req).id));
+    }),
+  );
+
+  r.delete(
+    "/gemini-key",
+    h(async (req, res) => {
+      await removeGeminiKey(userOf(req).id);
+      res.json(await profilePayload(userOf(req).id));
     }),
   );
 
@@ -234,7 +269,7 @@ export function profileRouter() {
         now,
         runTime: run_time,
         automationEnabled: true,
-        ranToday: await hasScheduledRunOn(userId, istDate(now)),
+        slotRanToday: await hasScheduledRunAt(userId, istDate(now), normalizeRunTime(run_time)),
         settingsChangedAt: changes ? now : p ? settingsChangedAt(p) : null,
       });
       res.json({ at, automationEnabled: !!p?.automationEnabled });
@@ -252,6 +287,15 @@ export function automationRouter() {
     h(async (req, res) => {
       const { enabled } = parse(z.object({ enabled: z.boolean() }), req.body);
       await setAutomation(userOf(req).id, enabled);
+      res.json(await profilePayload(userOf(req).id));
+    }),
+  );
+  // Sending mode: only while automation is ON (the saved value is kept while it's OFF).
+  r.put(
+    "/send-mode",
+    h(async (req, res) => {
+      const { mode } = parse(z.object({ mode: z.enum(SEND_MODE_VALUES as [SendMode, ...SendMode[]], { error: "Choose a sending mode." }) }), req.body);
+      await setSendMode(userOf(req).id, mode);
       res.json(await profilePayload(userOf(req).id));
     }),
   );

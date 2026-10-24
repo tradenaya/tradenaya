@@ -10,7 +10,7 @@ import { errInfo, log } from "../lib/logger.js";
 import { findExcluded } from "../matching/exclusions.js";
 import { followUpBlocker } from "./followups.js";
 import { gmailUsable, listExcluded, loadProfile, refreshTokenOf, type RunnableProfile } from "./profile.js";
-import { SEND_POLICY } from "./safety.js";
+import { DRAFTS_ONLY_REASON, SEND_POLICY } from "./safety.js";
 import { refreshRunStatus } from "./status.js";
 import { stopPendingFollowUps, trackItem, type TrackedItem } from "./tracking.js";
 
@@ -82,8 +82,9 @@ async function sendFirstEmail(item: QueueItem, profile: RunnableProfile, now: Da
   const attempts = item.send_attempts + 1;
   const token = refreshTokenOf(profile);
 
-  // Re-check everything right before sending.
+  // Re-check everything right before sending (profile is read fresh each pass, so this is the CURRENT mode).
   if (!profile.automationEnabled) return skipItem(item, "Automation is off — kept as a draft").then(() => false);
+  if (profile.sendMode === "drafts_only") return skipItem(item, DRAFTS_ONLY_REASON).then(() => false);
   if (!token || !gmailUsable(profile)) return skipItem(item, "Gmail is not connected — kept as a draft").then(() => false);
   if (findExcluded({ company: item.company, email: item.to_email, url: item.job_url }, await listExcluded(profile.userId))) {
     return skipItem(item, "Company is on your skip list").then(() => false);
@@ -104,7 +105,12 @@ async function sendFirstEmail(item: QueueItem, profile: RunnableProfile, now: Da
       return false;
     }
     const sent = await gmail().sendDraft(token, item.gmail_draft_id);
-    await execute("UPDATE run_items SET send_state = 'sent', sent_at = ?, gmail_message_id = ?, gmail_thread_id = ? WHERE id = ?", [now, sent.messageId, sent.threadId, item.id]);
+    await execute("UPDATE run_items SET send_state = 'sent', sent_by = 'auto', sent_at = ?, gmail_message_id = ?, gmail_thread_id = ? WHERE id = ?", [
+      now,
+      sent.messageId,
+      sent.threadId,
+      item.id,
+    ]);
     await afterSend(profile.userId, now, random);
     log.info("email_sent", { userId: profile.userId, itemId: item.id });
     return true;
@@ -134,6 +140,7 @@ async function sendFollowUp(fu: QueueFollowUp, profile: RunnableProfile, now: Da
 
   const blocker = followUpBlocker(item, profile, now);
   if (blocker) return skip(blocker);
+  if (profile.sendMode === "drafts_only") return skip(DRAFTS_ONLY_REASON);
   if (findExcluded({ company: item.company, email: item.to_email, url: item.job_url }, await listExcluded(profile.userId))) return skip("Company is on your skip list");
 
   try {
@@ -189,6 +196,8 @@ export async function recoverStuckSends(now = clock.now()): Promise<void> {
       await execute("UPDATE run_items SET send_state = 'scheduled' WHERE id = ? AND send_state = 'sending'", [item.id]);
       const reading = await trackItem(item, token, profile.gmailAddress).catch(() => null);
       if (!reading?.sent.length) await execute("UPDATE run_items SET send_state = 'removed' WHERE id = ? AND send_state <> 'sent'", [item.id]);
+      // The queue had claimed it and the draft is gone: the queue sent it before the crash.
+      else await execute("UPDATE run_items SET sent_by = 'auto' WHERE id = ?", [item.id]);
     }
     await refreshRunStatus(Number(item.run_id));
   }

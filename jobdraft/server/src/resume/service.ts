@@ -1,9 +1,10 @@
-import { AiInvalidOutputError, AiUnavailableError, parseResumeText } from "../ai/index.js";
+import { AiInvalidOutputError, AiKeyMissingError, AiKeyRejectedError, AiUnavailableError, parseResumeText } from "../ai/index.js";
+import { geminiKeyOf, markGeminiKeyInvalid } from "../ai/user-key.js";
 import type { ResumeData } from "../ai/schemas.js";
 import { execute, queryOne } from "../db/pool.js";
 import { HttpError } from "../lib/errors.js";
 import { errInfo, log } from "../lib/logger.js";
-import { replaceResumeExclusions, resumeCompanies } from "../runs/profile.js";
+import { loadProfile, replaceResumeExclusions, resumeCompanies } from "../runs/profile.js";
 import { storage } from "../storage/index.js";
 import { computeExperienceYears } from "./experience.js";
 import { extractPdfText, looksLikePdf, MAX_RESUME_BYTES, MIN_TEXT_CHARS, sanitizeFileName } from "./pdf.js";
@@ -47,8 +48,14 @@ export async function saveResume(userId: number, file: UploadedFile, text: strin
   const store = storage(); // throws "not configured" before spending an AI call
   let data: ResumeData;
   try {
-    data = await parseResumeText(text);
+    const profile = await loadProfile(userId);
+    data = await parseResumeText(text, profile ? geminiKeyOf(profile) : null);
   } catch (err) {
+    if (err instanceof AiKeyMissingError) throw new HttpError(400, err.message, "gemini_key");
+    if (err instanceof AiKeyRejectedError) {
+      await markGeminiKeyInvalid(userId);
+      throw new HttpError(400, err.message, "gemini_key");
+    }
     if (err instanceof AiInvalidOutputError) throw new HttpError(422, "We couldn't read the details from this resume. Please try again or upload a cleaner PDF.");
     if (err instanceof AiUnavailableError) throw new HttpError(503, err.message);
     throw err;

@@ -7,6 +7,10 @@ import { GMAIL_SCOPES, GmailNotFoundError, GmailRateLimitError, type GmailProvid
 export * from "./types.js";
 export { mockGmail } from "./mock.js";
 
+// googleapis has no request timeout by default: a stalled connection could hang
+// a run (and the scheduler) forever.
+google.options({ timeout: 60_000 });
+
 const METADATA_HEADERS = ["From", "Date", "Message-ID", "In-Reply-To", "Subject"];
 const RATE_REASONS = new Set(["rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded"]);
 

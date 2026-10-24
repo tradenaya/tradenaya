@@ -94,6 +94,48 @@ export const jobCheckJsonSchema = {
   required: ["suitable", "reason", "confidence", "real_employer_name", "scam_or_spam_signals", "is_staffing_agency", "application_email", "contact_name", "subject", "body"],
 };
 
+/** Batch suitability screen: one result per posting, matched back by index. */
+export const screenSchema = z.object({
+  results: z
+    .array(
+      z.object({
+        index: z.coerce.number().int().min(0).max(20),
+        suitable: z.boolean(),
+        reason: shortStr(300).catch(""),
+        confidence: z.coerce.number().int().min(0).max(100).catch(0),
+        real_employer_name: shortStr(200).catch(""),
+        scam_or_spam_signals: z.boolean().catch(false),
+        is_staffing_agency: z.boolean().catch(false),
+      }),
+    )
+    .max(20),
+});
+
+export type ScreenResult = z.infer<typeof screenSchema>["results"][number];
+
+export const screenJsonSchema = {
+  type: "object",
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          suitable: { type: "boolean" },
+          reason: s,
+          confidence: { type: "integer" },
+          real_employer_name: s,
+          scam_or_spam_signals: { type: "boolean" },
+          is_staffing_agency: { type: "boolean" },
+        },
+        required: ["index", "suitable", "reason", "confidence", "real_employer_name", "scam_or_spam_signals", "is_staffing_agency"],
+      },
+    },
+  },
+  required: ["results"],
+};
+
 export const followUpSchema = z.object({ body: z.string().trim().min(1).max(3000) });
 export type FollowUpText = z.infer<typeof followUpSchema>;
 export const followUpJsonSchema = { type: "object", properties: { body: s }, required: ["body"] };

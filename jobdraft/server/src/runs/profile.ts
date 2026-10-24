@@ -4,8 +4,9 @@ import { execute, json, query, queryOne } from "../db/pool.js";
 import { REQUIRED_SCOPES } from "../gmail/types.js";
 import { clock } from "../lib/clock.js";
 import { decrypt } from "../lib/crypto.js";
-import { istDate, nextRunAt, normalizeRunTime } from "../lib/time.js";
+import { istDate, istInstant, nextRunAt, normalizeRunTime } from "../lib/time.js";
 import { exclusionKey, type ExcludedCompany } from "../matching/exclusions.js";
+import { DEFAULT_SEND_MODE, type SendMode } from "./safety.js";
 
 export type GmailStatus = "connected" | "disconnected" | "error" | "needs_reconnect";
 
@@ -22,6 +23,14 @@ export interface RunnableProfile {
   runTimeChangedAt: Date | null;
   automationEnabled: boolean;
   automationChangedAt: Date | null;
+  /** Only applies while automation is ON. */
+  sendMode: SendMode;
+  sendModeChangedAt: Date | null;
+  /** The user's own Gemini API key, encrypted (see ai/user-key.ts). */
+  geminiKeyEnc: string | null;
+  geminiKeyHint: string | null;
+  geminiKeyStatus: "valid" | "invalid" | null;
+  geminiKeyUpdatedAt: Date | null;
   gmailAddress: string | null;
   gmailStatus: GmailStatus | null;
   grantedScopes: string[];
@@ -42,6 +51,12 @@ interface Row {
   run_time_changed_at: Date | null;
   automation_enabled: number;
   automation_changed_at: Date | null;
+  send_mode: SendMode | null;
+  send_mode_changed_at: Date | null;
+  gemini_key_enc: string | null;
+  gemini_key_hint: string | null;
+  gemini_key_status: "valid" | "invalid" | null;
+  gemini_key_updated_at: Date | null;
   gmail_address: string | null;
   gmail_status: GmailStatus | null;
   granted_scopes: string | null;
@@ -69,6 +84,12 @@ function toProfile(row: Row): RunnableProfile {
     runTimeChangedAt: row.run_time_changed_at,
     automationEnabled: !!row.automation_enabled,
     automationChangedAt: row.automation_changed_at,
+    sendMode: row.send_mode ?? DEFAULT_SEND_MODE,
+    sendModeChangedAt: row.send_mode_changed_at,
+    geminiKeyEnc: row.gemini_key_enc,
+    geminiKeyHint: row.gemini_key_hint,
+    geminiKeyStatus: row.gemini_key_status,
+    geminiKeyUpdatedAt: row.gemini_key_updated_at,
     gmailAddress: row.gmail_address,
     gmailStatus: row.gmail_status,
     grantedScopes: (row.granted_scopes ?? "").split(" ").filter(Boolean),
@@ -82,7 +103,17 @@ export async function loadProfile(userId: number): Promise<RunnableProfile | nul
   return row ? toProfile(row) : null;
 }
 
-/** Profiles with automation ON and a usable Gmail connection (the scheduler's candidates). */
+/**
+ * Every profile with automation ON, whatever the Gmail state. The scheduler
+ * starts from this list so a user whose Gmail broke is reported (a "couldn't
+ * run" card in History), never silently skipped.
+ */
+export async function automationOnProfiles(): Promise<RunnableProfile[]> {
+  const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 ORDER BY p.user_id`);
+  return rows.map(toProfile);
+}
+
+/** Profiles with automation ON and a usable Gmail connection. */
 export async function automationProfiles(): Promise<RunnableProfile[]> {
   const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 AND g.status = 'connected' AND g.refresh_token_enc IS NOT NULL ORDER BY p.user_id`);
   return rows.map(toProfile);
@@ -99,6 +130,8 @@ export function gmailUsable(p: Pick<RunnableProfile, "gmailStatus" | "refreshTok
 /** What still blocks automation (empty = can be turned on). */
 export function missingForAutomation(p: RunnableProfile | null): string[] {
   const missing: string[] = [];
+  if (!p?.geminiKeyEnc) missing.push("Add your Gemini API key");
+  else if (p.geminiKeyStatus === "invalid") missing.push("Update your Gemini API key (Google rejected it)");
   if (!p?.resume || !p.resumePublicId) missing.push("Upload your resume");
   if (!p?.targetRoles.length) missing.push("Choose target roles");
   if (!p?.locations.length) missing.push("Pick locations");
@@ -115,8 +148,13 @@ export function refreshTokenOf(profile: { refreshTokenEnc: string | null }): str
   return decrypt(profile.refreshTokenEnc, config().encryptionKey());
 }
 
-export async function hasScheduledRunOn(userId: number, runDate: string): Promise<boolean> {
-  return !!(await queryOne("SELECT id FROM runs WHERE user_id = ? AND scheduled_key = ?", [userId, runDate]));
+/** A scheduled run already happened on this IST date at this run time (each time slot runs at most once a day). */
+export async function hasScheduledRunAt(userId: number, runDate: string, runTime: string): Promise<boolean> {
+  return !!(await queryOne("SELECT id FROM runs WHERE user_id = ? AND `trigger` = 'scheduled' AND run_date = ? AND scheduled_for = ?", [
+    userId,
+    runDate,
+    istInstant(runDate, runTime),
+  ]));
 }
 
 export function settingsChangedAt(p: Pick<RunnableProfile, "runTimeChangedAt" | "automationChangedAt">): Date | null {
@@ -130,7 +168,7 @@ export async function nextRunFor(p: RunnableProfile, now = clock.now()): Promise
     now,
     runTime: p.runTime,
     automationEnabled: p.automationEnabled,
-    ranToday: await hasScheduledRunOn(p.userId, istDate(now)),
+    slotRanToday: await hasScheduledRunAt(p.userId, istDate(now), p.runTime),
     settingsChangedAt: settingsChangedAt(p),
   });
 }

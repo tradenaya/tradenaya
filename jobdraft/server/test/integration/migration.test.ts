@@ -39,7 +39,7 @@ describe("v1 → v2 migration", () => {
       await c.end();
     }
 
-    expect(await runMigrations(DB, v2)).toEqual([2]);
+    expect(await runMigrations(DB, v2)).toEqual([2, 3, 4, 5, 6]);
     expect(await runMigrations(DB, v2)).toEqual([]); // idempotent: nothing left to apply
 
     const d = await conn();
@@ -49,6 +49,11 @@ describe("v1 → v2 migration", () => {
       expect(p!.run_time).toBe("09:00:00");
       expect(p!.automation_enabled).toBe(0); // needs the new Gmail permission first
       expect(p!.automation_changed_at).not.toBeNull();
+      // v4: existing users get the default sending mode.
+      const [[m]] = (await d.query("SELECT send_mode FROM profiles")) as unknown as [Record<string, unknown>[]];
+      expect(m!.send_mode).toBe("smart");
+      const [modes] = (await d.query("SELECT type, send_mode FROM run_items ORDER BY id")) as unknown as [Record<string, unknown>[]];
+      expect(modes.filter((i) => i.type !== "link_only").every((i) => i.send_mode === "smart")).toBe(true);
       const [[g]] = (await d.query("SELECT status FROM gmail_connections")) as unknown as [Record<string, unknown>[]];
       expect(g!.status).toBe("needs_reconnect");
       const [runs] = (await d.query("SELECT id, `trigger`, scheduled_key FROM runs ORDER BY id")) as unknown as [Record<string, unknown>[]];

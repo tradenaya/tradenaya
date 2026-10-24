@@ -3,7 +3,8 @@ import { mockResume } from "../../src/ai/mock.js";
 import type { JobCheck } from "../../src/ai/schemas.js";
 import type { Job } from "../../src/jobs/types.js";
 import { exclusionKey } from "../../src/matching/exclusions.js";
-import { buildSignature, classifyAutoSend, decideDraft, humanize, layoutEmail, prepareFollowUpBody, styleProblem, templateFollowUp } from "../../src/runs/safety.js";
+import { followUpMode } from "../../src/runs/followups.js";
+import { buildSignature, classifyAutoSend, decideDraft, humanize, layoutEmail, prepareFollowUpBody, SEND_MODES, styleProblem, templateFollowUp } from "../../src/runs/safety.js";
 import { wordCount } from "../../src/matching/text.js";
 import { RESUME_LINES } from "../helpers.js";
 
@@ -231,5 +232,41 @@ describe("email layout", () => {
     const ok = "Hi Anita,\n\nI am applying for the role.\n\nThanks for your time.";
     expect(layoutEmail(ok)).toBe(ok);
     expect(layoutEmail("I am applying for the role.")).toBe("Dear Hiring Team,\n\nI am applying for the role.");
+  });
+});
+
+describe("sending modes (auto-send classification)", () => {
+  const ok = { confidence: 90, scam: false, agency: false, automationOn: true, gmailConnected: true, autoSendsThisRun: 0, autoSendsToday: 0 };
+
+  it("Drafts only never auto-sends", () => {
+    expect(classifyAutoSend({ ...ok, confidence: 100, mode: "drafts_only" })).toBe("draft");
+  });
+
+  it("Smart send: confidence ≥ 85, 5 per run, 8 per day (the default)", () => {
+    expect(classifyAutoSend({ ...ok, mode: "smart" })).toBe("auto_send");
+    expect(classifyAutoSend({ ...ok, mode: "smart", confidence: 84 })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, mode: "smart", autoSendsThisRun: 5 })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, mode: "smart", autoSendsToday: 8 })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, confidence: 84 })).toBe("draft"); // no mode = smart
+  });
+
+  it.each(["send_all", "send_all_instant"] as const)("%s: any confidence, up to 15 per day, never flagged items", (mode) => {
+    expect(classifyAutoSend({ ...ok, mode, confidence: 40 })).toBe("auto_send");
+    expect(classifyAutoSend({ ...ok, mode, autoSendsThisRun: 9, autoSendsToday: 14 })).toBe("auto_send");
+    expect(classifyAutoSend({ ...ok, mode, autoSendsToday: 15 })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, mode, scam: true })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, mode, agency: true })).toBe("draft");
+    expect(classifyAutoSend({ ...ok, mode, automationOn: false })).toBe("draft");
+  });
+
+  it("cancel windows: 30 minutes except Send all instantly", () => {
+    expect([SEND_MODES.smart, SEND_MODES.send_all, SEND_MODES.send_all_instant].map((m) => m.cancelWindowMinutes)).toEqual([30, 30, 0]);
+  });
+
+  it("follow-ups are auto only if the original was sent automatically, and never in Drafts only", () => {
+    expect(followUpMode({ followup_mode: "auto", sent_by: "auto" }, "smart")).toBe("auto");
+    expect(followUpMode({ followup_mode: "auto", sent_by: "user" }, "send_all")).toBe("draft");
+    expect(followUpMode({ followup_mode: "draft", sent_by: "user" }, "send_all_instant")).toBe("draft");
+    expect(followUpMode({ followup_mode: "auto", sent_by: "auto" }, "drafts_only")).toBe("draft");
   });
 });

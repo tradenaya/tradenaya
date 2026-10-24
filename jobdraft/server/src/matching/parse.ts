@@ -12,7 +12,8 @@ export function parseMinExperience(text: string): number | null {
   const patterns = [
     new RegExp(String.raw`${NUM}\s*(?:\+|plus)?\s*(?:-|–|to)\s*${NUM}\s*\+?\s*(?:years?|yrs?)`, "gi"),
     new RegExp(String.raw`(?:minimum|min\.?|at least|atleast)\s*(?:of\s*)?${NUM}\s*\+?\s*(?:years?|yrs?)`, "gi"),
-    new RegExp(String.raw`${NUM}\s*(?:\+|plus)\s*(?:years?|yrs?)`, "gi"),
+    // "7+ years" — but not a company's age ("25+ years of excellence").
+    new RegExp(String.raw`${NUM}\s*(?:\+|plus)\s*(?:years?|yrs?)\b(?!\s*(?:of\s+)?(?:excellence|legacy|history|trust|service|existence|in business|of operations))`, "gi"),
     new RegExp(String.raw`${NUM}\s*(?:years?|yrs?)\s*(?:of\s*)?(?:relevant\s*|professional\s*|work\s*|industry\s*|hands[- ]on\s*)?(?:experience|exp)`, "gi"),
     new RegExp(String.raw`(?:experience|exp)\s*[:\-]\s*${NUM}\s*(?:\+)?\s*(?:-|–|to)?\s*(?:\d{1,2})?\s*(?:years?|yrs?)`, "gi"),
   ];

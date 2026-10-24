@@ -42,10 +42,15 @@ export interface ExcludedCompany {
   source: "resume" | "manual";
 }
 
+export type SendMode = "drafts_only" | "smart" | "send_all" | "send_all_instant";
+
 export interface Automation {
   enabled: boolean;
   changedAt: string | null;
   missing: string[];
+  /** Kept while automation is OFF; only applies while it is ON. */
+  sendMode: SendMode;
+  sendModeChangedAt: string | null;
 }
 
 export interface Profile {
@@ -55,7 +60,9 @@ export interface Profile {
   automation: Automation;
   nextRunAt: string | null;
   gmail: { status: GmailStatus; address: string | null; connectedAt: string | null; lastError: string | null; allScopes: boolean; sendPausedUntil: string | null };
-  complete: { resume: boolean; preferences: boolean; gmail: boolean };
+  /** The user's own Gemini key (never the key itself). */
+  geminiKey: { saved: boolean; hint: string | null; status: "valid" | "invalid" | null; updatedAt: string | null; getKeyUrl: string };
+  complete: { geminiKey: boolean; resume: boolean; preferences: boolean; gmail: boolean };
 }
 
 export interface Run {
@@ -72,6 +79,30 @@ export interface Run {
   linkOnlyCount: number;
   jobsConsidered: number;
   errorMessage: string | null;
+  /** What the run fetched, filtered, checked and created (null for runs before diagnostics existed). */
+  funnel: Funnel | null;
+}
+
+export type JobSource = "adzuna" | "jsearch" | "mock";
+export type QueryVariant = "plain" | "remote" | "wfh" | "startup" | "immediate" | "send_resume" | "walk_in";
+export type RemovalStep = "excluded" | "seen" | "location" | "title" | "industry" | "seniority" | "experience" | "salary" | "agency" | "contacted" | "duplicate" | "other";
+
+export interface Funnel {
+  v: 1;
+  sources: { source: JobSource; configured: boolean; calls: number; cached: number; fetched: number; errors: { status?: number; message: string }[]; note?: string }[];
+  queries: { source: JobSource; variant: QueryVariant; role: string; location: string; query: string; where?: string; fetched: number; fromCache: boolean; error?: string }[];
+  fetched: number;
+  removed: Partial<Record<RemovalStep, number>>;
+  afterFilters: number;
+  aiChecked: number;
+  suitable: number;
+  emailsFound: number;
+  drafted: number;
+  autoSent: number;
+  linkOnly: number;
+  notChecked: number;
+  variants: Partial<Record<QueryVariant, { fetched: number; emailApply: number }>>;
+  note?: string;
 }
 
 export interface FollowUp {
@@ -110,6 +141,10 @@ export interface Application {
   skipReason: string | null;
   createdAt: string;
   status: { key: string; label: string; at?: string | null };
+  /** The sending mode when the email was created. */
+  sendMode: SendMode | null;
+  /** "Sent automatically", "Sent by you", "Draft – waiting for you"… */
+  handling: { key: "auto" | "user" | "scheduled" | "draft" | "removed"; label: string };
   followups: FollowUp[];
   canCancel: boolean;
   canStopFollowUps: boolean;

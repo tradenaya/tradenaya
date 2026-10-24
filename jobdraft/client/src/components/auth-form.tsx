@@ -8,16 +8,19 @@ import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useAuth } from "./auth";
 import { useConfirm } from "./confirm-dialog";
+import { GeminiKeyHelp } from "./gemini-key";
 import { Button, Field, Input, PasswordInput } from "./ui";
 
 type Mode = "login" | "register";
 
-function validate(mode: Mode, v: { name: string; email: string; password: string }) {
+function validate(mode: Mode, v: { name: string; email: string; password: string; geminiKey: string }) {
   const e: Record<string, string> = {};
   if (mode === "register" && !v.name.trim()) e.name = "Enter your name.";
   if (!/^\S+@\S+\.\S+$/.test(v.email.trim())) e.email = "Enter a valid email address.";
   if (mode === "register" && v.password.length < 8) e.password = "Password must be at least 8 characters.";
   if (mode === "login" && !v.password) e.password = "Enter your password.";
+  if (mode === "register" && !v.geminiKey.trim()) e.geminiKey = "Paste your Gemini API key.";
+  else if (mode === "register" && !/^\S{20,300}$/.test(v.geminiKey.trim())) e.geminiKey = "That doesn't look like a Gemini API key. Copy the whole key from Google AI Studio.";
   return e;
 }
 
@@ -25,7 +28,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const params = useSearchParams();
   const { user, loading, setUser } = useAuth();
-  const [values, setValues] = useState({ name: "", email: "", password: "" });
+  const [values, setValues] = useState({ name: "", email: "", password: "", geminiKey: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,14 +56,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
       mode === "register" &&
       !(await confirm({
         title: "Create your account?",
-        body: `We'll create a JobDraft account for ${values.email.trim()}. Next, you'll upload your resume and connect Gmail.`,
+        body: `We'll check your Gemini API key with Google, then create a JobDraft account for ${values.email.trim()}. Next, you'll upload your resume and connect Gmail.`,
         confirmLabel: "Create account",
       }))
     )
       return;
     setBusy(true);
     try {
-      const body = mode === "register" ? values : { email: values.email, password: values.password };
+      const body = mode === "register" ? { ...values, geminiKey: values.geminiKey.trim() } : { email: values.email, password: values.password };
       const res = await api<{ user: User }>(`/api/auth/${mode}`, { body });
       submitted.current = true;
       setUser(res.user);
@@ -118,6 +121,26 @@ export function AuthForm({ mode }: { mode: Mode }) {
           aria-describedby={errors.password ? "password-error" : isRegister ? "password-hint" : undefined}
         />
       </Field>
+      {isRegister && (
+        <div className="space-y-2">
+          <Field label="Gemini API key" htmlFor="geminiKey" error={errors.geminiKey}>
+            <PasswordInput
+              id="geminiKey"
+              what="key"
+              name="geminiKey"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="Paste your key (starts with AIza…)"
+              value={values.geminiKey}
+              onChange={set("geminiKey")}
+              invalid={!!errors.geminiKey}
+              aria-describedby={errors.geminiKey ? "geminiKey-error" : "gemini-key-help"}
+            />
+          </Field>
+          <GeminiKeyHelp id="gemini-key-help" />
+        </div>
+      )}
       <Button type="submit" full loading={busy}>
         {isRegister ? "Create account" : "Log in"}
       </Button>

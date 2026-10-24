@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import { config, features, missingFeatureMessages } from "../config/env.js";
-import { query, queryOne } from "../db/pool.js";
+import { json, query, queryOne } from "../db/pool.js";
 import { clock, DAY, MINUTE } from "../lib/clock.js";
 import { HttpError } from "../lib/errors.js";
+import type { Funnel } from "../runs/funnel.js";
 import { stopFollowUps } from "../runs/followups.js";
 import { startManualRun } from "../runs/runner.js";
 import { cancelFollowUp, cancelItemSend, cancelRunSends } from "../runs/send-queue.js";
@@ -25,10 +26,11 @@ interface RunRow {
   link_only_count: number;
   jobs_considered: number;
   error_message: string | null;
+  funnel: unknown;
 }
 
 const RUN_COLUMNS =
-  "id, `trigger`, run_date, scheduled_for, status, started_at, finished_at, drafts_count, auto_send_count, sent_count, link_only_count, jobs_considered, error_message";
+  "id, `trigger`, run_date, scheduled_for, status, started_at, finished_at, drafts_count, auto_send_count, sent_count, link_only_count, jobs_considered, error_message, funnel";
 
 function runDto(r: RunRow) {
   return {
@@ -45,6 +47,7 @@ function runDto(r: RunRow) {
     linkOnlyCount: r.link_only_count,
     jobsConsidered: r.jobs_considered,
     errorMessage: r.error_message,
+    funnel: json<Funnel | null>(r.funnel, null),
   };
 }
 
@@ -52,6 +55,8 @@ interface ItemRow {
   id: number;
   run_id: number;
   type: "draft" | "auto_send" | "link_only";
+  send_mode: string | null;
+  sent_by: "auto" | "user" | null;
   company: string;
   job_title: string;
   location: string | null;
@@ -84,6 +89,14 @@ interface FollowUpDto {
   sentAt: Date | null;
   skipReason: string | null;
   createdAt: Date;
+}
+
+/** How an application was handled: sent automatically, sent by the user, or still a draft. */
+export function handlingOf(i: Pick<ItemRow, "send_state" | "sent_by">): { key: "auto" | "user" | "scheduled" | "draft" | "removed"; label: string } {
+  if (i.send_state === "sent") return i.sent_by === "auto" ? { key: "auto", label: "Sent automatically" } : { key: "user", label: "Sent by you" };
+  if (i.send_state === "scheduled" || i.send_state === "sending") return { key: "scheduled", label: "Will be sent automatically" };
+  if (i.send_state === "removed") return { key: "removed", label: "Removed from your drafts" };
+  return { key: "draft", label: "Draft – waiting for you" };
 }
 
 /** The single status chip shown for an application. */
@@ -134,6 +147,8 @@ function itemDto(i: ItemRow, fus: FollowUpDto[]) {
     note: i.note,
     skipReason: i.skip_reason,
     createdAt: i.created_at,
+    sendMode: i.send_mode,
+    handling: handlingOf(i),
     status: statusChip(i, mine),
     followups: mine,
     canCancel: i.send_state === "scheduled",
@@ -169,7 +184,7 @@ async function followUpsFor(itemIds: number[]): Promise<FollowUpDto[]> {
   }));
 }
 
-const ITEM_COLUMNS = `id, run_id, type, company, job_title, location, job_url, source, to_email, subject, confidence, send_state, send_at, sent_at, skip_reason,
+const ITEM_COLUMNS = `id, run_id, type, send_mode, sent_by, company, job_title, location, job_url, source, to_email, subject, confidence, send_state, send_at, sent_at, skip_reason,
   reply_state, replied_at, followup_mode, followups_stopped, outcome, note, created_at`;
 
 const listQuery = z.object({

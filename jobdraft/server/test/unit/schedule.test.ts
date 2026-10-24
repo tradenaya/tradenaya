@@ -10,7 +10,7 @@ const base = (over: Partial<NextRunInput>): NextRunInput => ({
   now: ist("2026-10-20T07:00"),
   runTime: null,
   automationEnabled: true,
-  ranToday: false,
+  slotRanToday: false,
   settingsChangedAt: ist("2026-10-01T12:00"),
   ...over,
 });
@@ -35,8 +35,8 @@ describe("next run (shared by the scheduler and the UI)", () => {
   });
 
   it("today's run already done → tomorrow", () => {
-    expect(fmt(nextRunAt(base({ now: ist("2026-10-20T09:30"), ranToday: true })))).toBe("2026-10-21 09:00");
-    expect(fmt(nextRunAt(base({ now: ist("2026-10-20T07:00"), ranToday: true })))).toBe("2026-10-21 09:00");
+    expect(fmt(nextRunAt(base({ now: ist("2026-10-20T09:30"), slotRanToday: true })))).toBe("2026-10-21 09:00");
+    expect(fmt(nextRunAt(base({ now: ist("2026-10-20T07:00"), slotRanToday: true })))).toBe("2026-10-21 09:00");
   });
 
   it("time changed to later today → today; to earlier than now → tomorrow (never immediately)", () => {
@@ -48,7 +48,7 @@ describe("next run (shared by the scheduler and the UI)", () => {
 
   it("changing the time after today's run doesn't create a second run today", () => {
     const now = ist("2026-10-20T10:00");
-    expect(fmt(nextRunAt(base({ now, runTime: "15:00", ranToday: true, settingsChangedAt: now })))).toBe("2026-10-21 15:00");
+    expect(fmt(nextRunAt(base({ now, runTime: "15:00", slotRanToday: true, settingsChangedAt: now })))).toBe("2026-10-21 15:00");
   });
 
   it("turning automation ON never triggers an immediate run", () => {

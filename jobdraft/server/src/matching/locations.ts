@@ -6,11 +6,22 @@ import { normalize } from "./text.js";
 export const REMOTE_LOCATION = "Remote (India)";
 
 const DELHI = ["delhi", "new delhi", "delhi ncr", "ncr"];
+// Old names plus the neighbouring areas postings are filed under (also searched, see jobs/queries.ts).
+const BENGALURU = ["bengaluru", "bangalore", "blr"];
+const MUMBAI = ["mumbai", "bombay", "navi mumbai", "thane"];
+const PUNE = ["pune", "poona", "pimpri chinchwad", "pimpri", "chinchwad"];
+const HYDERABAD = ["hyderabad", "secunderabad"];
 const ALIASES: Record<string, string[]> = {
   ...(generatedAliases as Record<string, string[]>),
   delhi: DELHI,
   "new delhi": DELHI,
-  bengaluru: ["bengaluru", "bangalore", "blr"],
+  bengaluru: BENGALURU,
+  bangalore: BENGALURU,
+  mumbai: MUMBAI,
+  bombay: MUMBAI,
+  pune: PUNE,
+  poona: PUNE,
+  hyderabad: HYDERABAD,
 };
 
 /** "Bengaluru, Karnataka" → "bengaluru" */

@@ -5,12 +5,14 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateIst } from "@/lib/format";
+import { automationOnText, sendModeTitle } from "@/lib/send-modes";
 import type { Profile } from "@/lib/types";
 import { useConfirm } from "./confirm-dialog";
+import { SendModeSummary } from "./send-mode";
 import { cx } from "./ui";
 
-/** The master switch: "I got a job, stop searching." Large on the dashboard, mirrored on Setup. */
-export function AutomationSwitch({ profile, onChange, compact }: { profile: Profile; onChange: (p: Profile) => void; compact?: boolean }) {
+/** The master switch: "I got a job, stop searching." Large on the dashboard (with the sending mode), mirrored on Setup. */
+export function AutomationSwitch({ profile, onChange, compact, showMode }: { profile: Profile; onChange: (p: Profile) => void; compact?: boolean; showMode?: boolean }) {
   const [busy, setBusy] = useState(false);
   const a = profile.automation;
   const blocked = !a.enabled && a.missing.length > 0;
@@ -27,7 +29,7 @@ export function AutomationSwitch({ profile, onChange, compact }: { profile: Prof
           }
         : {
             title: "Turn automation on?",
-            body: "Every day at your run time, JobDraft finds matching jobs and prepares emails in your Gmail. The strongest matches are sent automatically, after a 30-minute window in which you can cancel them.",
+            body: `${automationOnText(a.sendMode)} Sending mode: ${sendModeTitle(a.sendMode)} (you can change it under the switch on Setup).`,
             confirmLabel: "Turn on",
           },
     );
@@ -61,7 +63,7 @@ export function AutomationSwitch({ profile, onChange, compact }: { profile: Prof
           </h2>
           <p id="automation-desc" className="mt-1 text-[15px] text-slate-700">
             {a.enabled
-              ? "Every day at your run time, JobDraft finds matching jobs and prepares emails in your Gmail. Only the strongest matches are sent automatically, after a 30-minute window to cancel; the rest wait in your drafts."
+              ? automationOnText(a.sendMode)
               : a.changedAt
                 ? `Off since ${formatDateIst(a.changedAt)}. Nothing is fetched, drafted or sent until you turn it on.`
                 : "Turn on to start daily runs. Nothing is drafted or sent while it's off."}
@@ -82,6 +84,7 @@ export function AutomationSwitch({ profile, onChange, compact }: { profile: Prof
           <span className={cx("absolute size-7 rounded-full bg-white shadow transition-transform", a.enabled ? "translate-x-3" : "-translate-x-3")} />
         </button>
       </div>
+      {showMode && <SendModeSummary profile={profile} />}
       {blocked && (
         <div className="mt-3 rounded-xl bg-amber-50 p-3 text-[15px] text-amber-900 ring-1 ring-inset ring-amber-200">
           <p className="font-semibold">To turn it on:</p>

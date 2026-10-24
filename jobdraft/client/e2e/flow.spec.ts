@@ -4,6 +4,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const RESUME = path.join(__dirname, "fixtures", "resume.pdf");
 const API = "http://localhost:5056";
+/** A well-formed fake key: the e2e server runs in mock mode, so it isn't checked with Google. */
+const GEMINI_KEY = "AIzaE2eTestKey_0123456789abcdefghijklmn";
 
 /** No horizontal scrolling at this viewport width. */
 async function expectNoHorizontalOverflow(page: Page) {
@@ -43,6 +45,7 @@ async function register(page: Page, email: string) {
   await page.getByLabel("Name").fill("Priya Sharma");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill("e2e-password-1");
+  await page.getByLabel("Gemini API key").fill(GEMINI_KEY);
   await page.getByRole("button", { name: "Show password" }).click();
   await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Create account" }).click();
@@ -93,6 +96,14 @@ test("register → setup → automation ON → run now → dashboard sends → h
   for (const name of await roles.getByRole("button", { name: /^Remove / }).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")!))) {
     if (name !== "Remove Software Engineer") await roles.getByRole("button", { name, exact: true }).click();
   }
+  await expect(roles.getByRole("listitem")).toHaveCount(1);
+  // Related roles: one tap adds a tag (then remove it again for this flow).
+  const related = page.getByTestId("related-roles").getByRole("button");
+  await expect(related.first()).toBeVisible();
+  const extra = (await related.first().textContent())!.trim();
+  await related.first().click();
+  await expect(roles.getByText(extra, { exact: true })).toBeVisible();
+  await roles.getByRole("button", { name: `Remove ${extra}`, exact: true }).click();
   await expect(roles.getByRole("listitem")).toHaveCount(1);
   await page.getByRole("combobox", { name: /Locations/ }).fill("bangal");
   await page.getByRole("option", { name: /Bengaluru/ }).click();
@@ -149,10 +160,20 @@ test("register → setup → automation ON → run now → dashboard sends → h
 
   // History → expand → status chips, timeline and "Stop follow-ups"
   await goTo(page, "History", isMobile);
+  // The run card shows the funnel in one line: "Fetched N → after filters N → suitable N → emails N → link-only N".
+  await expect(page.getByTestId("funnel-summary").first()).toContainText(/Fetched \d+.*after filters \d+.*suitable \d+.*emails \d+.*link-only \d+/);
   await page.getByRole("button", { expanded: false }).filter({ hasText: "Run now" }).first().click();
   const apps = page.getByTestId("application-item");
   await expect(apps.first()).toBeVisible();
   await expect(page.getByTestId("link-item").first()).toBeVisible();
+  // Tap the funnel for per-step details.
+  await page.getByRole("button", { name: /How this run went/ }).click();
+  const funnel = page.getByTestId("funnel");
+  await expect(funnel.getByRole("heading", { name: "Removed by filters" })).toBeVisible();
+  await expect(funnel).toContainText("Past employers / companies to skip");
+  await expect(funnel).toContainText("Demo source");
+  await expectNoHorizontalOverflow(page);
+  await funnel.screenshot({ path: testInfo.outputPath("funnel.png") });
   const sent = apps.filter({ hasText: /Sent ·/ }).first();
   await expect(sent).toBeVisible();
   await expect(sent.getByRole("list", { name: "Timeline" })).toContainText("Waiting for a reply");
@@ -287,11 +308,122 @@ test("deactivate account → confirmation screen → register again with the sam
   await page.getByLabel("Name").fill("Priya Sharma");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill("e2e-password-2");
+  await page.getByLabel("Gemini API key").fill(GEMINI_KEY);
   await page.getByRole("button", { name: "Create account" }).click();
   await confirmWith(page, "Create account");
   await expect(page).toHaveURL(/\/setup/);
   await expect(page.locator('label[for="resume-file"]')).toContainText("Upload resume (PDF)");
   await expect(page.getByRole("navigation", { name: "Setup progress" })).toContainText("current step");
+});
+
+test("sending mode: disabled while automation is OFF, one mode at a time, confirmation for Send all instantly", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  const isMobile = testInfo.project.name.startsWith("mobile");
+  await register(page, `e2e-mode-${testInfo.project.name}-${Date.now()}@example.org`);
+  // Resume and preferences through the API (same session) — this test is about the selector.
+  const upload = await page.request.post(`${API}/api/profile/resume`, {
+    multipart: { resume: { name: "resume.pdf", mimeType: "application/pdf", buffer: fs.readFileSync(RESUME) } },
+  });
+  expect(upload.ok()).toBe(true);
+  const prefs = await page.request.put(`${API}/api/profile/preferences`, {
+    data: { target_roles: ["Software Engineer"], locations: ["Bengaluru, Karnataka"], expected_salary_lpa: 12, run_time: "09:00" },
+  });
+  expect(prefs.ok()).toBe(true);
+  await page.reload();
+
+  // Automation OFF: visible but disabled, with the hint.
+  const group = page.getByRole("radiogroup", { name: "Sending mode" });
+  await expect(group).toBeVisible();
+  await expect(page.locator("#send-mode")).toContainText("Turn on automation to use");
+  for (const name of ["Drafts only", "Smart send (recommended)", "Send all", "Send all instantly"]) await expect(group.getByRole("radio", { name, exact: true })).toBeDisabled();
+  await expect(group.getByRole("radio", { name: "Smart send (recommended)", exact: true })).toHaveAttribute("aria-checked", "true"); // the default
+
+  // Connect Gmail and turn automation on.
+  await page.getByRole("button", { name: "Connect Gmail" }).click();
+  await confirmWith(page, "Continue to Google");
+  await expect(page.getByText(/Gmail connected/).first()).toBeVisible();
+  const on = await page.request.put(`${API}/api/automation`, { data: { enabled: true } });
+  expect(on.ok()).toBe(true);
+  await page.reload();
+  await expect(group.getByRole("radio", { name: "Drafts only", exact: true })).toBeEnabled();
+  await expectNoHorizontalOverflow(page);
+
+  const radio = (name: string) => group.getByRole("radio", { name, exact: true });
+  const expectOnly = async (name: string) => {
+    await expect(radio(name)).toHaveAttribute("aria-checked", "true");
+    await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
+  };
+  // Touch targets are at least 44px tall.
+  for (const r of await group.getByRole("radio").all()) expect((await r.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+  await radio("Drafts only").click();
+  await confirmWith(page, "Switch to Drafts only");
+  await expectOnly("Drafts only");
+  await radio("Send all").click();
+  await confirmWith(page, "Switch to Send all");
+  await expectOnly("Send all");
+
+  // Send all instantly asks first; "Go back" keeps the current mode.
+  await radio("Send all instantly").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Emails will be sent without a chance to cancel. Continue?");
+  await page.screenshot({ path: testInfo.outputPath("send-mode-confirm.png") });
+  await dialog.getByRole("button", { name: "Go back" }).click();
+  await expectOnly("Send all");
+  await radio("Send all instantly").click();
+  await confirmWith(page, "Continue");
+  await expectOnly("Send all instantly");
+  await page.locator("#send-mode").screenshot({ path: testInfo.outputPath("send-mode.png") });
+
+  // Dashboard shows the mode next to the switch, with a Change link back here.
+  await goTo(page, "Dashboard", isMobile);
+  const summary = page.getByTestId("send-mode-summary");
+  await expect(summary).toContainText("Sending mode: Send all instantly");
+  await summary.getByRole("link", { name: "Change" }).click();
+  await expect(page).toHaveURL(/\/setup#send-mode/);
+  await expect(page.getByRole("radiogroup", { name: "Sending mode" })).toBeVisible();
+
+  // Automation OFF again: disabled, choice kept.
+  const off = await page.request.put(`${API}/api/automation`, { data: { enabled: false } });
+  expect(off.ok()).toBe(true);
+  await page.reload();
+  await expect(radio("Send all instantly")).toBeDisabled();
+  await expect(radio("Send all instantly")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#send-mode")).toContainText("Turn on automation to use");
+});
+
+test("Gemini key: where to get one, required at sign-up, and managed on Setup", async ({ page }, testInfo) => {
+  // Registration explains where to get a key, with a link that opens Google AI Studio in a new tab.
+  await page.goto("/register");
+  const link = page.getByTestId("get-gemini-key");
+  await expect(link).toHaveAttribute("href", "https://aistudio.google.com/apikey");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(page.getByText("Click Create API key, then copy it.")).toBeVisible();
+  await page.getByLabel("Name").fill("Priya Sharma");
+  await page.getByLabel("Email").fill(`e2e-key-${testInfo.project.name}-${Date.now()}@example.org`);
+  await page.getByLabel("Password", { exact: true }).fill("e2e-password-1");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByText("Paste your Gemini API key.")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("register-key.png"), fullPage: true });
+  await page.getByLabel("Gemini API key").fill(GEMINI_KEY);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await confirmWith(page, "Create account");
+  await expect(page).toHaveURL(/\/setup/);
+
+  // Setup: the saved key shows only its last 4 characters; it can be removed and added back.
+  const card = page.locator("#gemini-key");
+  await expect(card.getByTestId("gemini-key-status")).toContainText(`Saved key ending in …${GEMINI_KEY.slice(-4)}`);
+  await expect(card).not.toContainText(GEMINI_KEY);
+  await card.getByRole("button", { name: "Remove" }).click();
+  await confirmWith(page, "Remove key");
+  await expect(card).toContainText("Add your key to get started");
+  await expect(card.getByTestId("get-gemini-key")).toHaveAttribute("href", "https://aistudio.google.com/apikey");
+  await card.getByLabel("Gemini API key").fill(GEMINI_KEY);
+  await card.getByRole("button", { name: "Save key" }).click();
+  await confirmWith(page, "Save key");
+  await expect(card.getByTestId("gemini-key-status")).toContainText(`…${GEMINI_KEY.slice(-4)}`);
+  await expectNoHorizontalOverflow(page);
 });
 
 test("touch targets in the bottom nav are at least 44px", async ({ page }, testInfo) => {

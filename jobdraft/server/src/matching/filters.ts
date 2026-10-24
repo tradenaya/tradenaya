@@ -1,4 +1,5 @@
 import type { Job } from "../jobs/types.js";
+import { industryProblem } from "./industry.js";
 import { locationMatches } from "./locations.js";
 import { parseMinExperience, parseSalaryLpa } from "./parse.js";
 import { companyKey, normalize } from "./text.js";
@@ -42,8 +43,11 @@ export function rejectReason(job: Job, ctx: FilterContext): string | null {
   if (!job.company.trim() || !job.title.trim()) return "missing company or title";
   if (!locationMatches(job, ctx.locations)) return "location";
   if (!titleMatchesAny(job.title, ctx.targetRoles)) return "title";
+  const industry = industryProblem(job);
+  if (industry) return industry;
   const seniority = seniorityMismatch(job.title, ctx.experienceYears);
   if (seniority) return seniority;
+  // Stated minimum may be up to 2 years above the user's; unstated is kept.
   const minExp = parseMinExperience(`${job.title}\n${job.description}`);
   if (minExp !== null && minExp > ctx.experienceYears + 2) return "experience required too high";
   const maxLpa = jobSalaryMaxLpa(job);

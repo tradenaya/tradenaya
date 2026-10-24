@@ -21,13 +21,14 @@ jobdraft/
 │   │   ├── index.ts        startup: env → create DB + migrate → HTTP → cron jobs
 │   │   ├── app.ts          Express app (helmet, CORS, rate limits, routes)
 │   │   ├── config/         env loading, auto-generated secrets, feature flags
-│   │   ├── db/             pool, migrations v1 + v2 (schema_migrations), bootstrap
+│   │   ├── db/             pool, migrations v1–v3 (schema_migrations), bootstrap
 │   │   ├── http/           auth, profile/resume/preferences, automation, gmail OAuth, runs/history, account
 │   │   ├── ai/             Gemini (model fallback, backoff), zod schemas, follow-up writer, mock
 │   │   ├── resume/         PDF checks + text extraction, experience calculation
-│   │   ├── jobs/           Adzuna, JSearch, mock source, shared 6-hour job_cache
-│   │   ├── matching/       rule filters, excluded-company matching (Jaro-Winkler, domains)
-│   │   ├── runs/           run pipeline, safety checks, send queue, tracking, follow-ups, scheduler
+│   │   ├── jobs/           Adzuna, JSearch v5, query planning, daily call caps, shared job_cache
+│   │   ├── matching/       rule filters, role families, industry check, excluded companies
+│   │   ├── runs/           run pipeline + funnel, safety checks, send queue, tracking, follow-ups, scheduler
+│   │   ├── cli/            diagnose (npm run diagnose: why each user is / isn't due)
 │   │   ├── gmail/          OAuth, drafts/send/threads (headers only), MIME builder, mock Gmail
 │   │   ├── storage/        Cloudinary private raw files (real + mock)
 │   │   └── lib/            clock (fake-able), IST scheduling (luxon), job locks, crypto, logger
@@ -79,14 +80,13 @@ npm run test:unit --prefix server   # pure logic only (works without MySQL)
 
 ### Daily run time
 
-Each user picks a time (15-minute steps, any time of day, **India time**, default 9:00 AM). A cron job runs **every minute** under a DB lock and finds users who are due:
-- automation is ON;
-- the profile is complete;
-- Gmail is connected with both permissions;
-- their run time has passed within the last 3 hours;
-- they have no scheduled run yet today (IST).
+Each user picks a time (15-minute steps, any time of day, **India time**, default 9:00 AM). A cron job runs **every minute**. Under a short DB lock it looks at **every user with automation ON** whose run time has passed within the last 3 hours and who has no scheduled run yet today (IST):
+- if the profile is complete and Gmail is connected with both permissions, it claims the run;
+- if something blocks it (Gmail access expired, a permission missing, setup incomplete), it records a **failed run card** saying exactly what to fix: "Today's run couldn't start: reconnect gmail (access expired)…". A missed day is never silent.
 
-It claims each run with a database row that is unique per user per IST date, so nobody ever gets two scheduled runs in a day, even across restarts or several processes.
+Claims are a database row unique per user per IST date, so nobody ever gets two scheduled runs in a day, even across restarts or several processes. The runs themselves are processed **outside** the lock (2 at a time per process), so a slow run never blocks the next minute's pass. Every pass also closes runs stuck in "running" for over 45 minutes, and a run stops itself after 20 minutes. The server logs the registered cron jobs at startup; with `LOG_LEVEL=debug` it also logs each minute how many users were due, blocked or waiting.
+
+**Diagnosis:** `npm run diagnose` (server folder, after a build) prints, for each automation-ON user, their run time, Gmail state, what blocks them, the next run time and their last runs, plus locks and today's job-source usage. It is read-only and prints IDs only.
 
 - **Missed runs.** If the server was down at the user's time, the run happens once when it is back, if that is within 3 hours. Otherwise today is skipped and the next run is tomorrow.
 - **Changing the time.** The new time applies today only if it is still ahead and today's run hasn't happened. Saving never triggers an immediate run, and neither does turning automation on.
@@ -108,10 +108,11 @@ Turning it back ON resumes at the next run time and never revives cancelled foll
 ### A run
 
 1. Track existing applications first.
-2. Fetch postings (Adzuna; JSearch if keyed). The cache is shared across users for 6 hours.
-3. Rule filters, **excluded companies first**: past and current employers from the resume plus the user's "companies to skip", matched by normalised name, contained name, Jaro-Winkler ≥ 0.9, and email or URL domain. Then location, title, seniority, experience, salary, agencies, seen jobs, companies contacted in the last 60 days, and any address ever contacted.
-4. Gemini check for at most 12 jobs. It returns suitability, a 0–100 confidence, scam/agency flags, the real employer behind a portal, the application email, and the subject and body.
-5. Hard safety checks in code:
+2. Fetch postings from every configured source (see **Job sources** below), with a shared cache and daily call caps.
+3. Rule filters, **excluded companies first**: past and current employers from the resume plus the user's "companies to skip", matched by normalised name, contained name, Jaro-Winkler ≥ 0.9, and email or URL domain. Then seen jobs, location (incl. nearby areas such as Navi Mumbai/Thane, Pimpri-Chinchwad, Secunderabad), title (role families: "Product Owner" = "Product Manager", "Technical Program Manager" = "Project Manager"…), non-software domains, seniority (director/head/VP/principal only skipped under 5 years), stated minimum experience (kept if ≤ yours + 2; unstated is kept), salary, agencies, and companies contacted in the last 60 days.
+4. **AI screen**: up to 15 postings per run, 5 per Gemini call, postings that state an email address first. It returns suitability, a 0–100 confidence, scam/agency flags and the real employer behind a portal.
+5. For each **suitable** posting that states an application email: a second Gemini call writes the email (subject, body, the verbatim address). Suitable postings without an email go to **Apply via link** with their apply URL.
+6. Hard safety checks in code:
    - the email is verbatim in the posting and not noreply/example/test;
    - the employer isn't excluded;
    - the body names the company and role;
@@ -119,16 +120,49 @@ Turning it back ON resumes at the next run time and never revives cancelled foll
    - salary is mentioned only if the posting asks for it;
    - the signature is built from the resume.
    A suitable job that fails a check becomes **Apply via link**.
-6. Create the Gmail draft: a unique `Message-ID`, `Reply-To`, UTF-8 subject, plain text (no tracking, no links except LinkedIn) and the resume PDF attached. At most 10 new emails per run.
-7. Classify: **auto-send** only if confidence ≥ 85, there are no flags, all checks passed, and the limits allow it (5 per run, 8 per IST day). Everything else stays a **draft**.
+7. Create the Gmail draft: a unique `Message-ID`, `Reply-To`, UTF-8 subject, plain text (no tracking, no links except LinkedIn) and the resume PDF attached. At most 10 new emails per run.
+8. Classify by the user's **sending mode** (below). In every mode, scam- or agency-flagged emails are never auto-sent, and anything over the daily cap stays a **draft**.
 
-### Sending (fixed anti-spam policy, no settings)
+Every run stores a **funnel** (shown in History, see below), and a run that fetches nothing says why on its card ("Adzuna error 401", "JSearch quota exhausted", "No job source is configured"…).
 
-- **Cancel window.** Auto-sends go out 30 minutes after the run finishes. The dashboard shows "Sending at 9:42 AM" with **Cancel** per email and **Cancel all** per run. A cancelled email stays a normal draft.
+### Job sources
+
+- **Adzuna** (`ADZUNA_APP_ID`, `ADZUNA_APP_KEY`): one search per (role, area) with the role words in the title (`title_only`), `where=<area>`, last 7 days, 50 newest. Areas include alternate names: Bengaluru + Bangalore, Mumbai + Navi Mumbai + Thane, Pune + Pimpri-Chinchwad, Hyderabad + Secunderabad. "Remote (India)" = the role plus "remote" and plus "work from home", keeping only postings that say remote/WFH. Cached 6 hours across users; at most `ADZUNA_DAILY_CAP` (230) calls a day across all users. Adzuna gives description excerpts, so its jobs mostly become **Apply via link**.
+- **JSearch** (RapidAPI v5, `RAPIDAPI_KEY`): always `country=in`, `date_posted=week`, `num_pages=1`, `language=en`; jobs from `data.jobs`, India only, direct apply links preferred, full descriptions (so application emails can be found). Besides the plain search it rotates variants that surface email-apply postings from smaller employers: "startup", "hiring immediate joiner", "send resume", "walk-in". The free quota is small: cached 12 hours, at most `JSEARCH_DAILY_CAP` (6) calls a day across all users and `JSEARCH_MAX_CALLS_PER_RUN` (4) per run, least-recently-searched combinations first. A second page only when the first had 5+ relevant postings. A missing key or a used-up quota is skipped and noted in the funnel.
+
+### Reading the funnel (History)
+
+Each run card shows one line: **Fetched 84 → after filters 12 → suitable 5 → emails 1 → link-only 4**.
+- **Fetched**: unique postings from all sources.
+- **After filters**: what survived the rule filters (tap the funnel to see how many each step removed: already seen, outside your locations, title, not a software role, seniority, experience, salary, agency, past employers, recently emailed, duplicates).
+- **Suitable**: what the AI judged a real fit (up to 15 screened per run; the rest wait for the next run).
+- **Emails**: applications created (drafts + auto-sends). Only postings that state an application email can become emails.
+- **Link-only**: suitable jobs to apply for on the company's site.
+
+Tap **How this run went** for per-source counts and errors, which search variants found email-apply jobs, and every search that ran.
+
+### Sending modes (per user, Setup → under the automation switch)
+
+| Mode | What is sent automatically | Cancel window | Daily cap (IST) |
+|---|---|---|---|
+| **Drafts only** | Nothing. Every email and follow-up is a Gmail draft. | — | — |
+| **Smart send** (default, recommended) | Confidence ≥ 85, no flags, all checks passed (5 per run). | 30 min | 8 |
+| **Send all** | Every suitable email that passes all hard checks. | 30 min | 15 |
+| **Send all instantly** | Every suitable email that passes all hard checks, queued as the run finishes (asks for confirmation). | none (2–4 min gap kept) | 15 |
+
+- The mode only applies while automation is ON; when it's OFF the selector is greyed out ("Turn on automation to use") and the choice is kept. The dashboard shows the current mode next to the switch, with a **Change** link.
+- Changing the mode affects only emails created afterwards. Switching to **Drafts only** cancels every scheduled send and follow-up at once (they stay drafts); switching to a send mode never sends existing drafts.
+- Each email stores the mode it was created in (`run_items.send_mode`) and who sent it (`sent_by`: the queue, or the user by hand). History shows "Sent automatically", "Sent by you" or "Draft – waiting for you".
+- Follow-ups (max 2) are sent automatically only if the original was; in Drafts only they are always drafts. Auto follow-ups get the 30-minute window in Smart send and Send all, none in Send all instantly.
+- Unchanged in every mode: all hard safety checks, excluded companies, 60-day company cooldown, never the same address twice, 10 new emails per run, the 2–4 minute gap, and the 24-hour pause on Gmail rate limits.
+
+### Sending queue
+
+- **Cancel window.** Auto-sends go out 30 minutes after the run finishes (at once in Send all instantly). The dashboard shows "Sending at 9:42 AM" with **Cancel** per email and **Cancel all** per run. A cancelled email stays a normal draft.
 - **DB-backed queue.** It runs every minute under a lock and survives restarts. It sends one email at a time per user, with a random 2–4 minute gap, using Gmail's `drafts.send`.
 - **Never twice.** Each item is claimed atomically (`scheduled → sending`), so an email can never be sent twice.
 - **Retries.** At most 3 attempts, at least 15 minutes apart; then the item is **failed** for good.
-- **Re-checks right before each send.** Automation is still ON, Gmail is connected, the draft still exists, the company isn't excluded, and the company/address wasn't contacted by another item.
+- **Re-checks right before each send.** Automation is still ON, the user's **current** mode isn't Drafts only (else: skipped, "mode changed to drafts only"), Gmail is connected, the draft still exists, the company isn't excluded, and the company/address wasn't contacted by another item.
 - **Gmail rate limits.** A rate-limit or quota error pauses all sending for that user for 24 hours. Remaining items stay drafts and the dashboard shows a warning.
 
 ### Tracking (headers only)

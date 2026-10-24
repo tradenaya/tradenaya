@@ -360,7 +360,7 @@ describe("account", () => {
     const again = await registerUser(newAgent(), { email });
     expect(again.user.id).not.toBe(first.user.id);
     const profile = await again.agent.get("/api/profile").expect(200);
-    expect(profile.body.complete).toEqual({ resume: false, preferences: false, gmail: false });
+    expect(profile.body.complete).toEqual({ geminiKey: true, resume: false, preferences: false, gmail: false });
     expect(profile.body.resume).toBeNull();
     expect(profile.body.excludedCompanies).toEqual([]);
     expect(profile.body.automation.enabled).toBe(false);
@@ -369,7 +369,7 @@ describe("account", () => {
 
   it("a new account starts with an incomplete profile and automation off", async () => {
     const res = await (await registerUser(newAgent())).agent.get("/api/profile").expect(200);
-    expect(res.body.complete).toEqual({ resume: false, preferences: false, gmail: false });
+    expect(res.body.complete).toEqual({ geminiKey: true, resume: false, preferences: false, gmail: false });
     expect(res.body.gmail.status).toBe("not_connected");
     expect(res.body.automation).toMatchObject({ enabled: false });
     expect(res.body.preferences.runTime).toBe("09:00");

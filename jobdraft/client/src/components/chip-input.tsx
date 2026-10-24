@@ -15,13 +15,14 @@ export function RemovableChip({ label, onRemove }: { label: string; onRemove: ()
   );
 }
 
-/** Role chips: remove with ×, add by typing (Enter or comma). */
+/** Role chips: remove with ×, add by typing (Enter or comma) or one tap on a suggestion. */
 export function ChipInput({
   id,
   values,
   onChange,
   max,
   suggestions = [],
+  related = [],
   invalid,
   describedBy,
 }: {
@@ -29,7 +30,10 @@ export function ChipInput({
   values: string[];
   onChange: (v: string[]) => void;
   max: number;
+  /** From the resume. */
   suggestions?: string[];
+  /** Adjacent roles worth considering. */
+  related?: string[];
   invalid?: boolean;
   describedBy?: string;
 }) {
@@ -45,6 +49,7 @@ export function ChipInput({
   }
 
   const unused = suggestions.filter((s) => !has(s));
+  const relatedUnused = related.filter((s) => !has(s) && !suggestions.some((x) => x.toLowerCase() === s.toLowerCase()));
   return (
     <div>
       {values.length > 0 && (
@@ -80,25 +85,31 @@ export function ChipInput({
           <span className="hidden sm:inline">Add</span>
         </Button>
       </div>
-      {unused.length > 0 && !full && (
-        <div className="mt-2">
-          <p className="mb-1 text-sm text-slate-600">Suggested from your resume:</p>
-          <ul className="flex flex-wrap gap-2">
-            {unused.map((s) => (
-              <li key={s}>
-                <button
-                  type="button"
-                  onClick={() => add(s)}
-                  className="inline-flex min-h-11 items-center gap-1 rounded-full border border-dashed border-slate-400 px-3 text-[15px] text-slate-800 hover:bg-slate-50"
-                >
-                  <Plus className="size-4" aria-hidden />
-                  {s}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {!full && <SuggestionGroup title="Suggested from your resume:" items={unused} onAdd={add} />}
+      {!full && <SuggestionGroup title="Related roles you could also target:" items={relatedUnused} onAdd={add} testId="related-roles" />}
+    </div>
+  );
+}
+
+function SuggestionGroup({ title, items, onAdd, testId }: { title: string; items: string[]; onAdd: (s: string) => void; testId?: string }) {
+  if (!items.length) return null;
+  return (
+    <div className="mt-2" data-testid={testId}>
+      <p className="mb-1 text-sm text-slate-600">{title}</p>
+      <ul className="flex flex-wrap gap-2">
+        {items.map((s) => (
+          <li key={s}>
+            <button
+              type="button"
+              onClick={() => onAdd(s)}
+              className="inline-flex min-h-11 items-center gap-1 rounded-full border border-dashed border-slate-400 px-3 text-[15px] text-slate-800 hover:bg-slate-50"
+            >
+              <Plus className="size-4" aria-hidden />
+              {s}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

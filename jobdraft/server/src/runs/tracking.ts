@@ -97,7 +97,8 @@ export async function trackItem(item: TrackedItem, token: string, userAddress: s
   // Sent? (the queue, or the user pressing Send in Gmail)
   const first = t.sent[0];
   if (first && item.send_state !== "sent") {
-    await execute("UPDATE run_items SET send_state = 'sent', sent_at = ?, gmail_message_id = ? WHERE id = ? AND send_state <> 'sent'", [new Date(first.internalDate), first.id, item.id]);
+    // Found sent in Gmail without the queue having sent it: the user sent the draft by hand.
+    await execute("UPDATE run_items SET send_state = 'sent', sent_by = COALESCE(sent_by, 'user'), sent_at = ?, gmail_message_id = ? WHERE id = ? AND send_state <> 'sent'", [new Date(first.internalDate), first.id, item.id]);
     item.send_state = "sent";
     item.sent_at = new Date(first.internalDate);
   } else if (!first && !t.hasDraft && item.send_state !== "sending") {
