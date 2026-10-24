@@ -141,6 +141,10 @@ export interface CoinSwitchClientOptions {
   // Min spacing enforced between consecutive calls on the same endpoint bucket.
   // CoinSwitch caps per endpoint per key (e.g. 20/60s), so we pace below it.
   rateLimitOverrides?: Record<string, number>;
+  /** Extra attempts for READ calls on network errors / 429 / 5xx (default 2). */
+  readRetries?: number;
+  /** First retry delay in ms; each further retry waits 3× longer (default 400). */
+  retryDelayMs?: number;
 }
 
 const DEFAULT_RATE_LIMITS: Record<string, number> = {
@@ -211,6 +215,19 @@ class RateLimiter {
 
 const rateLimiter = new RateLimiter();
 
+/** POST endpoints that only READ (safe to retry). */
+const READ_POST_ENDPOINTS = new Set(["/futures/orders/open", "/futures/orders/closed", "/futures/transactions"]);
+
+/** Network failures, timeouts, rate limits and exchange server errors — worth one more try. */
+export function isTransientError(error: unknown): boolean {
+  const e = error as { name?: string; message?: string; httpStatus?: number; code?: string; cause?: { code?: string } };
+  if (e?.httpStatus != null) return e.httpStatus === 429 || e.httpStatus >= 500;
+  if (e?.name === "AbortError" || e?.name === "TimeoutError") return true;
+  const code = e?.code ?? e?.cause?.code ?? "";
+  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR/i.test(code) ||
+    /fetch failed|network|socket hang up|timed? ?out|other side closed/i.test(e?.message ?? "");
+}
+
 export class CoinSwitchClient {
   constructor(private readonly options: CoinSwitchClientOptions = {}) {}
 
@@ -231,6 +248,26 @@ export class CoinSwitchClient {
       }
     }
 
+    // Reads are safe to repeat; a single network hiccup must not turn into a
+    // "position read failed" / "no stop-loss found" alert. Order placement and
+    // cancels are never retried here (no duplicate orders).
+    const isRead = method === "GET" || READ_POST_ENDPOINTS.has(endpoint);
+    const attempts = isRead ? (this.options.readRetries ?? 2) + 1 : 1;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, (this.options.retryDelayMs ?? 400) * 3 ** (attempt - 1)));
+      try {
+        return await this.send(method, endpoint, params, userId);
+      } catch (error) {
+        lastError = error;
+        if (!isTransientError(error)) throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exchange params are loosely typed JSON, like call()'s
+  private async send(method: "GET" | "POST" | "DELETE", endpoint: string, params: Record<string, any>, userId: number) {
     const budget = rateBudget(method, endpoint);
     if (budget) {
       const intervalMs = this.options.rateLimitOverrides?.[budget.key] ?? budget.intervalMs;
@@ -257,10 +294,10 @@ export class CoinSwitchClient {
         body: method === "GET" ? undefined : JSON.stringify(params),
         signal: controller.signal,
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        const message = extractErrorMessage(data);
-        throw new Error(message);
+        const message = extractErrorMessage(data) || `HTTP ${res.status}`;
+        throw Object.assign(new Error(message), { httpStatus: res.status });
       }
       return data;
     } finally {
@@ -463,6 +500,11 @@ export class CoinSwitchClient {
     const ticker = await this.getTicker(userId, symbol);
     const price = Number(ticker?.c ?? ticker?.last ?? ticker?.close ?? ticker?.last_price ?? null);
     return Number.isFinite(price) && price > 0 ? price : null;
+  }
+
+  /** The raw 24h ticker of every futures pair (`{ data: { BTCUSDT: {...}, ... } }`). */
+  async getAllPairsTicker(userId: number): Promise<{ data?: unknown }> {
+    return this.call("GET", "/futures/all-pairs/ticker", { exchange: "EXCHANGE_2" }, userId);
   }
 
   /** Fetch the full futures ticker row for one symbol (market-wide, not account-specific). */

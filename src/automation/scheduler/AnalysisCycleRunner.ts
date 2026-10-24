@@ -71,7 +71,7 @@ export function describeIdleScan(summary: AutoScanSummary | null): string {
 
 /** Risk rejections that come from the account, not the coin (every coin would fail the same way). */
 export function isAccountLevelRejection(reason: string): boolean {
-  return /daily loss limit|daily trade limit|maximum.*(positions|bots)|wallet balance|available balance|free balance|capital must be greater/i.test(reason);
+  return /daily loss limit|daily trade limit|maximum.*(positions|bots)|wallet balance|available balance|free balance|capital must be greater|could not read open positions/i.test(reason);
 }
 
 function normalizeErrorMessage(message: string): string {
@@ -439,6 +439,15 @@ export class AnalysisCycleRunner {
     // Another bot (or a manual trade) already holds this coin: on the exchange
     // two trades on one coin merge into a single position, so skip it and let
     // the scan try the next coin.
+    // Fail safe: if the account's positions / orders could not be read, we
+    // can't know whether another bot already trades this coin (two trades on
+    // one coin merge into a single position) or how much is at risk — don't
+    // trade this cycle. Found by the end-to-end simulation (2 bots on BTC).
+    if (risk.accountUnreadable) {
+      const reason = "Could not read open positions / orders from CoinSwitch right now — not trading this cycle (will retry)";
+      this.rejectCandidate(bot, cycleSymbol, index, reason, "risk");
+      return { status: "CONTINUE", reason };
+    }
     if (risk.symbolBusy) {
       const reason = `${cycleSymbol} already has an open trade or order (another bot) — skipped`;
       this.rejectCandidate(bot, cycleSymbol, index, reason, "risk");
@@ -531,7 +540,7 @@ export class AnalysisCycleRunner {
         // margin…). That says nothing about the other coins — try the next one.
         // Previously this ended the whole cycle, so a top-ranked coin the
         // account can't afford (BTC) blocked the bot from every other coin.
-        if (!executionResult.executionId && !executionResult.entryOrderId) {
+        if (executionResult.coinSkipped && !executionResult.entryOrderId) {
           await this.deps.stateManager.transition(bot.id, "ORDER_PENDING", "RUNNING");
           await this.deps.stateManager.transition(bot.id, "RUNNING", "ANALYZING");
           return { status: "CONTINUE", reason: executionResult.message };
@@ -714,13 +723,16 @@ export class AnalysisCycleRunner {
     return message;
   }
 
-  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number; symbolBusy: boolean }> {
-    const [wallet, exchangePositions, openOrders, daily] = await Promise.all([
+  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number; symbolBusy: boolean; accountUnreadable: boolean }> {
+    const [wallet, positionsRead, ordersRead, daily] = await Promise.all([
       this.deps.client.getWalletSnapshot(bot.userId).catch(() => null),
-      this.deps.client.getPositions(bot.userId).catch(() => []),
-      this.deps.client.getOpenOrders(bot.userId).catch(() => []),
+      this.deps.client.getPositions(bot.userId).catch(() => null),
+      this.deps.client.getOpenOrders(bot.userId).catch(() => null),
       this.deps.store.getDailyStats(bot.userId),
     ]);
+    const accountUnreadable = positionsRead == null || ordersRead == null;
+    const exchangePositions = positionsRead ?? [];
+    const openOrders = ordersRead ?? [];
 
     // Count the OTHER running bots: this bot is itself running, so including it
     // would reject every trade once MAX_RUNNING_BOTS bots are on.
@@ -798,6 +810,7 @@ export class AnalysisCycleRunner {
       decision: this.deps.riskManager.evaluate(input),
       allocatedCapital,
       symbolBusy: symbolInUse(String(plan.symbol ?? config.symbol), exchangePositions, openOrders),
+      accountUnreadable,
     };
   }
 

@@ -27,7 +27,7 @@ const plan = (symbol: string, price: number): TradePlan => ({
   riskRewardRatio: 15, confidence: 0.7, symbol, reason: "breakout", expiryTime: new Date(Date.now() + 4 * 3600e3).toISOString(),
 });
 
-function setup(executeImpl: (input: { plan: TradePlan }) => Promise<unknown>, wallet = 116) {
+function setup(executeImpl: (input: { plan: TradePlan }) => Promise<unknown>, wallet = 116, readsFail = false) {
   const execute = vi.fn(executeImpl);
   const transition = vi.fn(async () => true);
   const opp = (symbol: string, price: number) => ({ symbol, side: "LONG", score: 80, confidence: 0.7, price, atrPct: 1, trend: "UP", factors: {}, leverage: 5, instrument: null });
@@ -44,7 +44,7 @@ function setup(executeImpl: (input: { plan: TradePlan }) => Promise<unknown>, wa
     lifecycle: new Proxy({}, { get: () => vi.fn(async () => 0) }),
     client: {
       getWalletSnapshot: vi.fn(async () => ({ available: wallet, total: wallet, blocked: 0, positionMargin: 0, openOrderMargin: 0, equity: null })),
-      getPositions: vi.fn(async () => []),
+      getPositions: vi.fn(async () => (readsFail ? Promise.reject(new Error("fetch failed")) : [])),
       getOpenOrders: vi.fn(async () => []),
     },
     engine: vi.fn(() => ({
@@ -69,7 +69,7 @@ describe("a coin refused before ordering never blocks the other coins", () => {
   it("BTC below the minimum order → the bot goes on and trades the next coin", async () => {
     const { runner, execute } = setup(async ({ plan: p }) =>
       p.symbol === "BTCUSDT"
-        ? { success: false, executionId: null, entryOrderId: null, state: "CANCELLED", message: "Position size 0 is below the exchange minimum (0.001) for BTCUSDT; raising it to 0.001 would risk ~1.73 USDT at SL, above the Max Risk limit of 1.16 USDT — trade skipped." }
+        ? { success: false, executionId: 31, entryOrderId: null, state: "CANCELLED", coinSkipped: true, message: "Position size 0 is below the exchange minimum (0.001) for BTCUSDT; raising it to 0.001 would risk ~1.73 USDT at SL, above the Max Risk limit of 1.16 USDT — trade skipped." }
         : { success: true, executionId: 77, entryOrderId: "o-1", state: "MONITORING_ENTRY", message: "resting" },
     );
     await runner.runCycle(9);
@@ -83,11 +83,24 @@ describe("a coin refused before ordering never blocks the other coins", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("a cancellation that is NOT a coin skip (e.g. lost the submission claim) ends the cycle", async () => {
+    const { runner, execute } = setup(async () => ({ success: false, executionId: 56, entryOrderId: null, state: "CANCELLED", message: "another worker holds this submission" }));
+    await runner.runCycle(9);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("no free balance is an account-level wait: stop scanning, plain message", async () => {
     const { runner, execute } = setup(async () => ({ state: "MONITORING_ENTRY" }), 0);
     const result = await runner.runCycle(9);
     expect(execute).not.toHaveBeenCalled();
     expect(result.message).toMatch(/No free balance in the wallet right now/);
     expect(isAccountLevelRejection("No free balance in the wallet right now")).toBe(true);
+  });
+
+  it("if open positions can't be read, it does NOT trade (could double up on a coin another bot holds)", async () => {
+    const { runner, execute } = setup(async () => ({ state: "MONITORING_ENTRY", entryOrderId: "o" }), 116, true);
+    const result = await runner.runCycle(9);
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.message).toMatch(/Could not read open positions/);
   });
 });

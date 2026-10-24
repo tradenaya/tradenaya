@@ -136,6 +136,13 @@ export class AutomationEngine {
     }
 
     step("plan", `Plan ready — ${plan.action} ${config.symbol} @ ${usdt(plan.limitPrice ?? market.price)} | SL ${usdt(plan.stopLoss)} · TP ${usdt(plan.takeProfit)} | R:R ${plan.riskRewardRatio}`);
+    // Wallet-% bots are sized from the wallet's FREE balance at order time
+    // (live risk gate). Their saved `capital` is only the amount at creation, so
+    // a pre-check against it could drop valid trades — skip it for them.
+    if (config.capitalMode === "percent") {
+      step("risk", "Position size is worked out from the free wallet balance when the order is placed.");
+      return { signal: plan.action, plan, analysis };
+    }
     const risk = this.riskManager.assess(
       {
         capital: config.capital,

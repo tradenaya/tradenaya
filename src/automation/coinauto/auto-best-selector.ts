@@ -117,8 +117,20 @@ export async function fetchEligibleCoins(
     undefined,
     { exchange: "EXCHANGE_2" },
   );
+  return parseEligibleCoins(ticker);
+}
 
-  const rawRows = ticker.data ?? {};
+/**
+ * Same list through the shared CoinSwitch client, so it gets the client's
+ * IPv4 / timeout / retry / rate-limit handling like every other call.
+ */
+export async function fetchEligibleCoinsViaClient(client: Pick<CoinSwitchClient, "getAllPairsTicker">, userId: number): Promise<EligibleCoin[]> {
+  return parseEligibleCoins(await client.getAllPairsTicker(userId));
+}
+
+/** 24h ticker response → tradable coins sorted by quote volume. */
+export function parseEligibleCoins(ticker: { data?: unknown } | null | undefined): EligibleCoin[] {
+  const rawRows = ticker?.data ?? {};
   const rows = Array.isArray(rawRows)
     ? rawRows.reduce<Record<string, TickerRow>>((acc, row) => {
         const candidate = (row ?? {}) as TickerRow;
@@ -147,6 +159,59 @@ export async function fetchEligibleCoins(
     })
     .filter((c) => c.symbol && c.symbol.length >= 5 && c.quoteVolume24h > 0)
     .sort((a, b) => b.quoteVolume24h - a.quoteVolume24h);
+}
+
+const COIN_LIST_FRESH_MS = 60_000;
+const COIN_LIST_STALE_OK_MS = 30 * 60_000;
+const COIN_LIST_TIMEOUT_MS = 12_000;
+const coinListCache = new Map<number, { at: number; coins: EligibleCoin[] }>();
+const coinListInflight = new Map<number, Promise<EligibleCoin[]>>();
+
+/**
+ * The coin list (24h ticker of every pair) is the same for all of a user's
+ * bots. Fetch it at most once a minute per user (shared by every bot), with a
+ * timeout and one retry; if CoinSwitch is briefly unreachable, keep scanning
+ * with the last good list (up to 30 min old) instead of skipping the cycle.
+ */
+export async function cachedEligibleCoins(userId: number, fetcher: () => Promise<EligibleCoin[]>, now = Date.now()): Promise<EligibleCoin[]> {
+  const hit = coinListCache.get(userId);
+  if (hit && now - hit.at < COIN_LIST_FRESH_MS) return hit.coins;
+  const running = coinListInflight.get(userId);
+  if (running) return running;
+  const withTimeout = () =>
+    Promise.race([
+      fetcher(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("coin list request timed out")), COIN_LIST_TIMEOUT_MS)),
+    ]);
+  const job = (async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const coins = await withTimeout();
+        if (coins.length > 0) {
+          coinListCache.set(userId, { at: Date.now(), coins });
+          return coins;
+        }
+        lastError = new Error("empty coin list");
+      } catch (error) {
+        lastError = error;
+      }
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 500));
+    }
+    if (hit && Date.now() - hit.at < COIN_LIST_STALE_OK_MS) {
+      console.warn(`[AUTO BEST] coin list unavailable (${lastError instanceof Error ? lastError.message : String(lastError)}) — using the list from ${Math.round((Date.now() - hit.at) / 1000)}s ago`);
+      return hit.coins;
+    }
+    throw lastError;
+  })().finally(() => coinListInflight.delete(userId));
+  coinListInflight.set(userId, job);
+  return job;
+}
+
+/** Test hook. */
+export function resetCoinListCache(): void {
+  coinListCache.clear();
+  coinListInflight.clear();
 }
 
 /** Bounded-concurrency map that never fires an uncontrolled `Promise.all`. */
@@ -234,7 +299,7 @@ export class AutoBestSelector {
     console.log(`[AUTO BEST] TICKERS_FETCH_START userId=${userId}`);
     const fetchCoins =
       this.deps.fetchEligibleCoins ??
-      ((apiKey: string, apiSecret: string) => fetchEligibleCoins(apiKey, apiSecret));
+      (() => cachedEligibleCoins(userId, () => fetchEligibleCoinsViaClient(this.deps.client, userId)));
     let eligible: EligibleCoin[];
     try {
       eligible = await fetchCoins(keys.apiKey, keys.apiSecret);
