@@ -1,5 +1,10 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Before ANY outbound connection: the VPS's IPv6 is broken, so CoinSwitch
+    // calls must go over IPv4 (see src/lib/network/ipv4.ts).
+    const { preferIpv4 } = await import("@/lib/network/ipv4");
+    preferIpv4();
+
     const { positionMonitor } = await import("@/automation/position/PositionMonitor");
     const { ensureTables } = await import("@/automation/position/bootstrap");
     try {

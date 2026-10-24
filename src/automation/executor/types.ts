@@ -96,6 +96,12 @@ export interface OrderExecutorResult {
   remainingQuantity?: number | null;
   protectiveStatus: ProtectiveStatus;
   requiresEmergencyProtection: boolean;
+  /**
+   * True when the trade was refused for THIS coin before anything was sent to
+   * the exchange (below the minimum order at the bot's risk, no safe
+   * leverage, not enough free margin). The caller may try another coin.
+   */
+  coinSkipped?: boolean;
   message: string;
 }
 

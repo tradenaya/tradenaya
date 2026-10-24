@@ -387,7 +387,9 @@ export class PositionRecovery {
     const retries = this.config.emergencyRetries ?? 2;
     for (let i = 0; i < retries; i++) {
       const { status } = await this.protective.placeProtection(execution, execution.filledQuantity);
-      if (status !== "FAILED" && status !== "NONE") return true;
+      // Recovered only once the STOP-LOSS is on the exchange: a take-profit
+      // alone (TP_ONLY) must not mark the position protected.
+      if (status === "PLACED" || status === "SL_ONLY") return true;
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return false;

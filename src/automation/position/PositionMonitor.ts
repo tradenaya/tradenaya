@@ -338,6 +338,7 @@ export class PositionMonitor {
       await this.executionStore.updateState(position.executionId, "ENTRY_FILLED");
       await this.stateManager.transition(position.id, "ENTRY_PENDING", "ENTRY_EXECUTED");
       await this.log(position, "ENTRY_EXECUTED", `entry order ${orderId} filled (${filledQuantity ?? "n/a"})`);
+      await this.protectAfterFill(position, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null);
     } else if (kind === "PARTIAL") {
       // Partial fill: a position exists for the filled portion while the
       // remainder keeps resting. Track the ACTUAL filled quantity and the
@@ -353,6 +354,7 @@ export class PositionMonitor {
       await this.executionStore.updateState(position.executionId, "PARTIALLY_FILLED");
       await this.stateManager.transition(position.id, "ENTRY_PENDING", "ENTRY_EXECUTED");
       await this.log(position, "PARTIAL_EXECUTION", `entry order ${orderId} partially filled: ${filledQuantity ?? "n/a"}${remainingQuantity != null ? ` (${remainingQuantity} remaining — remainder stays resting until fill or expiry)` : ""}`);
+      await this.protectAfterFill(position, filledQuantity ?? snapshot.exchangePosition?.quantity ?? null);
     } else if (kind === "CANCELLED") {
       await this.closeUnfilledEntry(position, `entry order ${status}`);
     } else if (open) {
@@ -407,9 +409,15 @@ export class PositionMonitor {
 
     const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
     if (!execution?.expiresAt || Date.now() < execution.expiresAt) return;
+    // Fully filled: there is no remainder to cancel.
+    if (this.remainingQuantity(position, execution) === 0) return;
 
     const order = await this.client.getOrderStatus(position.userId, orderId).catch(() => null);
-    const kind = classifyStatus(order?.status);
+    // Status unreadable (network / exchange hiccup): don't fire a blind cancel
+    // every tick — on a filled order it just fails and floods the log. Retry
+    // when the status can be read.
+    if (!order?.status) return;
+    const kind = classifyStatus(order.status);
     if (kind === "FILLED" || kind === "CANCELLED") return;
 
     const cancelled = await this.client.cancelOrder(position.userId, orderId).catch(() => false);
@@ -417,6 +425,36 @@ export class PositionMonitor {
       await this.log(position, "ENTRY_EXPIRY", `entry order remainder expired after the configured orderExpiryMinutes and was cancelled (remaining ${this.remainingQuantity(position, execution) ?? "n/a"})`);
     } else {
       await this.log(position, "ENTRY_EXPIRY", `expiry cancel failed for entry order remainder ${orderId}; will retry`);
+    }
+  }
+
+  /**
+   * A resting entry just filled: place its stop-loss and take-profit NOW, as
+   * the normal next step. Previously nothing did, so the next check found no
+   * protection, raised an "UNPROTECTED" alert (Telegram) and placed it through
+   * the emergency path — a false alarm and a gap without a stop on every
+   * resting-entry fill. placeProtection is idempotent (it skips orders already
+   * on the exchange), so a later check never duplicates them.
+   */
+  private async protectAfterFill(position: PositionRecord, filledQuantity: number | null): Promise<void> {
+    const execution = await this.executionStore.getExecution(position.executionId).catch(() => null);
+    if (!execution) return;
+    const result = await this.protective
+      .placeProtection({ ...execution, stopLoss: position.stopLoss ?? execution.stopLoss, takeProfit: position.takeProfit ?? execution.takeProfit }, filledQuantity ?? execution.filledQuantity)
+      .catch(() => null);
+    if (result?.slPlaced) {
+      const fresh = await this.store.getPosition(position.id);
+      if (fresh) {
+        position.stopLossOrderId = fresh.stopLossOrderId;
+        position.takeProfitOrderId = fresh.takeProfitOrderId;
+        await this.stateManager.transition(position.id, fresh.state, "PROTECTED");
+        position.state = "PROTECTED";
+      }
+      await this.log(position, "PROTECTED", `entry filled — stop-loss${result.tpPlaced ? " and take-profit" : ""} placed on the exchange`);
+    } else {
+      // Not placed (e.g. exchange hiccup): the protection check on the next
+      // pass places it through the normal re-protection path.
+      await this.log(position, "PROTECTION_PENDING", "entry filled — placing stop-loss / take-profit did not succeed yet; retrying on the next check");
     }
   }
 
@@ -644,7 +682,19 @@ export class PositionMonitor {
         await this.log(position, "ORDERS_READ_FAILED", "open orders read failed — cannot verify protection; skipping re-protection until reads succeed");
         return;
       }
-      const wasProtected = position.state === "PROTECTED" || position.state === "TRAILING" || position.state === "ENTRY_EXECUTED";
+      if (protection.hasStopLoss) {
+        // The stop-loss is in place, only the take-profit is missing (e.g. a
+        // take-profit move failed): the position is not at risk, so re-place it
+        // quietly — no "UNPROTECTED" alarm — and carry on managing the trade.
+        await this.log(position, "TAKE_PROFIT_MISSING", `take-profit missing (stop-loss in place) — re-placing it: ${protection.issues.join("; ")}`);
+        await this.recovery.emergencyProtect(position.executionId);
+      }
+    }
+
+    if (!protection.valid && !protection.hasStopLoss) {
+      // Alert only when protection that WAS in place went missing. A just-filled
+      // entry (ENTRY_EXECUTED) is still being protected — re-place quietly.
+      const wasProtected = position.state === "PROTECTED" || position.state === "TRAILING";
       if (wasProtected && (await this.stateManager.transition(position.id, position.state, "UNPROTECTED", protection.issues.join("; ")))) {
         await this.log(position, "UNPROTECTED", `position unprotected: ${protection.issues.join("; ")}`);
         await this.notify(position, "POSITION_UNPROTECTED", `position ${position.symbol} is UNPROTECTED: ${protection.issues.join("; ")}`);

@@ -194,6 +194,7 @@ export class OrderExecutorService {
           protectiveStatus: "NONE",
           requiresEmergencyProtection: false,
           message,
+          coinSkipped: true,
         };
       }
       leverage = resolved.leverage;
@@ -244,6 +245,7 @@ export class OrderExecutorService {
         protectiveStatus: "NONE",
         requiresEmergencyProtection: false,
         message,
+        coinSkipped: true,
       };
     }
     console.log(
@@ -257,7 +259,11 @@ export class OrderExecutorService {
     // their wallet (some of which can be locked in open orders/positions).
     const preflight = await this.checkFreeMargin(effectiveInput, normalized);
     if (!preflight.ok) {
-      await this.notify("ENTRY_CANCELLED", input, 0, preflight.message);
+      // A routine skip for this coin (below its minimum order at the bot's
+      // risk, or the wallet's free money is in other trades). Logged on the
+      // cycle, but not saved as a notification every cycle (production: 262 in
+      // two days).
+      console.log(`[executor] ${symbol} skipped before ordering: ${preflight.message}`);
       return {
         success: false,
         executionId: null,
@@ -270,6 +276,7 @@ export class OrderExecutorService {
         protectiveStatus: "NONE",
         requiresEmergencyProtection: false,
         message: preflight.message,
+        coinSkipped: true,
       };
     }
 
@@ -325,8 +332,9 @@ export class OrderExecutorService {
     try {
       if (!normalized.ok || normalized.quantity === undefined || !normalized.plan) {
         await this.store.updateState(executionId, "CANCELLED", normalized.message);
-        await this.notify("ENTRY_CANCELLED", input, executionId, normalized.message);
-        return this.result(executionId, "CANCELLED", null, "NONE", false, normalized.message);
+        // Routine skip (this coin's minimum order doesn't fit the bot's risk):
+        // logged on the execution, but not a notification every cycle.
+        return { ...(await this.result(executionId, "CANCELLED", null, "NONE", false, normalized.message)), coinSkipped: true };
       }
 
       const orderId = await this.lifecycle.submitEntry(executionId, input.userId, input.botId, normalized.plan, normalized.quantity);

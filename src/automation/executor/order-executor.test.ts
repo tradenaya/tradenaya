@@ -361,3 +361,23 @@ describe("OrderExecutorService.execute — liquidation-safe leverage downshift",
     expect(result.state).toBe("ENTRY_FILLED");
   });
 });
+describe("OrderExecutorService.execute — coin skipped before ordering (production BTC case)", () => {
+  it("below the minimum order at the bot's risk: marked coinSkipped, nothing sent, no notification", async () => {
+    // BTC at 84,505 with a ~2% stop; risk allows 0 BTC but the minimum is 0.001
+    const { result, store, client } = await run(
+      {
+        quantity: 0,
+        leverage: 17,
+        maxRiskAmount: 1.16,
+        allocatedCapital: 116,
+        plan: plan({ symbol: "BTCUSDT", limitPrice: 84505.4, entryPrice: 84505.4, stopLoss: 82770, takeProfit: 110000 }),
+      },
+      { instrument: instrument({ symbol: "BTCUSDT", min_base_quantity: "0.001", base_quantity_step_size: "0.001", lot_size: "0.001", quantity_precision: 3, price_precision: 1 }) },
+    );
+    expect(result.state).toBe("CANCELLED");
+    expect(result.coinSkipped).toBe(true);
+    expect(result.message).toMatch(/below the exchange minimum/);
+    expect(entryOrderCalls(client)).toHaveLength(0);
+    expect(store.saveNotification).not.toHaveBeenCalled();
+  });
+});

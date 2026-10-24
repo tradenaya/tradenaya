@@ -131,10 +131,18 @@ export class AutomationEngine {
 
     if (plan.action === "WAIT") {
       step("plan", `Planner skipped the trade: ${plan.reason}`);
-      return { signal: "WAIT", analysis };
+      // Say WHY (the strategy summary alone — "LONG breakout on X" — hid the reason).
+      return { signal: "WAIT", analysis: { ...analysis, summary: `${decision.signal === "SELL" ? "Short" : "Long"} setup found but not taken — ${plan.reason}` } };
     }
 
     step("plan", `Plan ready — ${plan.action} ${config.symbol} @ ${usdt(plan.limitPrice ?? market.price)} | SL ${usdt(plan.stopLoss)} · TP ${usdt(plan.takeProfit)} | R:R ${plan.riskRewardRatio}`);
+    // Wallet-% bots are sized from the wallet's FREE balance at order time
+    // (live risk gate). Their saved `capital` is only the amount at creation, so
+    // a pre-check against it could drop valid trades — skip it for them.
+    if (config.capitalMode === "percent") {
+      step("risk", "Position size is worked out from the free wallet balance when the order is placed.");
+      return { signal: plan.action, plan, analysis };
+    }
     const risk = this.riskManager.assess(
       {
         capital: config.capital,
@@ -151,7 +159,7 @@ export class AutomationEngine {
 
     if (!risk.allowed) {
       step("risk", `Risk check failed: ${risk.reason}`);
-      return { signal: "WAIT", analysis };
+      return { signal: "WAIT", analysis: { ...analysis, summary: `${decision.signal === "SELL" ? "Short" : "Long"} setup found but the risk check failed — ${risk.reason}` } };
     }
 
     step("risk", `Position sizing check passed — position size ${risk.positionSize} (${risk.reason ?? "within limits"}). Live account risk gate (daily-loss / exposure) runs after planning.`);
