@@ -1,4 +1,5 @@
 import type { CoinSwitchClient } from "@/automation/executor/client";
+import { runWithTradingMode } from "@/automation/paper/mode";
 import type { BotLifecycleService, BotRuntimeState } from "@/automation/service/bot-lifecycle";
 import { SchedulerStore } from "./SchedulerStore";
 import { SchedulerStateManager } from "./SchedulerStateManager";
@@ -22,7 +23,9 @@ export class SchedulerRecovery {
     const bots = await this.deps.store.lifecycle.getBotsByDesiredStatus(["RUNNING", "PAUSED"]);
     for (const bot of bots) {
       try {
-        await this.recoverBot(bot);
+        // Startup runs in LIVE mode: recover each bot in ITS mode, so a paper
+        // bot's orders are looked up on the paper exchange, never on CoinSwitch.
+        await runWithTradingMode(bot.tradingMode === "PAPER" ? "PAPER" : "LIVE", () => this.recoverBot(bot));
       } catch (error) {
         console.error(`SchedulerRecovery: failed to recover bot ${bot.id}`, error);
       }
