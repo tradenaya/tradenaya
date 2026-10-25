@@ -64,7 +64,10 @@ export function adzunaQueries(pairs: SearchPair[]): AdzunaQuery[] {
           { role: r, location, titleOnly: r, what: "remote", variant: "remote", remoteOnly: true },
           { role: r, location, titleOnly: r, what: "work from home", variant: "wfh", remoteOnly: true },
         ]
-      : searchAreas(location).map((where) => ({ role: r, location, titleOnly: r, where, variant: "plain" as const, remoteOnly: false }));
+      : // Main city only: Adzuna geocodes nearby areas itself, and searching every alias
+        // (Navi Mumbai, Thane…) more than doubled the calls and hit its per-minute/weekly limits.
+        // Location matching still accepts those areas.
+        searchAreas(location).slice(0, 1).map((where) => ({ role: r, location, titleOnly: r, where, variant: "plain" as const, remoteOnly: false }));
     for (const q of qs) {
       const key = `${normalize(adzunaLabel(q))}|${normalize(q.where ?? "")}`;
       if (!out.has(key)) out.set(key, q);

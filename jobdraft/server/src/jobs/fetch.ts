@@ -11,6 +11,7 @@ import { isRemoteLocation } from "../matching/locations.js";
 import { normalize } from "../matching/text.js";
 import { MAX_QUERY_REPORTS, type QueryReport, type SourceReport } from "../runs/funnel.js";
 import { fetchAdzuna, keepForQuery } from "./adzuna.js";
+import { sleep } from "../lib/errors.js";
 import { SourceHttpError, isQuotaStatus } from "./errors.js";
 import { fetchJSearchPage } from "./jsearch.js";
 import { mockJobsFor } from "./mock.js";
@@ -118,12 +119,28 @@ async function collectMock(pairs: SearchPair[], now: Date, c: Collector): Promis
   return rep;
 }
 
-/** One query per (role, area); remote = keyword searches. Stops at the daily cap or on rejected keys. */
+/**
+ * Adzuna answers 503 when called too fast (it limits calls per minute), so real
+ * calls are spaced out and a 503/429 is retried once after a pause. Tests run
+ * without pauses.
+ */
+export const ADZUNA_PACING = { gapMs: process.env.NODE_ENV === "test" ? 0 : 2600, retryMs: process.env.NODE_ENV === "test" ? 0 : 10_000, stopAfterBusy: 3 };
+const isBusy = (err: unknown) => err instanceof SourceHttpError && (err.status === 503 || err.status === 429);
+
+/** One query per (role, city); remote = keyword searches. Stops at the daily cap, on rejected keys, or when Adzuna keeps saying "busy". */
 async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Promise<SourceReport> {
   const rep = report("adzuna", true);
   const cap = config().adzunaDailyCap;
   let skippedForCap = 0;
   let stopped: string | null = null;
+  let lastCallAt = 0;
+  let busyInARow = 0;
+  const paced = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const wait = lastCallAt + ADZUNA_PACING.gapMs - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+    return fn();
+  };
   for (const q of adzunaQueries(pairs)) {
     const cq = normalize(adzunaLabel(q));
     const cl = q.where ? normalize(q.where) : "india";
@@ -143,13 +160,21 @@ async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Prom
       }
       rep.calls++;
       try {
-        jobs = await fetchAdzuna(q);
+        try {
+          jobs = await paced(() => fetchAdzuna(q));
+        } catch (err) {
+          if (!isBusy(err)) throw err;
+          await sleep(ADZUNA_PACING.retryMs); // busy: one retry after a pause
+          jobs = await paced(() => fetchAdzuna(q));
+        }
+        busyInARow = 0;
         await writeCache("adzuna", cq, cl, jobs, now);
       } catch (err) {
         recordError(rep, err);
         error = err instanceof Error ? err.message : "error";
         jobs = [];
         if (err instanceof SourceHttpError && (err.status === 401 || err.status === 403)) stopped = `Keys rejected (HTTP ${err.status})`;
+        else if (isBusy(err) && ++busyInARow >= ADZUNA_PACING.stopAfterBusy) stopped = "Adzuna is busy (HTTP 503), the remaining searches run next time";
       }
     }
     const kept = jobs.filter((j) => keepForQuery(j, q));

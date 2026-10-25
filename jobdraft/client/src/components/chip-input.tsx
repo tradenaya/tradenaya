@@ -1,8 +1,9 @@
 "use client";
 
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
-import { Button, Input } from "./ui";
+import { useId, useMemo, useState } from "react";
+import { isKnownRole, searchRoles } from "@/lib/job-roles";
+import { Button, cx, Input } from "./ui";
 
 export function RemovableChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
@@ -50,6 +51,20 @@ export function ChipInput({
 
   const unused = suggestions.filter((s) => !has(s));
   const relatedUnused = related.filter((s) => !has(s) && !suggestions.some((x) => x.toLowerCase() === s.toLowerCase()));
+
+  // Autocomplete: known titles that match what's typed (spelling mistakes included), then "add as typed".
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  const typed = draft.replace(/\s+/g, " ").trim();
+  const matches = useMemo(() => (typed.length >= 2 ? searchRoles(typed, values) : []), [typed, values]);
+  const options = typed.length >= 2 && !isKnownRole(typed) && !has(typed) ? [...matches.map((m) => ({ value: m, custom: false })), { value: typed, custom: true }] : matches.map((m) => ({ value: m, custom: false }));
+  const showList = open && !full && options.length > 0;
+  const pick = (v: string) => {
+    add(v);
+    setActive(0);
+  };
+
   return (
     <div>
       {values.length > 0 && (
@@ -60,26 +75,69 @@ export function ChipInput({
         </ul>
       )}
       <div className="flex gap-2">
-        <Input
-          id={id}
-          value={draft}
-          placeholder={full ? `Up to ${max} roles` : "Add a role, e.g. Product Manager"}
-          disabled={full}
-          invalid={invalid}
-          aria-describedby={describedBy}
-          enterKeyHint="done"
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v.endsWith(",")) add(v.slice(0, -1));
-            else setDraft(v);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add(draft);
-            }
-          }}
-        />
+        <div className="relative min-w-0 flex-1">
+          <Input
+            id={id}
+            role="combobox"
+            aria-expanded={showList}
+            aria-controls={listId}
+            aria-autocomplete="list"
+            aria-activedescendant={showList ? `${listId}-${active}` : undefined}
+            autoComplete="off"
+            value={draft}
+            placeholder={full ? `Up to ${max} roles` : "Type a role, e.g. Product Manager"}
+            disabled={full}
+            invalid={invalid}
+            aria-describedby={describedBy}
+            enterKeyHint="done"
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.endsWith(",")) add(v.slice(0, -1));
+              else setDraft(v);
+              setOpen(true);
+              setActive(0);
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setOpen(true);
+                setActive((a) => Math.min(a + 1, options.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActive((a) => Math.max(a - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                pick(showList && options[active] ? options[active].value : draft);
+              } else if (e.key === "Escape") setOpen(false);
+            }}
+          />
+          {showList && (
+            <ul id={listId} role="listbox" aria-label="Matching roles" className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
+              {options.map((o, i) => (
+                <li
+                  key={`${o.custom}-${o.value}`}
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={i === active}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pick(o.value)}
+                  onMouseEnter={() => setActive(i)}
+                  className={cx("flex min-h-11 cursor-pointer items-center px-3 py-2 text-slate-900", i === active && "bg-brand-50", o.custom && "border-t border-slate-200 text-slate-700")}
+                >
+                  {o.custom ? (
+                    <span className="truncate">
+                      Add “<strong className="font-semibold">{o.value}</strong>” as typed
+                    </span>
+                  ) : (
+                    <span className="truncate font-medium">{o.value}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <Button type="button" variant="secondary" onClick={() => add(draft)} disabled={full || draft.trim().length < 2} aria-label="Add role">
           <Plus className="size-5" aria-hidden />
           <span className="hidden sm:inline">Add</span>

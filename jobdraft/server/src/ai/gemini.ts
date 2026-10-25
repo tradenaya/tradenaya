@@ -19,6 +19,14 @@ export class AiKeyMissingError extends AiUnavailableError {
   }
 }
 
+/** The user's key has used up its quota on every model (it resets daily). */
+export class AiQuotaError extends AiUnavailableError {
+  constructor() {
+    super("Your Gemini API key has reached its usage limit for now. Please try again in a few hours.");
+    this.name = "AiQuotaError";
+  }
+}
+
 /** Google rejected the user's Gemini API key (invalid, deleted or restricted). */
 export class AiKeyRejectedError extends AiUnavailableError {
   constructor() {
@@ -200,7 +208,7 @@ export async function geminiGenerateJson(req: GenerateRequest): Promise<unknown>
   }
   if (onlyQuotaErrors && remaining() >= 3000) {
     log.error("gemini_quota_reached", { models: gemini.models.length });
-    throw new AiUnavailableError("Your Gemini API key has reached its usage limit for now. Please try again in a few hours.");
+    throw new AiQuotaError();
   }
   if (remaining() < 3000) {
     log.error("gemini_deadline_reached", { error: errInfo(lastErr) });

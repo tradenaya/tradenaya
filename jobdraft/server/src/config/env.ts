@@ -129,6 +129,8 @@ export function config() {
     jsearchDailyCap: int(e.JSEARCH_DAILY_CAP, 6),
     /** One run's share of the JSearch daily cap, so one user can't use the whole day. */
     jsearchMaxCallsPerRun: int(e.JSEARCH_MAX_CALLS_PER_RUN, 4),
+    /** Postings the AI checks per user per run; 0 = no cap (until done, the key's limit, or the run's time limit). */
+    maxScreenPerRun: int(e.MAX_SCREEN_PER_RUN, 0),
     mockExternal: bool(e.MOCK_EXTERNAL, false),
     schedulerEnabled: bool(e.SCHEDULER_ENABLED, true),
     authRateLimitMax: int(e.AUTH_RATE_LIMIT_MAX, 20),

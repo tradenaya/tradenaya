@@ -17,6 +17,7 @@ function setEnv(over: Partial<Record<(typeof ENV_KEYS)[number], string>>) {
 
 interface Call {
   host: string;
+  path: string;
   params: URLSearchParams;
 }
 let calls: Call[] = [];
@@ -31,7 +32,7 @@ beforeEach(async () => {
   jsearchReply = () => ({ status: 200, body: { status: "OK", data: { jobs: [], cursor: null } } });
   vi.stubGlobal("fetch", async (input: string) => {
     const url = new URL(input);
-    calls.push({ host: url.host, params: url.searchParams });
+    calls.push({ host: url.host, path: url.pathname, params: url.searchParams });
     const r = url.host.includes("adzuna") ? adzunaReply(url.searchParams) : jsearchReply(url.searchParams);
     return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
   });
@@ -69,32 +70,42 @@ const jsJob = (i: number, over: Partial<JSearchJob> = {}): JSearchJob => ({
 });
 
 describe("Adzuna", () => {
-  it("queries each city alias and remote variants with 7 days / 50 / date, and caches for 6 hours", async () => {
+  it("queries each main city and remote variants with 7 days / 50 / date, and caches for 6 hours", async () => {
     setEnv({ RAPIDAPI_KEY: "" });
     const now = setIst("2026-11-02T09:00");
     const res = await collectJobs(PM_PAIRS, { now });
     const wheres = adzunaCalls().map((c) => c.params.get("where"));
-    expect(wheres).toEqual(["Pune", "Pimpri-Chinchwad", "Mumbai", "Navi Mumbai", "Thane", null, null, "Hyderabad", "Secunderabad", "Bengaluru", "Bangalore"]);
+    expect(wheres).toEqual(["Pune", "Mumbai", null, null, "Hyderabad", "Bengaluru"]);
     for (const c of adzunaCalls()) expect([c.params.get("max_days_old"), c.params.get("results_per_page"), c.params.get("sort_by")]).toEqual(["7", "50", "date"]);
     expect(adzunaCalls().filter((c) => !c.params.get("where")).map((c) => c.params.get("what"))).toEqual(["remote", "work from home"]);
     for (const c of adzunaCalls()) expect(c.params.get("title_only")).toBe("Product Manager");
-    expect(res.sources.find((s) => s.source === "adzuna")).toMatchObject({ calls: 11, cached: 0 });
+    expect(res.sources.find((s) => s.source === "adzuna")).toMatchObject({ calls: 6, cached: 0 });
     expect(res.sources.find((s) => s.source === "jsearch")).toMatchObject({ configured: false, note: "Not configured (add RAPIDAPI_KEY)" });
-    expect((await usage("adzuna"))!.calls).toBe(11);
+    expect((await usage("adzuna"))!.calls).toBe(6);
 
     // Another user's run 5 hours later: everything from the cache.
     calls = [];
     const again = await collectJobs(PM_PAIRS, { now: new Date(now.getTime() + 5 * HOUR) });
     expect(adzunaCalls()).toHaveLength(0);
-    expect(again.sources[0]).toMatchObject({ calls: 0, cached: 11 });
+    expect(again.sources[0]).toMatchObject({ calls: 0, cached: 6 });
   });
 
   it("stops at the daily cap and says so in the funnel", async () => {
     setEnv({ RAPIDAPI_KEY: "", ADZUNA_DAILY_CAP: "4" });
     const res = await collectJobs(PM_PAIRS, { now: setIst("2026-11-02T09:00") });
     expect(adzunaCalls()).toHaveLength(4);
-    expect(res.sources[0]!.note).toBe("Daily limit reached (4 calls/day across all users); 7 searches skipped");
+    expect(res.sources[0]!.note).toBe("Daily limit reached (4 calls/day across all users); 2 searches skipped");
     expect((await usage("adzuna"))!.calls).toBe(4);
+  });
+
+  it("a busy Adzuna (503) is retried once; after 3 busy searches in a row the rest wait for the next run", async () => {
+    setEnv({ RAPIDAPI_KEY: "" });
+    let n = 0;
+    adzunaReply = () => (++n === 1 ? { status: 503, body: {} } : n === 2 ? { status: 200, body: { results: [] } } : { status: 503, body: {} });
+    const res = await collectJobs(PM_PAIRS, { now: setIst("2026-11-02T09:00") });
+    // Search 1: 503 then OK on retry. Searches 2–4: 503 twice each → stop.
+    expect(adzunaCalls()).toHaveLength(2 + 3 * 2);
+    expect(res.sources[0]!.note).toBe("Adzuna is busy (HTTP 503), the remaining searches run next time; 2 searches skipped");
   });
 
   it("remote searches keep only remote / WFH postings; rejected keys stop further calls", async () => {
@@ -129,6 +140,7 @@ describe("JSearch", () => {
         : { status: 200, body: { status: "OK", data: { jobs: [1, 2, 3, 4, 5].map((i) => jsJob(i)), cursor: "NEXT" } } };
     const res = await collectJobs([PM_PAIRS[0]!], { now: setIst("2026-11-02T09:00"), isRelevant: () => true });
     const [first, second] = jsearchCalls();
+    expect(first!.path).toBe("/search-v2"); // "/search" no longer exists on RapidAPI
     expect(Object.fromEntries(first!.params)).toEqual({ query: "Product Manager in Pune, India", country: "in", date_posted: "week", num_pages: "1", language: "en" });
     expect(second!.params.get("cursor")).toBe("NEXT");
     expect(res.jobs.map((j) => j.key)).toContain("jsearch:uid-9");

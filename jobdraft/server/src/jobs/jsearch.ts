@@ -145,7 +145,8 @@ export function parseJSearchResponse(body: JSearchResponse, variant?: JSearchQue
 
 /** One page of results for one query (each page is one API call). */
 export async function fetchJSearchPage(q: JSearchQuery, cursor?: string | null): Promise<JSearchPage> {
-  const res = await fetch(`https://${JSEARCH_HOST}/search?${jsearchParams(q, cursor)}`, {
+  // "/search" was retired by JSearch ("Endpoint '/search' does not exist"); v5 lives at /search-v2.
+  const res = await fetch(`https://${JSEARCH_HOST}/search-v2?${jsearchParams(q, cursor)}`, {
     headers: { "X-RapidAPI-Key": config().rapidApiKey, "X-RapidAPI-Host": JSEARCH_HOST },
     signal: AbortSignal.timeout(25000),
   });

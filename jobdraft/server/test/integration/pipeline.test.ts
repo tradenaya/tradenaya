@@ -53,7 +53,7 @@ describe("a full daily run", () => {
     expect(dash.body.upcoming[0]).toMatchObject({ kind: "email", label: "Application" });
   });
 
-  it("records a funnel that matches what was created; screens in batches of 5, at most 15 per run", async () => {
+  it("records a funnel that matches what was created; screens in batches of 10, at most 60 per run", async () => {
     const screens: number[] = [];
     let writes = 0;
     setGeneratorForTests(async (req) => {
@@ -86,9 +86,9 @@ describe("a full daily run", () => {
     expect(f.afterFilters).toBeLessThanOrEqual(f.fetched);
     expect(f.fetched - removed).toBeLessThanOrEqual(f.afterFilters + (f.removed.excluded ?? 0));
     // AI: batches of ≤5, ≤15 postings per run, emails written only for suitable postings with an address.
-    expect(screens.every((n) => n <= 5)).toBe(true);
+    expect(screens.every((n) => n <= 10)).toBe(true);
     expect(f.aiChecked).toBe(screens.reduce((a, b) => a + b, 0));
-    expect(f.aiChecked).toBeLessThanOrEqual(15);
+    expect(f.aiChecked).toBeLessThanOrEqual(60);
     expect(f.notChecked).toBe(f.afterFilters - f.aiChecked);
     expect(f.suitable).toBeLessThanOrEqual(f.aiChecked);
     expect(f.emailsFound).toBeLessThanOrEqual(f.suitable);

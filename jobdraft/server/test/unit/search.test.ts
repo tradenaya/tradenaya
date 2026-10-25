@@ -130,9 +130,9 @@ describe("locations: nearby areas", () => {
 describe("Adzuna queries", () => {
   const pairs = ["Pune, Maharashtra", "Mumbai, Maharashtra", "Remote (India)", "Hyderabad, Telangana", "Bengaluru, Karnataka"].map((location) => ({ role: "Product Manager", location }));
 
-  it("queries each (role, area) with aliases, and remote as two keyword searches without where", () => {
+  it("queries each (role, main city) once, and remote as two keyword searches without where", () => {
     const qs = adzunaQueries([...pairs, ...pairs]); // duplicates collapse
-    expect(qs.filter((q) => q.where).map((q) => q.where)).toEqual(["Pune", "Pimpri-Chinchwad", "Mumbai", "Navi Mumbai", "Thane", "Hyderabad", "Secunderabad", "Bengaluru", "Bangalore"]);
+    expect(qs.filter((q) => q.where).map((q) => q.where)).toEqual(["Pune", "Mumbai", "Hyderabad", "Bengaluru"]);
     const remote = qs.filter((q) => !q.where);
     expect(remote.map((q) => [adzunaLabel(q), q.variant, q.remoteOnly])).toEqual([
       ['Product Manager + "remote"', "remote", true],

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AiKeyRejectedError, setGeneratorForTests } from "../../src/ai/index.js";
+import { AiKeyRejectedError, AiQuotaError, setGeneratorForTests } from "../../src/ai/index.js";
 import { mockGenerateJson } from "../../src/ai/mock.js";
 import { closePool, query, queryOne } from "../../src/db/pool.js";
 import { processFollowUps } from "../../src/runs/followups.js";
@@ -79,5 +79,26 @@ describe("without a usable key", () => {
     expect(fixed.body.geminiKey.status).toBe("valid");
     expect(fixed.body.automation.missing).toEqual([]);
     expect(await query("SELECT id FROM runs WHERE user_id = ?", [user.id])).toHaveLength(1);
+  });
+});
+
+describe("no fixed cap on AI checks", () => {
+  it("checks every posting it can; when the key's limit is reached it stops calmly, keeps what it made, and carries the rest over", async () => {
+    setIst("2026-11-01T20:00");
+    const { user } = await readyUser({ prefs: { target_roles: ["Software Engineer", "Backend Developer", "Full Stack Developer"] } });
+    let screens = 0;
+    setGeneratorForTests(async (req) => {
+      if (req.task === "screen" && ++screens >= 2) throw new AiQuotaError(); // the 2nd screening call hits the limit
+      return mockGenerateJson(req);
+    });
+    setIst("2026-11-02T09:00");
+    await runDueUsers();
+    const run = await queryOne<{ status: string; error_message: string; funnel: unknown }>("SELECT status, error_message, funnel FROM runs WHERE user_id = ?", [user.id]);
+    expect(run!.status).not.toBe("failed");
+    expect(run!.error_message).toMatch(/^Your Gemini key reached its usage limit\. \d+ postings will be checked in the next run\.$/);
+    const f = (typeof run!.funnel === "string" ? JSON.parse(run!.funnel) : run!.funnel) as { aiChecked: number; notChecked: number; afterFilters: number };
+    expect(f.aiChecked).toBe(10); // the first call: 10 postings
+    expect(f.notChecked).toBe(f.afterFilters - 10);
+    expect((await query("SELECT id FROM run_items WHERE user_id = ?", [user.id])).length).toBeGreaterThanOrEqual(1);
   });
 });

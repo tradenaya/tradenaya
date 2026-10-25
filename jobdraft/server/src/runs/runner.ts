@@ -1,4 +1,4 @@
-import { AiKeyMissingError, AiKeyRejectedError, AiUnavailableError, checkJob, SCREEN_BATCH_SIZE, screenJobs } from "../ai/index.js";
+import { AiKeyMissingError, AiKeyRejectedError, AiQuotaError, AiUnavailableError, checkJob, SCREEN_BATCH_SIZE, screenJobs } from "../ai/index.js";
 import { geminiKeyOf, markGeminiKeyInvalid } from "../ai/user-key.js";
 import type { ScreenResult } from "../ai/schemas.js";
 import { config, features } from "../config/env.js";
@@ -36,8 +36,6 @@ import { refreshRunStatus } from "./status.js";
 import { trackUser } from "./tracking.js";
 
 export const LIMITS = {
-  /** Postings the AI screens per user per run (in batches of 5). */
-  maxScreenPerRun: 15,
   maxNewEmailsPerRun: SEND_POLICY.maxNewEmailsPerRun,
   maxLinkOnlyPerRun: SEND_POLICY.maxLinkOnlyPerRun,
   companyCooldownDays: 60,
@@ -214,9 +212,17 @@ export async function processRun(runId: number, userId: number): Promise<void> {
     for (const r of rejected) bump(funnel.removed, stepOf(r.reason));
     funnel.afterFilters = passed.length;
     // Postings that state an email can become applications: screen those first (newest first within each group).
-    passed.sort((a, b) => Number(applicationEmailsIn(b.description).length > 0) - Number(applicationEmailsIn(a.description).length > 0));
-    const toScreen = passed.slice(0, LIMITS.maxScreenPerRun);
+    // Most promising first, so a key that hits its limit early is spent on the best postings:
+    // an application email (only those can become emails) > a close title match to a target role
+    // > JSearch (full descriptions) > newest. Every target role counts equally (career moves too).
+    const closeTitle = (j: Job) => profile.targetRoles.some((r) => j.title.toLowerCase().includes(r.toLowerCase()));
+    const priority = (j: Job) => (applicationEmailsIn(j.description).length ? 8 : 0) + (closeTitle(j) ? 4 : 0) + (j.source === "jsearch" ? 2 : 0);
+    passed.sort((a, b) => priority(b) - priority(a));
+    // No fixed cap by default: screen until done, the key's limit, or the run's time limit.
+    const cap = config().maxScreenPerRun;
+    const toScreen = cap > 0 ? passed.slice(0, cap) : passed;
     funnel.notChecked = passed.length - toScreen.length;
+    let quotaHit = false;
     log.info("run_filtered", { ...ctx, fetched: funnel.fetched, passed: passed.length, screening: toScreen.length });
 
     // 4. AI screen in batches, then an email or a link for each suitable posting.
@@ -232,8 +238,13 @@ export async function processRun(runId: number, userId: number): Promise<void> {
       firstAiCall = false;
     };
 
-    for (const batch of chunks(toScreen, SCREEN_BATCH_SIZE)) {
-      checkTime();
+    const batches = chunks(toScreen, SCREEN_BATCH_SIZE);
+    for (const [bi, batch] of batches.entries()) {
+      if (quotaHit || Date.now() > deadline - 60_000) {
+        // Out of AI quota or time: the rest are checked next run (they're not marked seen).
+        funnel.notChecked += batches.slice(bi).reduce((n, b) => n + b.length, 0);
+        break;
+      }
       if (!(await automationStillOn(userId))) throw new AutomationOff();
       await pace();
       let results: (ScreenResult | null)[];
@@ -242,6 +253,11 @@ export async function processRun(runId: number, userId: number): Promise<void> {
         aiFailuresInARow = 0;
       } catch (err) {
         if (err instanceof AiKeyRejectedError) throw err; // retrying with the same key can't help
+        if (err instanceof AiQuotaError) {
+          quotaHit = true;
+          funnel.notChecked += batch.length;
+          continue; // stop screening calmly; keep what this run made
+        }
         aiFailuresInARow++;
         log.warn("run_ai_screen_failed", { ...ctx, error: errInfo(err) });
         if (aiFailuresInARow >= LIMITS.consecutiveAiFailuresToAbort) throw new RunAbort("AI unavailable");
@@ -285,6 +301,10 @@ export async function processRun(runId: number, userId: number): Promise<void> {
             aiFailuresInARow = 0;
           } catch (err) {
             if (err instanceof AiKeyRejectedError) throw err;
+            if (err instanceof AiQuotaError) {
+              quotaHit = true;
+              break; // no more AI today: this posting and the rest are checked next run
+            }
             aiFailuresInARow++;
             log.warn("run_ai_check_failed", { ...ctx, error: errInfo(err) });
             if (aiFailuresInARow >= LIMITS.consecutiveAiFailuresToAbort) throw new RunAbort("AI unavailable");
@@ -370,6 +390,7 @@ export async function processRun(runId: number, userId: number): Promise<void> {
       }
     }
 
+    if (quotaHit) funnel.note = `Your Gemini key reached its usage limit. ${funnel.notChecked} postings will be checked in the next run.`;
     await finishRun(runId, userId, funnel, funnel.note ?? null);
     log.info("run_finished", { ...ctx, newEmails, autoSends: funnel.autoSent, linkOnly: funnel.linkOnly, screened: funnel.aiChecked, ms: Date.now() - started });
   } catch (err) {
