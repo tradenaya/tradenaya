@@ -12,6 +12,8 @@ export type GmailStatus = "connected" | "disconnected" | "error" | "needs_reconn
 
 export interface RunnableProfile {
   userId: number;
+  /** An admin can deactivate an account: no runs, sends or follow-ups. */
+  userStatus: "active" | "inactive";
   resume: ResumeData | null;
   resumePublicId: string | null;
   resumeFileName: string;
@@ -40,6 +42,7 @@ export interface RunnableProfile {
 
 interface Row {
   user_id: number;
+  user_status: "active" | "inactive" | null;
   resume_public_id: string | null;
   resume_file_name: string | null;
   resume_data: unknown;
@@ -65,7 +68,7 @@ interface Row {
 }
 
 const SELECT = `
-  SELECT p.*, g.gmail_address, g.status AS gmail_status, g.granted_scopes, g.refresh_token_enc, g.send_paused_until
+  SELECT p.*, u.status AS user_status, g.gmail_address, g.status AS gmail_status, g.granted_scopes, g.refresh_token_enc, g.send_paused_until
   FROM profiles p
   JOIN users u ON u.id = p.user_id
   LEFT JOIN gmail_connections g ON g.user_id = p.user_id`;
@@ -73,6 +76,7 @@ const SELECT = `
 function toProfile(row: Row): RunnableProfile {
   return {
     userId: row.user_id,
+    userStatus: row.user_status ?? "active",
     resume: json<ResumeData | null>(row.resume_data, null),
     resumePublicId: row.resume_public_id,
     resumeFileName: row.resume_file_name || "resume.pdf",
@@ -109,13 +113,13 @@ export async function loadProfile(userId: number): Promise<RunnableProfile | nul
  * run" card in History), never silently skipped.
  */
 export async function automationOnProfiles(): Promise<RunnableProfile[]> {
-  const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 ORDER BY p.user_id`);
+  const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 AND u.status = 'active' ORDER BY p.user_id`);
   return rows.map(toProfile);
 }
 
 /** Profiles with automation ON and a usable Gmail connection. */
 export async function automationProfiles(): Promise<RunnableProfile[]> {
-  const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 AND g.status = 'connected' AND g.refresh_token_enc IS NOT NULL ORDER BY p.user_id`);
+  const rows = await query<Row>(`${SELECT} WHERE p.automation_enabled = 1 AND u.status = 'active' AND g.status = 'connected' AND g.refresh_token_enc IS NOT NULL ORDER BY p.user_id`);
   return rows.map(toProfile);
 }
 

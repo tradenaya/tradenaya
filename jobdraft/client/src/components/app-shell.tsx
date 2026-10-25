@@ -1,8 +1,11 @@
 "use client";
 
-import { History, LayoutDashboard, SlidersHorizontal, UserRound } from "lucide-react";
+import { History, LayoutDashboard, ShieldCheck, SlidersHorizontal, UserRound } from "lucide-react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { api } from "@/lib/api";
+import { useAuth } from "./auth";
 import { Logo } from "./logo";
 import { ThemeToggle } from "./theme";
 import { cx } from "./ui";
@@ -14,9 +17,38 @@ const NAV = [
   { href: "/account", label: "Account", Icon: UserRound },
 ];
 
+const ADMIN_NAV = { href: "/admin", label: "Admin", Icon: ShieldCheck };
+
+/** Shown on every page while an admin uses JobDraft as another user. */
+function ActingBanner() {
+  const { user, actor } = useAuth();
+  const [busy, setBusy] = useState(false);
+  if (!actor || !user) return null;
+  async function back() {
+    setBusy(true);
+    await api("/api/admin/impersonate/stop", { method: "POST" }).catch(() => undefined);
+    window.location.assign("/admin");
+  }
+  return (
+    <div role="status" className="bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-300" data-testid="acting-banner">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 text-[15px] sm:px-6 lg:px-8">
+        <p className="min-w-0">
+          You&apos;re using JobDraft as <strong>{user.name}</strong> <span className="break-all">({user.email})</span>. Everything you do here is done for them.
+        </p>
+        <button type="button" onClick={() => void back()} disabled={busy} className="min-h-11 rounded-xl px-3 font-semibold underline underline-offset-2 hover:bg-amber-100">
+          Return to admin
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const { user, actor } = useAuth();
+  // Admins see an Admin tab (not while acting as a user).
+  const nav = user?.isAdmin && !actor ? [...NAV, ADMIN_NAV] : NAV;
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -24,6 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <header className="pt-safe sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <ActingBanner />
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-4 sm:px-6 lg:px-8">
           <Link href="/dashboard" className="flex min-h-11 items-center" aria-label="JobDraft — dashboard">
             <Logo />
@@ -32,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* Desktop / tablet nav */}
             <nav aria-label="Main" className="hidden md:block">
               <ul className="flex items-center gap-1">
-                {NAV.map(({ href, label, Icon }) => (
+                {nav.map(({ href, label, Icon }) => (
                   <li key={href}>
                     <Link
                       href={href}
@@ -60,8 +93,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile bottom tab bar */}
       <nav aria-label="Main" data-testid="bottom-nav" className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white md:hidden">
-        <ul className="grid grid-cols-4">
-          {NAV.map(({ href, label, Icon }) => (
+        <ul className={cx("grid", nav.length === 5 ? "grid-cols-5" : "grid-cols-4")}>
+          {nav.map(({ href, label, Icon }) => (
             <li key={href}>
               <Link
                 href={href}

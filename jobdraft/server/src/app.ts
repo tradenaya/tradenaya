@@ -5,6 +5,7 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { config, features, missingFeatureMessages } from "./config/env.js";
 import { accountRouter } from "./http/account-routes.js";
+import { adminRouter } from "./http/admin-routes.js";
 import { authRouter } from "./http/auth-routes.js";
 import { errorHandler, requireAuth } from "./http/common.js";
 import { gmailRouter } from "./http/gmail-routes.js";
@@ -41,6 +42,7 @@ export function createApp() {
   app.use("/api/automation", automationRouter());
   app.use("/api/gmail", gmailRouter());
   app.use("/api/account", accountRouter());
+  app.use("/api/admin", adminRouter());
   // E2E-only helpers: never mounted outside NODE_ENV=test with MOCK_EXTERNAL=true.
   if (config().isTest && config().mockExternal) app.use("/api/__test", testRouter());
   app.use("/api", runsRouter());

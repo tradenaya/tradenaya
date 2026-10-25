@@ -49,6 +49,8 @@ export default defineConfig({
         DB_NAME: "jobdraft_test",
         MOCK_EXTERNAL: "true",
         SCHEDULER_ENABLED: "false",
+        // Sign-ups log in at once; the approval test switches approval on via the admin page.
+        SIGNUP_APPROVAL: "false",
         GEMINI_DELAY_MS: "0",
         AUTH_RATE_LIMIT_MAX: "1000",
         GOOGLE_REDIRECT_URI: `${SERVER_URL}/api/gmail/callback`,

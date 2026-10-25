@@ -133,6 +133,10 @@ export function config() {
     maxScreenPerRun: int(e.MAX_SCREEN_PER_RUN, 0),
     mockExternal: bool(e.MOCK_EXTERNAL, false),
     schedulerEnabled: bool(e.SCHEDULER_ENABLED, true),
+    /** Default for "new sign-ups need admin approval" (the admin page can switch it). */
+    signupApproval: bool(e.SIGNUP_APPROVAL, true),
+    /** Google Cloud project for the "Open Google test users" link (defaults to the number in GOOGLE_CLIENT_ID). */
+    googleCloudProject: e.GOOGLE_CLOUD_PROJECT || (e.GOOGLE_CLIENT_ID || "").split("-")[0] || "",
     authRateLimitMax: int(e.AUTH_RATE_LIMIT_MAX, 20),
     manualRunCooldownMin: int(e.MANUAL_RUN_COOLDOWN_MIN, 30),
     mockStorageDir: e.MOCK_STORAGE_DIR || path.resolve(path.dirname(ENV_FILE), ".mock-storage"),

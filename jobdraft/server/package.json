@@ -12,6 +12,8 @@
     "start": "node dist/index.js",
     "diagnose": "node dist/cli/diagnose.js",
     "diagnose:dev": "tsx src/cli/diagnose.ts",
+    "admin": "node dist/cli/admin.js",
+    "admin:dev": "tsx src/cli/admin.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

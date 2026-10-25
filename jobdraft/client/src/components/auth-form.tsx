@@ -32,6 +32,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Registered, but the admin must approve it before it can log in.
+  const [pendingFor, setPendingFor] = useState<string | null>(null);
   // Set once this form logs someone in, so the redirect below doesn't race it.
   const submitted = useRef(false);
 
@@ -64,7 +66,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setBusy(true);
     try {
       const body = mode === "register" ? { ...values, geminiKey: values.geminiKey.trim() } : { email: values.email, password: values.password };
-      const res = await api<{ user: User }>(`/api/auth/${mode}`, { body });
+      const res = await api<{ user?: User; pending?: boolean }>(`/api/auth/${mode}`, { body });
+      if (res.pending) {
+        setPendingFor(values.email.trim());
+        return;
+      }
+      if (!res.user) throw new Error("Unexpected response");
       submitted.current = true;
       setUser(res.user);
       if (mode === "register") {
@@ -84,7 +91,21 @@ export function AuthForm({ mode }: { mode: Mode }) {
   }
 
   const isRegister = mode === "register";
+  if (pendingFor)
+    return (
+      <div role="status" className="space-y-3" data-testid="pending-approval">
+        <h1 className="text-xl font-bold text-slate-900">Account created</h1>
+        <p className="rounded-xl bg-emerald-50 p-3 text-[15px] text-emerald-900 ring-1 ring-inset ring-emerald-200">
+          Your account for <strong className="break-all">{pendingFor}</strong> has been created. The JobDraft admin needs to approve it before you can log in.
+        </p>
+        <p className="text-[15px] text-slate-700">You&apos;ll get an email (or a message from the admin) as soon as it&apos;s approved. Then log in with the email and password you just chose.</p>
+        <Link href="/login" className="inline-flex min-h-11 items-center font-semibold text-brand-700 underline-offset-2 hover:underline">
+          Go to log in
+        </Link>
+      </div>
+    );
   const deactivated = isRegister && params.get("deactivated") === "1";
+  const inactiveNotice = !isRegister && params.get("inactive") === "1";
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
       {deactivated && (
@@ -94,6 +115,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
             Your resume, settings, Gmail connection and history were permanently deleted, and nothing more will be drafted or sent. Drafts already in your Gmail stay there.
           </p>
           <p className="mt-1">Want to start again? Create a new account below — you can use the same email and you&apos;ll begin from the first step.</p>
+        </div>
+      )}
+      {inactiveNotice && (
+        <div role="alert" className="rounded-xl bg-amber-50 p-3 text-[15px] text-amber-900 ring-1 ring-inset ring-amber-300" data-testid="inactive-banner">
+          <p className="font-semibold">Your account is inactive</p>
+          <p className="mt-1">The JobDraft admin has deactivated it. Please ask the admin to activate it again.</p>
         </div>
       )}
       <h1 className="text-xl font-bold text-slate-900">{isRegister ? (deactivated ? "Start again" : "Create your account") : "Log in"}</h1>

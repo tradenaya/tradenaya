@@ -83,6 +83,7 @@ async function sendFirstEmail(item: QueueItem, profile: RunnableProfile, now: Da
   const token = refreshTokenOf(profile);
 
   // Re-check everything right before sending (profile is read fresh each pass, so this is the CURRENT mode).
+  if (profile.userStatus !== "active") return skipItem(item, "Account is inactive — kept as a draft").then(() => false);
   if (!profile.automationEnabled) return skipItem(item, "Automation is off — kept as a draft").then(() => false);
   if (profile.sendMode === "drafts_only") return skipItem(item, DRAFTS_ONLY_REASON).then(() => false);
   if (!token || !gmailUsable(profile)) return skipItem(item, "Gmail is not connected — kept as a draft").then(() => false);
@@ -141,6 +142,7 @@ async function sendFollowUp(fu: QueueFollowUp, profile: RunnableProfile, now: Da
   const blocker = followUpBlocker(item, profile, now);
   if (blocker) return skip(blocker);
   if (profile.sendMode === "drafts_only") return skip(DRAFTS_ONLY_REASON);
+  if (profile.userStatus !== "active") return skip("Account is inactive");
   if (findExcluded({ company: item.company, email: item.to_email, url: item.job_url }, await listExcluded(profile.userId))) return skip("Company is on your skip list");
 
   try {

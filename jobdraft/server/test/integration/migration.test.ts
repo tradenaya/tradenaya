@@ -39,7 +39,7 @@ describe("v1 → v2 migration", () => {
       await c.end();
     }
 
-    expect(await runMigrations(DB, v2)).toEqual([2, 3, 4, 5, 6]);
+    expect(await runMigrations(DB, v2)).toEqual([2, 3, 4, 5, 6, 7, 8]);
     expect(await runMigrations(DB, v2)).toEqual([]); // idempotent: nothing left to apply
 
     const d = await conn();

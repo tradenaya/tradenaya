@@ -2,6 +2,14 @@ export interface User {
   id: number;
   name: string;
   email: string;
+  isAdmin?: boolean;
+}
+
+/** The admin using JobDraft as `user` (null in normal sessions). */
+export interface Actor {
+  id: number;
+  name: string;
+  email: string;
 }
 
 export type RunStatus = "running" | "ready_to_send" | "sending" | "sent" | "no_matches" | "failed" | "completed";

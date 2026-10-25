@@ -7,7 +7,8 @@ import { execute, isDuplicateKey, queryOne } from "../db/pool.js";
 import { checkGeminiKey, geminiKeySchema, saveGeminiKey } from "../ai/user-key.js";
 import { HttpError } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
-import { clearSessionCookie, h, parse, requireAuth, setSessionCookie, userOf } from "./common.js";
+import { signupApprovalRequired } from "../lib/settings.js";
+import { actorOf, clearSessionCookie, h, parse, PENDING_MESSAGE, requireAuth, setSessionCookie, statusBlock, userOf } from "./common.js";
 
 const BCRYPT_COST = 12;
 // Compared against when the email doesn't exist, so login timing doesn't reveal accounts.
@@ -15,7 +16,7 @@ let dummyHash: Promise<string> | undefined;
 const getDummyHash = () => (dummyHash ??= bcrypt.hash("jobdraft-timing-equaliser", BCRYPT_COST));
 
 const email = z.string().trim().toLowerCase().pipe(z.email("Enter a valid email address.").max(254));
-const registerSchema = z.object({
+export const registerSchema = z.object({
   name: z.string().trim().min(1, "Enter your name.").max(100, "Name is too long."),
   email,
   // bcrypt only uses the first 72 bytes.
@@ -24,6 +25,30 @@ const registerSchema = z.object({
   geminiKey: geminiKeySchema,
 });
 const loginSchema = z.object({ email, password: z.string().min(1, "Enter your password.").max(200) });
+
+/**
+ * Creates an account (sign-up, or an admin creating one on someone's behalf).
+ * The Gemini key is checked with Google first. Always role "user": admin rights
+ * are only granted from the server shell.
+ */
+export async function createUser(body: z.infer<typeof registerSchema>, status: "pending" | "active" = "active"): Promise<{ id: number; name: string; email: string }> {
+  await checkGeminiKey(body.geminiKey);
+  const hash = await bcrypt.hash(body.password, BCRYPT_COST);
+  let userId: number;
+  try {
+    const result = await execute("INSERT INTO users (name, email, password_hash, status) VALUES (?, ?, ?, ?)", [body.name, body.email, hash, status]);
+    userId = result.insertId;
+  } catch (err) {
+    if (isDuplicateKey(err)) throw new HttpError(409, "An account with this email already exists. Try logging in.", "email_taken", { email: "Already registered." });
+    throw err;
+  }
+  await execute("INSERT IGNORE INTO profiles (user_id) VALUES (?)", [userId]);
+  await saveGeminiKey(userId, body.geminiKey);
+  return { id: userId, name: body.name, email: body.email };
+}
+
+/** What the browser may know about the signed-in user. */
+export const publicUser = (u: { id: number; name: string; email: string; role?: string }) => ({ id: u.id, name: u.name, email: u.email, isAdmin: u.role === "admin" });
 
 export function authRouter() {
   const r = Router();
@@ -40,22 +65,17 @@ export function authRouter() {
     limiter,
     h(async (req, res) => {
       const body = parse(registerSchema, req.body);
-      // Checked with Google first, so nobody ends up with an account whose AI can't work.
-      await checkGeminiKey(body.geminiKey);
-      const hash = await bcrypt.hash(body.password, BCRYPT_COST);
-      let userId: number;
-      try {
-        const result = await execute("INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)", [body.name, body.email, hash]);
-        userId = result.insertId;
-      } catch (err) {
-        if (isDuplicateKey(err)) throw new HttpError(409, "An account with this email already exists. Try logging in.", "email_taken", { email: "Already registered." });
-        throw err;
+      // While sign-ups need approval (Google app in Testing mode), the account waits and no session is created.
+      if (await signupApprovalRequired()) {
+        const user = await createUser(body, "pending");
+        log.info("user_registered_pending", { userId: user.id });
+        res.status(201).json({ pending: true, message: PENDING_MESSAGE });
+        return;
       }
-      await execute("INSERT IGNORE INTO profiles (user_id) VALUES (?)", [userId]);
-      await saveGeminiKey(userId, body.geminiKey);
-      setSessionCookie(res, userId);
-      log.info("user_registered", { userId });
-      res.status(201).json({ user: { id: userId, name: body.name, email: body.email } });
+      const user = await createUser(body);
+      setSessionCookie(res, user.id);
+      log.info("user_registered", { userId: user.id });
+      res.status(201).json({ user: publicUser(user) });
     }),
   );
 
@@ -64,14 +84,17 @@ export function authRouter() {
     limiter,
     h(async (req, res) => {
       const body = parse(loginSchema, req.body);
-      const user = await queryOne<{ id: number; name: string; email: string; password_hash: string }>(
-        "SELECT id, name, email, password_hash FROM users WHERE email = ?",
+      const user = await queryOne<{ id: number; name: string; email: string; password_hash: string; role: string; status: string }>(
+        "SELECT id, name, email, password_hash, role, status FROM users WHERE email = ?",
         [body.email],
       );
       const ok = await bcrypt.compare(body.password, user?.password_hash ?? (await getDummyHash()));
       if (!user || !ok) throw new HttpError(401, "Invalid email or password.");
+      // Only after the password is right, so this doesn't reveal which emails exist.
+      const blocked = statusBlock(user.status);
+      if (blocked) throw blocked;
       setSessionCookie(res, user.id);
-      res.json({ user: { id: user.id, name: user.name, email: user.email } });
+      res.json({ user: publicUser(user) });
     }),
   );
 
@@ -80,8 +103,10 @@ export function authRouter() {
     res.json({ ok: true });
   });
 
+  // While an admin uses JobDraft as this user, "actor" says who is acting (for the banner).
   r.get("/me", requireAuth, (req, res) => {
-    res.json({ user: userOf(req) });
+    const actor = actorOf(req);
+    res.json({ user: publicUser(userOf(req)), actor: actor ? { id: actor.id, name: actor.name, email: actor.email } : null });
   });
 
   return r;

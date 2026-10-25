@@ -197,6 +197,19 @@ Mode follows the original email:
 
 **Stop follow-ups** on any application stops everything for it.
 
+## Admin
+
+- **Who can be admin:** only people made admin from the server shell. There is no admin sign-up and no default admin account:
+  ```
+  cd ~/tradenaya/jobdraft/server
+  npm run admin -- grant you@example.com   # the account must exist (register it on the site first)
+  npm run admin -- list
+  npm run admin -- revoke you@example.com
+  ```
+- Admin rights and account status are read from the database on every request, so revoking or deactivating takes effect at once.
+- **/admin** (admins only, also as an Admin tab): totals; every user with runs, drafted, auto-send, sent, link-only and replies; deactivate / activate (an inactive user can't log in and is told to ask the admin; their runs, sends and follow-ups stop); delete completely; create an account on someone's behalf; **Use as user** (a 1-hour session with a banner and *Return to admin*; admin pages and account deletion are blocked while acting); and a log of every admin action.
+- **Sign-up approval:** while the Google app is in Testing mode only its test users can connect Gmail, so new sign-ups wait ("Account created, please wait for approval"). On /admin → *Waiting for approval*: Copy email → Open Google test users (Google Cloud → Auth → Audience → Test users → Add users) → Approve. Approving can email them "you can log in" from the admin's own connected Gmail (free). Turn *New sign-ups need approval* off once the Google app is published.
+
 ## Deploy with pm2 (on the VPS)
 
 JobDraft is **not** part of Tradenaya's GitHub Actions deploy. Tradenaya's type check and lint ignore `jobdraft/`. Deploy it by hand:

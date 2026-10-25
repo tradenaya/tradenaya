@@ -58,6 +58,7 @@ export async function dueFollowUpCandidates(now = clock.now()): Promise<Candidat
             f1.sent_at AS fu1_sent_at,
             IF(f1.id IS NULL, 1, 2) AS next_sequence
      FROM run_items i
+     JOIN users u ON u.id = i.user_id AND u.status = 'active'
      LEFT JOIN followups f1 ON f1.run_item_id = i.id AND f1.sequence = 1
      LEFT JOIN followups f2 ON f2.run_item_id = i.id AND f2.sequence = 2
      WHERE i.type <> 'link_only' AND i.send_state = 'sent' AND i.reply_state = 'none' AND i.outcome = 'open'

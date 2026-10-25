@@ -5,6 +5,8 @@ import { migrationV3 } from "./migration-v3.js";
 import { migrationV4 } from "./migration-v4.js";
 import { migrationV5 } from "./migration-v5.js";
 import { migrationV6 } from "./migration-v6.js";
+import { migrationV7 } from "./migration-v7.js";
+import { migrationV8 } from "./migration-v8.js";
 
 export interface Migration {
   version: number;
@@ -146,4 +148,6 @@ export const migrations: Migration[] = [
   migrationV4,
   migrationV5,
   migrationV6,
+  migrationV7,
+  migrationV8,
 ];

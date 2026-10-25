@@ -46,7 +46,7 @@ export const istFmt = (d: Date | string | null) => (d ? DateTime.fromJSDate(new 
 
 const TABLES = [
   "followups", "run_items", "runs", "seen_jobs", "contacted_companies", "contacted_emails", "excluded_companies", "gmail_connections", "profiles",
-  "job_cache", "job_locks", "api_usage", "search_rotation", "users",
+  "job_cache", "job_locks", "api_usage", "search_rotation", "admin_audit", "app_settings", "users",
 ];
 
 export async function resetDb() {

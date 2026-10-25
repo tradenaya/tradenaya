@@ -1,6 +1,7 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, request as pwRequest, test, type Page } from "@playwright/test";
 
 const RESUME = path.join(__dirname, "fixtures", "resume.pdf");
 const API = "http://localhost:5056";
@@ -424,6 +425,142 @@ test("Gemini key: where to get one, required at sign-up, and managed on Setup", 
   await confirmWith(page, "Save key");
   await expect(card.getByTestId("gemini-key-status")).toContainText(`…${GEMINI_KEY.slice(-4)}`);
   await expectNoHorizontalOverflow(page);
+});
+
+/** The real server command, against the e2e test database (the only way to make an admin). */
+function grantAdmin(email: string) {
+  return execFileSync("npx", ["tsx", "src/cli/admin.ts", "grant", email], {
+    cwd: path.resolve(__dirname, "../../server"),
+    env: { ...process.env, DB_NAME: "jobdraft_test", NODE_ENV: "test", MOCK_EXTERNAL: "true" },
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+}
+
+test("admin: granted only from the server, sees users, deactivates, uses JobDraft as a user, creates and deletes accounts", async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  const isMobile = testInfo.project.name.startsWith("mobile");
+  const stamp = `${testInfo.project.name}-${Date.now()}`;
+  // A normal user, in their own browser session.
+  const userEmail = `e2e-member-${stamp}@example.org`;
+  const member = await pwRequest.newContext();
+  expect((await member.post(`${API}/api/auth/register`, { data: { name: "Meera Rao", email: userEmail, password: "member-pass-1", geminiKey: GEMINI_KEY } })).status()).toBe(201);
+
+  // The admin registers like anyone else; nothing on the website makes them admin.
+  const adminEmail = `e2e-admin-${stamp}@example.org`;
+  await register(page, adminEmail);
+  await page.goto("/admin");
+  await expect(page.getByText("This page is for JobDraft admins.")).toBeVisible();
+  expect(grantAdmin(adminEmail)).toContain("is now an admin");
+  await page.reload();
+  await expect(page.getByTestId("admin-totals")).toBeVisible();
+  const nav = isMobile ? page.getByTestId("bottom-nav") : page.locator("header nav");
+  await expect(nav.getByRole("link", { name: "Admin" })).toBeVisible();
+
+  // Find the user.
+  await page.getByLabel("Search users").fill("Meera");
+  const row = page.getByTestId("admin-user").filter({ hasText: userEmail });
+  await expect(row).toHaveCount(1);
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("admin.png"), fullPage: true });
+
+  // Deactivate: they can't log in and are told to ask the admin. Then activate again.
+  await row.getByRole("button", { name: "Deactivate Meera Rao" }).click();
+  await confirmWith(page, "Deactivate");
+  await expect(row).toContainText("Inactive");
+  const blocked = await member.get(`${API}/api/auth/me`);
+  expect(blocked.status()).toBe(403);
+  expect((await blocked.json()).error).toBe("This account is inactive. Please ask the JobDraft admin to activate it.");
+  await row.getByRole("button", { name: "Activate Meera Rao" }).click();
+  await confirmWith(page, "Activate");
+  await expect(row).not.toContainText("Inactive");
+  expect((await member.get(`${API}/api/auth/me`)).status()).toBe(200);
+
+  // Use JobDraft as them, then return to admin.
+  await row.getByRole("button", { name: "Use JobDraft as Meera Rao" }).click();
+  await confirmWith(page, "Use as this user");
+  const banner = page.getByTestId("acting-banner");
+  await expect(banner).toContainText("You're using JobDraft as Meera Rao");
+  await expect(nav.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("acting.png") });
+  await banner.getByRole("button", { name: "Return to admin" }).click();
+  await expect(page).toHaveURL(/\/admin/);
+  await expect(page.getByTestId("admin-totals")).toBeVisible();
+
+  // Create an account on someone's behalf, then delete it.
+  const newEmail = `e2e-created-${stamp}@example.org`;
+  await page.getByRole("button", { name: "Create user" }).click();
+  const form = page.getByTestId("create-user-form");
+  await form.getByLabel("Name").fill("Kiran Das");
+  await form.getByLabel("Email").fill(newEmail);
+  await form.getByLabel("Password", { exact: true }).fill("kiran-pass-1");
+  await form.getByLabel("Their Gemini API key").fill(GEMINI_KEY);
+  await form.getByRole("button", { name: "Create account" }).click();
+  await confirmWith(page, "Create account");
+  await page.getByLabel("Search users").fill("Kiran");
+  const created = page.getByTestId("admin-user").filter({ hasText: newEmail });
+  await expect(created).toHaveCount(1);
+  await created.getByRole("button", { name: "Delete Kiran Das" }).click();
+  await confirmWith(page, "Delete permanently");
+  await expect(created).toHaveCount(0);
+  await expect(page.getByTestId("admin-audit")).toContainText("Deleted account");
+  await member.dispose();
+});
+
+test("sign-up approval: the account waits, the admin adds the email to Google test users and approves, then they can log in", async ({ page, browser }, testInfo) => {
+  test.setTimeout(180_000);
+  const stamp = `${testInfo.project.name}-${Date.now()}`;
+  const adminEmail = `e2e-approver-${stamp}@example.org`;
+  await register(page, adminEmail);
+  grantAdmin(adminEmail);
+  await page.goto("/admin");
+  const card = page.locator("#approvals");
+  const sw = card.getByRole("switch", { name: "New sign-ups need approval" });
+  await expect(sw).toHaveAttribute("aria-checked", "false"); // off on this test server
+  await sw.click();
+  await confirmWith(page, "Require approval");
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  try {
+    // A friend signs up in their own browser: told to wait, can't log in yet.
+    const friendEmail = `e2e-friend-${stamp}@example.org`;
+    const friendCtx = await browser.newContext({ viewport: page.viewportSize() ?? undefined });
+    const friend = await friendCtx.newPage();
+    await friend.goto("/register");
+    await friend.getByLabel("Name").fill("Asha Friend");
+    await friend.getByLabel("Email").fill(friendEmail);
+    await friend.getByLabel("Password", { exact: true }).fill("friend-pass-1");
+    await friend.getByLabel("Gemini API key").fill(GEMINI_KEY);
+    await friend.getByRole("button", { name: "Create account" }).click();
+    await confirmWith(friend, "Create account");
+    await expect(friend.getByTestId("pending-approval")).toContainText("The JobDraft admin needs to approve it before you can log in.");
+    await friend.screenshot({ path: testInfo.outputPath("pending.png") });
+    await friend.goto("/login");
+    await friend.getByLabel("Email").fill(friendEmail);
+    await friend.getByLabel("Password", { exact: true }).fill("friend-pass-1");
+    await friend.getByRole("button", { name: "Log in" }).click();
+    await expect(friend.getByText(/waiting for the admin's approval/)).toBeVisible();
+
+    // The admin sees them waiting, with the Google test-users page one click away.
+    await page.reload();
+    const row = page.getByTestId("pending-user").filter({ hasText: friendEmail });
+    await expect(row).toHaveCount(1);
+    await expect(row.getByTestId("google-test-users")).toHaveAttribute("href", /^https:\/\/console\.cloud\.google\.com\/auth\/audience/);
+    await expect(row.getByTestId("google-test-users")).toHaveAttribute("target", "_blank");
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath("approvals.png"), fullPage: true });
+    await row.getByRole("button", { name: "Approve Asha Friend" }).click();
+    await confirmWith(page, "Approve");
+    await expect(row).toHaveCount(0);
+    await expect(page.getByTestId("admin-user").filter({ hasText: friendEmail })).toContainText("Asha Friend");
+
+    // Now the friend can log in.
+    await friend.getByRole("button", { name: "Log in" }).click();
+    await expect(friend).toHaveURL(/\/(dashboard|setup)/);
+    await friendCtx.close();
+  } finally {
+    // Leave the shared test server as it was.
+    await page.request.put(`${API}/api/admin/settings`, { data: { signupApproval: false } });
+  }
 });
 
 test("touch targets in the bottom nav are at least 44px", async ({ page }, testInfo) => {

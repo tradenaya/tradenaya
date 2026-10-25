@@ -15,26 +15,41 @@ export interface SessionUser {
   id: number;
   name: string;
   email: string;
+  role: "user" | "admin";
+  status: "pending" | "active" | "inactive";
 }
 
-export type AuthedRequest = Request & { user: SessionUser };
+/**
+ * `user` is whose JobDraft this request acts on. `actor` is set only while an
+ * admin uses JobDraft as that user ("act" claim): the admin who is acting.
+ */
+export type AuthedRequest = Request & { user: SessionUser; actor?: SessionUser };
 
-export function signSession(userId: number): string {
-  return jwt.sign({}, config().jwtSecret, { subject: String(userId), expiresIn: `${SESSION_DAYS}d`, audience: AUDIENCE, issuer: "jobdraft", algorithm: "HS256" });
+/** An admin acting as a user gets a short session; normal sessions last 7 days. */
+export const IMPERSONATION_MINUTES = 60;
+
+export function signSession(userId: number, actorId?: number): string {
+  return jwt.sign(actorId ? { act: actorId } : {}, config().jwtSecret, {
+    subject: String(userId),
+    expiresIn: actorId ? `${IMPERSONATION_MINUTES}m` : `${SESSION_DAYS}d`,
+    audience: AUDIENCE,
+    issuer: "jobdraft",
+    algorithm: "HS256",
+  });
 }
 
-export function sessionCookieOptions() {
+export function sessionCookieOptions(actorId?: number) {
   return {
     httpOnly: true,
     secure: config().cookieSecure,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: SESSION_DAYS * 24 * 3600 * 1000,
+    maxAge: actorId ? IMPERSONATION_MINUTES * 60 * 1000 : SESSION_DAYS * 24 * 3600 * 1000,
   };
 }
 
-export function setSessionCookie(res: Response, userId: number) {
-  res.cookie(SESSION_COOKIE, signSession(userId), sessionCookieOptions());
+export function setSessionCookie(res: Response, userId: number, actorId?: number) {
+  res.cookie(SESSION_COOKIE, signSession(userId, actorId), sessionCookieOptions(actorId));
 }
 
 export function clearSessionCookie(res: Response) {
@@ -42,30 +57,75 @@ export function clearSessionCookie(res: Response) {
   res.clearCookie(SESSION_COOKIE, opts);
 }
 
-export function userIdFromCookie(req: Request): number | null {
+export function sessionFromCookie(req: Request): { userId: number; actorId?: number } | null {
   const token = req.cookies?.[SESSION_COOKIE];
   if (!token || typeof token !== "string") return null;
   try {
     const payload = jwt.verify(token, config().jwtSecret, { audience: AUDIENCE, issuer: "jobdraft", algorithms: ["HS256"] }) as jwt.JwtPayload;
     const id = Number(payload.sub);
-    return Number.isInteger(id) && id > 0 ? id : null;
+    if (!Number.isInteger(id) || id <= 0) return null;
+    const act = payload.act === undefined ? undefined : Number(payload.act);
+    if (act !== undefined && (!Number.isInteger(act) || act <= 0)) return null;
+    return { userId: id, ...(act ? { actorId: act } : {}) };
   } catch {
     return null;
   }
 }
 
+export function userIdFromCookie(req: Request): number | null {
+  return sessionFromCookie(req)?.userId ?? null;
+}
+
+const loadSessionUser = (id: number) => queryOne<SessionUser>("SELECT id, name, email, role, status FROM users WHERE id = ?", [id]);
+
+export const INACTIVE_MESSAGE = "This account is inactive. Please ask the JobDraft admin to activate it.";
+export const PENDING_MESSAGE = "Your account is waiting for the admin's approval. You can log in as soon as it's approved.";
+
+/** Why this account can't sign in, or null. */
+export function statusBlock(status: string): HttpError | null {
+  if (status === "pending") return new HttpError(403, PENDING_MESSAGE, "account_pending");
+  if (status !== "active") return new HttpError(403, INACTIVE_MESSAGE, "account_inactive");
+  return null;
+}
+
+/**
+ * Role and status are read from the database on every request (never trusted
+ * from the cookie), so deactivation and admin revocation take effect at once.
+ * An "act as user" session is valid only while its admin is still an active admin.
+ */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
-    const id = userIdFromCookie(req);
-    if (!id) throw new HttpError(401, "Please log in.");
-    const user = await queryOne<SessionUser>("SELECT id, name, email FROM users WHERE id = ?", [id]);
+    const session = sessionFromCookie(req);
+    if (!session) throw new HttpError(401, "Please log in.");
+    const user = await loadSessionUser(session.userId);
     if (!user) throw new HttpError(401, "Please log in.");
+    if (session.actorId) {
+      const actor = await loadSessionUser(session.actorId);
+      if (!actor || actor.role !== "admin" || actor.status !== "active") throw new HttpError(401, "Please log in.");
+      (req as AuthedRequest).actor = actor;
+    } else {
+      const blocked = statusBlock(user.status);
+      if (blocked) throw blocked;
+    }
     (req as AuthedRequest).user = user;
     next();
   } catch (err) {
     next(err);
   }
 };
+
+/** Admin pages: a real (not acting-as-user) session of an active admin. */
+export const requireAdmin: RequestHandler = (req, res, next) => {
+  requireAuth(req, res, (err?: unknown) => {
+    if (err) return next(err);
+    const r = req as AuthedRequest;
+    if (r.actor) return next(new HttpError(403, "Return to your admin account first.", "acting_as_user"));
+    if (r.user.role !== "admin") return next(new HttpError(403, "Admins only."));
+    next();
+  });
+};
+
+export const actorOf = (req: Request) => (req as AuthedRequest).actor;
 
 export const userOf = (req: Request) => (req as AuthedRequest).user;
 
