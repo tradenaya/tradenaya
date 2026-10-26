@@ -70,7 +70,7 @@ Adzuna's API returns a **short snippet** of each posting, so many postings have 
 ## 4. JSearch on RapidAPI (optional, full descriptions)
 
 1. Sign up at https://rapidapi.com → open **JSearch** → **Subscribe** to the free **Basic** plan.
-2. Copy your **X-RapidAPI-Key** into `RAPIDAPI_KEY=…`. Optional: `JSEARCH_DAILY_CAP` (calls per day across all users, default 6) and `JSEARCH_MAX_CALLS_PER_RUN` (one run’s share, default 4). The free plan’s quota is small; JobDraft caches results for 12 hours and rotates searches so everything is covered over the week.
+2. Copy your **X-RapidAPI-Key** into `RAPIDAPI_KEY=…`. The free plan has 200 searches a month: JobDraft spreads them over the month (`JSEARCH_MONTHLY_QUOTA`, `JSEARCH_RESET_DAY` = the day you subscribed), splits each day's searches between users, caches results for 12 hours and rotates searches. Optional extra limits: `JSEARCH_SHARED_DAILY_LIMIT`, `JSEARCH_RUN_LIMIT` (the old `JSEARCH_DAILY_CAP` / `JSEARCH_MAX_CALLS_PER_RUN` are ignored).
 
 The free quota is small (about 200 requests a month); the default 6 calls a day (second pages included) stays within it. Results are shared between users.
 

@@ -9,7 +9,7 @@ import { HOUR } from "../../src/lib/clock.js";
 import { resetDb, setIst } from "../helpers.js";
 
 const ENV_KEYS = [
-  "MOCK_EXTERNAL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "RAPIDAPI_KEY", "ADZUNA_DAILY_CAP", "JSEARCH_DAILY_CAP", "JSEARCH_MAX_CALLS_PER_RUN",
+  "MOCK_EXTERNAL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "RAPIDAPI_KEY", "ADZUNA_DAILY_CAP", "JSEARCH_SHARED_DAILY_LIMIT", "JSEARCH_RUN_LIMIT",
   "JSEARCH_MONTHLY_QUOTA", "JSEARCH_RESET_DAY", "JSEARCH_OWN_KEY_MONTHLY_QUOTA",
 ] as const;
 let saved: Record<string, string | undefined> = {};
@@ -142,7 +142,7 @@ describe("Adzuna", () => {
 
 describe("JSearch", () => {
   it("sends country=in and date_posted=week, maps data.jobs, and fetches page 2 only for 5+ relevant postings", async () => {
-    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MAX_CALLS_PER_RUN: "3" });
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_RUN_LIMIT: "3" });
     jsearchReply = (p) =>
       p.get("cursor")
         ? { status: 200, body: { status: "OK", data: { jobs: [jsJob(9)], cursor: null } } }
@@ -160,14 +160,14 @@ describe("JSearch", () => {
   });
 
   it("no page 2 when fewer than 5 postings are relevant", async () => {
-    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MAX_CALLS_PER_RUN: "1" });
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_RUN_LIMIT: "1" });
     jsearchReply = () => ({ status: 200, body: { status: "OK", data: { jobs: [1, 2, 3, 4, 5].map((i) => jsJob(i)), cursor: "NEXT" } } });
     await collectJobs([PM_PAIRS[0]!], { now: setIst("2026-11-02T09:00"), isRelevant: (j) => j.key.endsWith("1") });
     expect(jsearchCalls().map((c) => c.params.get("cursor"))).toEqual([null]);
   });
 
   it("tracks usage, respects the daily cap, and rotates (role, city, variant) over runs", async () => {
-    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_DAILY_CAP: "6", JSEARCH_MAX_CALLS_PER_RUN: "2" });
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_SHARED_DAILY_LIMIT: "6", JSEARCH_RUN_LIMIT: "2" });
     const pairs = [PM_PAIRS[0]!, PM_PAIRS[1]!];
     const day1 = setIst("2026-11-02T09:00");
     const r1 = await collectJobs(pairs, { now: day1 });
@@ -208,7 +208,7 @@ describe("JSearch", () => {
   });
 
   it("an exhausted quota (HTTP 429) stops JSearch for the rest of the day", async () => {
-    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MAX_CALLS_PER_RUN: "4" });
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_RUN_LIMIT: "4" });
     jsearchReply = () => ({ status: 429, body: { message: "You have exceeded the MONTHLY quota" } });
     const now = setIst("2026-11-02T09:00");
     const res = await collectJobs([PM_PAIRS[0]!], { now });
@@ -221,7 +221,7 @@ describe("JSearch", () => {
   });
 
   it("drops non-India postings and records which variant found each job", async () => {
-    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MAX_CALLS_PER_RUN: "1" });
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_RUN_LIMIT: "1" });
     jsearchReply = () => ({ status: 200, body: { status: "OK", data: { jobs: [jsJob(1), jsJob(2, { job_country: "US", job_location: "Austin, TX" })], cursor: null } } });
     const res = await collectJobs([PM_PAIRS[0]!], { now: setIst("2026-11-02T09:00") });
     expect(res.jobs.map((j) => [j.key, j.variant])).toEqual([["jsearch:uid-1", "plain"]]);
@@ -260,6 +260,21 @@ describe("JSearch quota: monthly pacing, fair shares and own keys", () => {
     // A reset day other than the 1st (the day the RapidAPI plan was subscribed): Oct 25 → Nov 24.
     process.env.JSEARCH_RESET_DAY = "25";
     expect(await sharedBudget(now)).toMatchObject({ daysLeft: 4, usedThisCycle: 70, pool: 0 });
+  });
+
+  it("ignores the old JSEARCH_DAILY_CAP / JSEARCH_MAX_CALLS_PER_RUN still in a server .env (nothing to change on deploy)", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MONTHLY_QUOTA: "290" });
+    Object.assign(process.env, { JSEARCH_DAILY_CAP: "6", JSEARCH_MAX_CALLS_PER_RUN: "4" });
+    try {
+      const now = setIst("2026-11-02T09:00"); // 290 a month, 29 days left → 10 today, not 6
+      expect((await sharedBudget(now)).pool).toBe(10);
+      const res = await collectJobs([PM_PAIRS[0]!, PM_PAIRS[1]!], { now });
+      expect(jsearchCalls()).toHaveLength(10); // not 4 per run
+      expect(res.sources[1]!.calls).toBe(10);
+    } finally {
+      delete process.env.JSEARCH_DAILY_CAP;
+      delete process.env.JSEARCH_MAX_CALLS_PER_RUN;
+    }
   });
 
   it("splits each day's searches equally between active users with automation on", async () => {
