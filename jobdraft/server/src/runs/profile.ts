@@ -33,6 +33,11 @@ export interface RunnableProfile {
   geminiKeyHint: string | null;
   geminiKeyStatus: "valid" | "invalid" | null;
   geminiKeyUpdatedAt: Date | null;
+  /** The user's own (optional) RapidAPI key for JSearch, encrypted (see jobs/jsearch-key.ts). */
+  rapidApiKeyEnc: string | null;
+  rapidApiKeyHint: string | null;
+  rapidApiKeyStatus: "valid" | "not_subscribed" | "invalid" | null;
+  rapidApiKeyUpdatedAt: Date | null;
   gmailAddress: string | null;
   gmailStatus: GmailStatus | null;
   grantedScopes: string[];
@@ -60,6 +65,10 @@ interface Row {
   gemini_key_hint: string | null;
   gemini_key_status: "valid" | "invalid" | null;
   gemini_key_updated_at: Date | null;
+  rapidapi_key_enc: string | null;
+  rapidapi_key_hint: string | null;
+  rapidapi_key_status: "valid" | "not_subscribed" | "invalid" | null;
+  rapidapi_key_updated_at: Date | null;
   gmail_address: string | null;
   gmail_status: GmailStatus | null;
   granted_scopes: string | null;
@@ -94,6 +103,10 @@ function toProfile(row: Row): RunnableProfile {
     geminiKeyHint: row.gemini_key_hint,
     geminiKeyStatus: row.gemini_key_status,
     geminiKeyUpdatedAt: row.gemini_key_updated_at,
+    rapidApiKeyEnc: row.rapidapi_key_enc ?? null,
+    rapidApiKeyHint: row.rapidapi_key_hint ?? null,
+    rapidApiKeyStatus: row.rapidapi_key_status ?? null,
+    rapidApiKeyUpdatedAt: row.rapidapi_key_updated_at ?? null,
     gmailAddress: row.gmail_address,
     gmailStatus: row.gmail_status,
     grantedScopes: (row.granted_scopes ?? "").split(" ").filter(Boolean),

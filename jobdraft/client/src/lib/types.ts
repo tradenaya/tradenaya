@@ -71,6 +71,25 @@ export interface Profile {
   /** The user's own Gemini key (never the key itself). */
   geminiKey: { saved: boolean; hint: string | null; status: "valid" | "invalid" | null; updatedAt: string | null; getKeyUrl: string };
   complete: { geminiKey: boolean; resume: boolean; preferences: boolean; gmail: boolean };
+  jsearch: JSearchInfo;
+}
+
+/** JSearch on Setup: the user's own (optional) RapidAPI key, or their share of the shared searches. */
+export interface JSearchInfo {
+  ownKey: {
+    hint: string | null;
+    status: "valid" | "not_subscribed" | "invalid" | null;
+    updatedAt: string | null;
+    monthlyQuota: number;
+    usedThisMonth: number;
+    todayAllowance: number;
+    usedToday: number;
+    quotaUsedUp: boolean;
+  } | null;
+  /** null when the server has no shared key. */
+  shared: { todayShare: number; usedToday: number; dailyPool: number; sharers: number } | null;
+  subscribeUrl: string;
+  playgroundUrl: string;
 }
 
 export interface Run {
@@ -146,6 +165,8 @@ export interface Application {
   followupMode: "auto" | "draft";
   followupsStopped: boolean;
   note: string | null;
+  /** "Apply via link": a cover note for the application form, once written. */
+  coverNote: string | null;
   skipReason: string | null;
   createdAt: string;
   status: { key: string; label: string; at?: string | null };

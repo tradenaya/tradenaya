@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AutomationSwitch } from "@/components/automation-switch";
 import { GeminiKeyCard } from "@/components/gemini-key";
+import { JSearchKeyCard } from "@/components/jsearch-key";
 import { SendModeSelector } from "@/components/send-mode";
 import { GmailSection } from "@/components/gmail-section";
 import { PreferencesForm } from "@/components/preferences-form";
@@ -83,6 +84,8 @@ function SetupInner() {
         </div>
         <GmailSection profile={profile} onChange={setProfile} />
         {keyOk && <GeminiKeyCard profile={profile} onChange={setProfile} />}
+        {/* Optional: never a setup step. */}
+        <JSearchKeyCard profile={profile} onChange={setProfile} />
         <AutomationSwitch profile={profile} onChange={setProfile} compact />
         <SendModeSelector profile={profile} onChange={setProfile} />
         {allDone && (

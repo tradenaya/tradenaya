@@ -143,13 +143,18 @@ export function parseJSearchResponse(body: JSearchResponse, variant?: JSearchQue
   return { jobs, total: raw.length, notIndia, cursor: body.data?.cursor || null };
 }
 
-/** One page of results for one query (each page is one API call). */
-export async function fetchJSearchPage(q: JSearchQuery, cursor?: string | null): Promise<JSearchPage> {
+/** One page of results for one query (each page is one API call), with the server's key or the user's own. */
+export async function fetchJSearchPage(q: JSearchQuery, cursor?: string | null, key = config().rapidApiKey): Promise<JSearchPage> {
   // "/search" was retired by JSearch ("Endpoint '/search' does not exist"); v5 lives at /search-v2.
   const res = await fetch(`https://${JSEARCH_HOST}/search-v2?${jsearchParams(q, cursor)}`, {
-    headers: { "X-RapidAPI-Key": config().rapidApiKey, "X-RapidAPI-Host": JSEARCH_HOST },
+    headers: { "X-RapidAPI-Key": key, "X-RapidAPI-Host": JSEARCH_HOST },
     signal: AbortSignal.timeout(25000),
   });
-  if (!res.ok) throw new SourceHttpError("jsearch", res.status, `JSearch error ${res.status}`);
+  if (!res.ok) {
+    // RapidAPI explains refusals ("You are not subscribed to this API.", "Invalid API key…").
+    const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+    const why = typeof body?.message === "string" ? `: ${body.message.slice(0, 120)}` : "";
+    throw new SourceHttpError("jsearch", res.status, `JSearch error ${res.status}${why}`);
+  }
   return parseJSearchResponse((await res.json()) as JSearchResponse, q.variant);
 }

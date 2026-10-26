@@ -167,6 +167,14 @@ test("register → setup → automation ON → run now → dashboard sends → h
   const apps = page.getByTestId("application-item");
   await expect(apps.first()).toBeVisible();
   await expect(page.getByTestId("link-item").first()).toBeVisible();
+  // "Apply via link": a cover note for the application form, written on request.
+  const link = page.getByTestId("link-item").first();
+  await link.getByRole("button", { name: /^Write a cover note for / }).click();
+  await expect(link.getByTestId("cover-note")).toContainText("Dear Hiring Team,");
+  await expect(link.getByRole("button", { name: "Copy" })).toBeVisible();
+  await link.screenshot({ path: testInfo.outputPath("cover-note.png") });
+  await link.getByRole("button", { name: /^Hide a cover note for / }).click();
+  await expect(link.getByTestId("cover-note")).toBeHidden();
   // Tap the funnel for per-step details.
   await page.getByRole("button", { name: /How this run went/ }).click();
   const funnel = page.getByTestId("funnel");
@@ -425,6 +433,46 @@ test("Gemini key: where to get one, required at sign-up, and managed on Setup", 
   await confirmWith(page, "Save key");
   await expect(card.getByTestId("gemini-key-status")).toContainText(`…${GEMINI_KEY.slice(-4)}`);
   await expectNoHorizontalOverflow(page);
+});
+
+test("JSearch key: optional, only on Setup, with the steps; not subscribed yet, then a working key", async ({ page }, testInfo) => {
+  // Not asked for at sign-up.
+  await page.goto("/register");
+  await expect(page.getByLabel("RapidAPI key")).toHaveCount(0);
+  await register(page, `e2e-jsearch-${testInfo.project.name}-${Date.now()}@example.org`);
+
+  // Setup: an optional card, never a setup step.
+  const card = page.locator("#jsearch-key");
+  await expect(card).toContainText("More jobs you can apply to by email (optional)");
+  await expect(page.getByLabel("RapidAPI key")).toHaveCount(0);
+  await card.getByTestId("jsearch-add-key").click();
+  for (const id of ["jsearch-open-pricing", "jsearch-open-playground"]) {
+    await expect(card.getByTestId(id)).toHaveAttribute("target", "_blank");
+    await expect(card.getByTestId(id)).toHaveAttribute("href", /^https:\/\/rapidapi\.com\/letscrape-6bRBa3QguO5\/api\/jsearch\//);
+  }
+  await expect(card).toContainText("find X-RapidAPI-Key and copy the long value next to it");
+  await expectNoHorizontalOverflow(page);
+  await card.screenshot({ path: testInfo.outputPath("jsearch-steps.png") });
+
+  // A key that isn't subscribed yet (the demo server treats "notsubscribed" keys that way): kept, with the one step left.
+  await card.getByLabel("RapidAPI key").fill("'x-rapidapi-key': 'e2e-notsubscribed-0123456789abcdef',");
+  await card.getByRole("button", { name: "Save key" }).click();
+  await expect(card.getByTestId("jsearch-not-subscribed")).toContainText("One step left: subscribe to the free plan");
+  await expect(card.getByTestId("jsearch-not-subscribed")).toContainText("…cdef");
+  await card.getByRole("button", { name: "I've subscribed, check again" }).click();
+  await expect(page.getByText("Still not subscribed.")).toBeVisible();
+  await card.getByRole("button", { name: "Remove" }).click();
+  await confirmWith(page, "Remove key");
+
+  // A working key: only its last 4 characters are shown, with this month's searches.
+  await card.getByTestId("jsearch-add-key").click();
+  await card.getByLabel("RapidAPI key").fill("e2e-working-key-0123456789abcdefWXYZ");
+  await card.getByRole("button", { name: "Save key" }).click();
+  await expect(card.getByTestId("jsearch-key-status")).toContainText("Your key ending in …WXYZ works.");
+  await expect(card.getByTestId("jsearch-key-status")).toContainText("1 of 200 searches used this month");
+  await expect(card).not.toContainText("e2e-working-key-0123456789abcdefWXYZ");
+  await expectNoHorizontalOverflow(page);
+  await card.screenshot({ path: testInfo.outputPath("jsearch-saved.png") });
 });
 
 /** The real server command, against the e2e test database (the only way to make an admin). */

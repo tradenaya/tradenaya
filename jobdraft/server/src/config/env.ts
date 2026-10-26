@@ -125,10 +125,20 @@ export function config() {
     /** Adzuna's free plan allows 250 calls a day across all users; stop short of it. */
     adzunaDailyCap: int(e.ADZUNA_DAILY_CAP, 230),
     rapidApiKey: e.RAPIDAPI_KEY || "",
-    /** JSearch's free plan has a small monthly quota: calls per day across all users. */
-    jsearchDailyCap: int(e.JSEARCH_DAILY_CAP, 6),
-    /** One run's share of the JSearch daily cap, so one user can't use the whole day. */
-    jsearchMaxCallsPerRun: int(e.JSEARCH_MAX_CALLS_PER_RUN, 4),
+    /**
+     * Searches a month on the shared RAPIDAPI_KEY (JSearch free plan: 200). Each day
+     * gets what is left divided by the days left in the cycle, so nothing unused is
+     * lost, and that day's searches are split between the users who run.
+     */
+    jsearchMonthlyQuota: int(e.JSEARCH_MONTHLY_QUOTA, 200),
+    /** Day of the month the shared key's RapidAPI quota resets (the day you subscribed). */
+    jsearchResetDay: Math.min(31, Math.max(1, int(e.JSEARCH_RESET_DAY, 1))),
+    /** Searches a month on a user's own key (JSearch free plan: 200). */
+    jsearchOwnKeyMonthlyQuota: int(e.JSEARCH_OWN_KEY_MONTHLY_QUOTA, 200),
+    /** Optional upper limit on shared-key searches per day across all users; 0 = from the monthly quota only. */
+    jsearchDailyCap: int(e.JSEARCH_DAILY_CAP, 0),
+    /** Optional upper limit on searches in one run; 0 = only the user's share for the day. */
+    jsearchMaxCallsPerRun: int(e.JSEARCH_MAX_CALLS_PER_RUN, 0),
     /** Postings the AI checks per user per run; 0 = no cap (until done, the key's limit, or the run's time limit). */
     maxScreenPerRun: int(e.MAX_SCREEN_PER_RUN, 0),
     mockExternal: bool(e.MOCK_EXTERNAL, false),

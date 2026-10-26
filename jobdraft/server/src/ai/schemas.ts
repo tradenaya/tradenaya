@@ -139,3 +139,6 @@ export const screenJsonSchema = {
 export const followUpSchema = z.object({ body: z.string().trim().min(1).max(3000) });
 export type FollowUpText = z.infer<typeof followUpSchema>;
 export const followUpJsonSchema = { type: "object", properties: { body: s }, required: ["body"] };
+
+export const coverNoteSchema = z.object({ note: z.string().trim().min(1).max(3000) });
+export const coverNoteJsonSchema = { type: "object", properties: { note: s }, required: ["note"] };

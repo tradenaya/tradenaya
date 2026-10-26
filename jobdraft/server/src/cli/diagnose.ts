@@ -12,6 +12,9 @@ const { clock } = await import("../lib/clock.js");
 const { istDate, IST_TZ } = await import("../lib/time.js");
 const { automationOnProfiles, hasAllScopes, hasScheduledRunAt } = await import("../runs/profile.js");
 const { explainSchedule } = await import("../runs/runner.js");
+const { sharedBudget, sharerIds } = await import("../jobs/jsearch-budget.js");
+const { applicationEmailsIn } = await import("../matching/emails.js");
+const { json } = await import("../db/pool.js");
 
 const ist = (d: Date | string | null | undefined) =>
   d ? DateTime.fromJSDate(new Date(d), { zone: IST_TZ }).toFormat("yyyy-MM-dd HH:mm") + " IST" : "—";
@@ -33,10 +36,34 @@ async function main() {
 
   console.log("\nJob-source calls today:");
   const usage = await query<{ source: string; calls: number; exhausted: number }>("SELECT source, calls, exhausted FROM api_usage WHERE day = ?", [istDate(now)]);
-  for (const s of ["adzuna", "jsearch"]) {
-    const u = usage.find((x) => x.source === s);
-    const cap = s === "adzuna" ? cfg.adzunaDailyCap : cfg.jsearchDailyCap;
-    console.log(`  ${s.padEnd(8)} ${u?.calls ?? 0}/${cap}${u?.exhausted ? "  (quota exhausted)" : ""}`);
+  const adz = usage.find((x) => x.source === "adzuna");
+  console.log(`  adzuna   ${adz?.calls ?? 0}/${cfg.adzunaDailyCap}${adz?.exhausted ? "  (quota exhausted)" : ""}`);
+  const js = usage.find((x) => x.source === "jsearch");
+  const b = await sharedBudget(now);
+  const sharers = (await sharerIds()).size;
+  console.log(
+    `  jsearch  ${js?.calls ?? 0}/${b.pool} on the shared key${js?.exhausted ? "  (quota exhausted)" : ""} · this cycle ${b.usedThisCycle}/${b.quota}, ${b.daysLeft} days left · ${sharers} users share it (${b.pool > 0 ? Math.max(1, Math.floor(b.pool / Math.max(1, sharers))) : 0} each today)`,
+  );
+  const own = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM profiles WHERE rapidapi_key_enc IS NOT NULL AND rapidapi_key_status = 'valid'");
+  console.log(`  users with their own JSearch key: ${own?.n ?? 0}`);
+
+  // Which source finds postings with an application email (cached searches, last 7 days).
+  console.log("\nPostings in the shared cache (last 7 days):");
+  const cached = await query<{ source: string; payload: unknown }>("SELECT source, payload FROM job_cache WHERE fetched_at > ?", [new Date(now.getTime() - 7 * 86_400_000)]);
+  const per = new Map<string, { searches: number; jobs: number; withEmail: number; descChars: number }>();
+  for (const row of cached) {
+    const x = per.get(row.source) ?? { searches: 0, jobs: 0, withEmail: 0, descChars: 0 };
+    x.searches++;
+    for (const j of json<{ description?: string }[]>(row.payload, [])) {
+      x.jobs++;
+      x.descChars += (j.description ?? "").length;
+      if (applicationEmailsIn(j.description ?? "").length) x.withEmail++;
+    }
+    per.set(row.source, x);
+  }
+  if (!per.size) console.log("  none");
+  for (const [source, x] of per) {
+    console.log(`  ${source.padEnd(8)} ${x.searches} searches · ${x.jobs} postings · ${x.withEmail} with an application email · average description ${Math.round(x.descChars / Math.max(1, x.jobs))} characters`);
   }
 
   const stuck = await query<{ id: number; user_id: number; started_at: Date }>("SELECT id, user_id, started_at FROM runs WHERE status = 'running' ORDER BY id");

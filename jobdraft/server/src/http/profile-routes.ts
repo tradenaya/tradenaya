@@ -8,6 +8,16 @@ import { HttpError } from "../lib/errors.js";
 import { istDate, nextRunAt, normalizeRunTime } from "../lib/time.js";
 import { MAX_RESUME_BYTES } from "../resume/pdf.js";
 import { checkGeminiKey, GEMINI_KEY_URL, geminiKeySchema, removeGeminiKey, saveGeminiKey } from "../ai/user-key.js";
+import { ownKeyBudget, sharedBudget, sharedCallsToday } from "../jobs/jsearch-budget.js";
+import {
+  checkJSearchKey,
+  JSEARCH_PLAYGROUND_URL,
+  JSEARCH_SUBSCRIBE_URL,
+  jsearchKeySchema,
+  recheckJSearchKey,
+  removeJSearchKey,
+  saveJSearchKey,
+} from "../jobs/jsearch-key.js";
 import { editableResume, resumeEditSchema, saveResumeEdits } from "../resume/edit.js";
 import { clearResumeJob, resumeJob, startResumeJob } from "../resume/jobs.js";
 import { readResumeFile } from "../resume/service.js";
@@ -78,6 +88,7 @@ export async function profilePayload(userId: number) {
   const excluded = await listExcluded(userId);
   const now = clock.now();
   return {
+    jsearch: await jsearchPayload(userId, p, now),
     resume,
     preferences: {
       targetRoles: p?.targetRoles ?? [],
@@ -118,6 +129,33 @@ export async function profilePayload(userId: number) {
       preferences: (p?.targetRoles.length ?? 0) > 0 && (p?.locations.length ?? 0) > 0 && p?.expectedSalaryLpa != null,
       gmail: status === "connected" && (p ? hasAllScopes(p) : false),
     },
+  };
+}
+
+/**
+ * JSearch on the Setup page: the user's own key (never the key itself) with its
+ * searches this month and today, or their share of today's shared searches.
+ */
+async function jsearchPayload(userId: number, p: Awaited<ReturnType<typeof loadProfile>>, now: Date) {
+  const own = p?.rapidApiKeyEnc
+    ? await ownKeyBudget(userId, p.rapidApiKeyUpdatedAt, now).then((b) => ({
+        hint: p.rapidApiKeyHint,
+        status: p.rapidApiKeyStatus,
+        updatedAt: p.rapidApiKeyUpdatedAt,
+        monthlyQuota: b.quota,
+        usedThisMonth: b.usedThisCycle,
+        todayAllowance: b.allowance,
+        usedToday: b.usedToday,
+        quotaUsedUp: b.exhausted,
+      }))
+    : null;
+  const sharedConfigured = !!config().rapidApiKey && !config().mockExternal;
+  const shared = sharedConfigured ? await sharedBudget(now, userId) : null;
+  return {
+    ownKey: own,
+    shared: shared ? { todayShare: shared.share, usedToday: await sharedCallsToday(userId, now), dailyPool: shared.pool, sharers: shared.sharers } : null,
+    subscribeUrl: JSEARCH_SUBSCRIBE_URL,
+    playgroundUrl: JSEARCH_PLAYGROUND_URL,
   };
 }
 
@@ -185,6 +223,36 @@ export function profileRouter() {
     "/gemini-key",
     h(async (req, res) => {
       await removeGeminiKey(userOf(req).id);
+      res.json(await profilePayload(userOf(req).id));
+    }),
+  );
+
+  // The user's own RapidAPI key for JSearch (optional): checked with one real search, then stored encrypted.
+  r.put(
+    "/jsearch-key",
+    h(async (req, res) => {
+      const { key } = parse(z.object({ key: jsearchKeySchema }), req.body);
+      const check = await checkJSearchKey(key);
+      await saveJSearchKey(userOf(req).id, key, check);
+      res.json(await profilePayload(userOf(req).id));
+    }),
+  );
+
+  // "I've subscribed, check again": the saved key is checked again.
+  r.post(
+    "/jsearch-key/check",
+    h(async (req, res) => {
+      const userId = userOf(req).id;
+      const p = await loadProfile(userId);
+      await recheckJSearchKey(userId, { rapidApiKeyEnc: p?.rapidApiKeyEnc ?? null, rapidApiKeyStatus: p?.rapidApiKeyStatus ?? null });
+      res.json(await profilePayload(userId));
+    }),
+  );
+
+  r.delete(
+    "/jsearch-key",
+    h(async (req, res) => {
+      await removeJSearchKey(userOf(req).id);
       res.json(await profilePayload(userOf(req).id));
     }),
   );

@@ -1,11 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
 import { config, features, missingFeatureMessages } from "../config/env.js";
-import { json, query, queryOne } from "../db/pool.js";
+import { AiInvalidOutputError, AiKeyRejectedError, AiQuotaError, AiUnavailableError, writeCoverNote } from "../ai/index.js";
+import { geminiKeyOf, markGeminiKeyInvalid } from "../ai/user-key.js";
+import { execute, json, query, queryOne } from "../db/pool.js";
 import { clock, DAY, MINUTE } from "../lib/clock.js";
 import { HttpError } from "../lib/errors.js";
+import type { SourceName } from "../jobs/types.js";
 import type { Funnel } from "../runs/funnel.js";
 import { stopFollowUps } from "../runs/followups.js";
+import { loadProfile } from "../runs/profile.js";
 import { startManualRun } from "../runs/runner.js";
 import { cancelFollowUp, cancelItemSend, cancelRunSends } from "../runs/send-queue.js";
 import { trackUser } from "../runs/tracking.js";
@@ -75,6 +79,7 @@ interface ItemRow {
   followups_stopped: number;
   outcome: string;
   note: string | null;
+  cover_note: string | null;
   created_at: Date;
 }
 
@@ -145,6 +150,7 @@ function itemDto(i: ItemRow, fus: FollowUpDto[]) {
     followupMode: i.followup_mode,
     followupsStopped: !!i.followups_stopped,
     note: i.note,
+    coverNote: i.cover_note,
     skipReason: i.skip_reason,
     createdAt: i.created_at,
     sendMode: i.send_mode,
@@ -185,7 +191,7 @@ async function followUpsFor(itemIds: number[]): Promise<FollowUpDto[]> {
 }
 
 const ITEM_COLUMNS = `id, run_id, type, send_mode, sent_by, company, job_title, location, job_url, source, to_email, subject, confidence, send_state, send_at, sent_at, skip_reason,
-  reply_state, replied_at, followup_mode, followups_stopped, outcome, note, created_at`;
+  reply_state, replied_at, followup_mode, followups_stopped, outcome, note, cover_note, created_at`;
 
 const listQuery = z.object({
   before: z.coerce.number().int().positive().optional(),
@@ -316,6 +322,49 @@ export function runsRouter() {
       const { id } = parse(idParam, req.params);
       if (!(await cancelItemSend(userOf(req).id, id))) throw new HttpError(409, "This email can no longer be cancelled.");
       res.json({ ok: true });
+    }),
+  );
+
+  // A cover note for an "apply via link" posting, written once with the user's own Gemini key and kept.
+  r.post(
+    "/items/:id/cover-note",
+    h(async (req, res) => {
+      const { id } = parse(idParam, req.params);
+      const userId = userOf(req).id;
+      const item = await queryOne<{ type: string; company: string; job_title: string; location: string | null; job_url: string | null; source: string; job_description: string | null; cover_note: string | null }>(
+        "SELECT type, company, job_title, location, job_url, source, job_description, cover_note FROM run_items WHERE id = ? AND user_id = ?",
+        [id, userId],
+      );
+      if (!item || item.type !== "link_only") throw new HttpError(404, "Job not found.");
+      if (item.cover_note) {
+        res.json({ coverNote: item.cover_note });
+        return;
+      }
+      const profile = await loadProfile(userId);
+      if (!profile?.resume) throw new HttpError(400, "Upload your resume first.");
+      const apiKey = geminiKeyOf(profile);
+      if (!apiKey) throw new HttpError(400, "Add your Gemini API key in Setup first.", "gemini_key");
+      let note: string;
+      try {
+        note = await writeCoverNote({
+          apiKey,
+          job: { key: `item:${id}`, source: item.source as SourceName, title: item.job_title, company: item.company, location: item.location ?? "", isRemote: false,
+            description: item.job_description ?? "", url: item.job_url ?? "", postedAt: null, salaryMinLpa: null, salaryMaxLpa: null },
+          resume: profile.resume,
+          experienceYears: profile.experienceYears,
+          targetRoles: profile.targetRoles,
+        });
+      } catch (err) {
+        if (err instanceof AiKeyRejectedError) {
+          await markGeminiKeyInvalid(userId);
+          throw new HttpError(400, err.message, "gemini_key");
+        }
+        if (err instanceof AiQuotaError) throw new HttpError(429, err.message, "ai_quota");
+        if (err instanceof AiUnavailableError || err instanceof AiInvalidOutputError) throw new HttpError(503, "The AI couldn't write the note just now. Please try again in a minute.");
+        throw err;
+      }
+      await execute("UPDATE run_items SET cover_note = ? WHERE id = ? AND user_id = ?", [note, id, userId]);
+      res.json({ coverNote: note });
     }),
   );
 

@@ -17,6 +17,8 @@ import { fetchJSearchPage } from "./jsearch.js";
 import { mockJobsFor } from "./mock.js";
 import { adzunaLabel, adzunaQueries, jsearchCombos, type JSearchQuery } from "./queries.js";
 import type { Job, SearchPair, SourceName } from "./types.js";
+import { markOwnKeyExhausted, ownKeyBudget, reserveOwnCall, reserveSharedCall, sharedBudget, type OwnKeyBudget, type SharedBudget } from "./jsearch-budget.js";
+import { classifyRapidApiRefusal, setJSearchKeyStatus } from "./jsearch-key.js";
 import { markExhausted, reserveCall } from "./usage.js";
 
 /** How long cached postings are reused (across users). */
@@ -63,10 +65,20 @@ function recordError(rep: SourceReport, err: unknown) {
   log.warn("job_source_error", { source: rep.source, status, error: errInfo(err) });
 }
 
+/** A user's own RapidAPI key for JSearch (see jsearch-key.ts). */
+export interface OwnJSearchKey {
+  key: string;
+  savedAt: Date | null;
+}
+
 export interface CollectOptions {
   now?: Date;
   /** Used to decide whether a second JSearch page is worth a call. */
   isRelevant?: (job: Job) => boolean;
+  /** The user this run is for: their share of the shared JSearch searches. */
+  userId?: number;
+  /** Their own key, used first; the shared key only if it stops working. */
+  ownJSearchKey?: OwnJSearchKey | null;
 }
 
 export interface CollectResult {
@@ -126,8 +138,23 @@ async function collectMock(pairs: SearchPair[], now: Date, c: Collector): Promis
  */
 export const ADZUNA_PACING = { gapMs: process.env.NODE_ENV === "test" ? 0 : 2600, retryMs: process.env.NODE_ENV === "test" ? 0 : 10_000, stopAfterBusy: 3 };
 const isBusy = (err: unknown) => err instanceof SourceHttpError && (err.status === 503 || err.status === 429);
+/** Pause before retrying a search whose connection dropped. */
+export const NETWORK_RETRY_MS = process.env.NODE_ENV === "test" ? 0 : 3000;
 
-/** One query per (role, city); remote = keyword searches. Stops at the daily cap, on rejected keys, or when Adzuna keeps saying "busy". */
+/**
+ * The connection dropped or timed out ("fetch failed", a reset, a DNS hiccup):
+ * no answer from the source at all, so one retry usually works.
+ */
+export function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error) || err instanceof SourceHttpError) return false;
+  return err.name === "TimeoutError" || err.name === "AbortError" || /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket|network/i.test(err.message);
+}
+
+/**
+ * One query per (role, city); remote = keyword searches. A busy answer or a
+ * dropped connection is retried once. Stops at the daily cap, on rejected keys,
+ * or when Adzuna keeps saying "busy".
+ */
 async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Promise<SourceReport> {
   const rep = report("adzuna", true);
   const cap = config().adzunaDailyCap;
@@ -163,8 +190,9 @@ async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Prom
         try {
           jobs = await paced(() => fetchAdzuna(q));
         } catch (err) {
-          if (!isBusy(err)) throw err;
-          await sleep(ADZUNA_PACING.retryMs); // busy: one retry after a pause
+          if (isBusy(err)) await sleep(ADZUNA_PACING.retryMs); // busy: one retry after a pause
+          else if (isNetworkError(err)) await sleep(NETWORK_RETRY_MS); // connection dropped: one retry
+          else throw err;
           jobs = await paced(() => fetchAdzuna(q));
         }
         busyInARow = 0;
@@ -186,16 +214,25 @@ async function collectAdzuna(pairs: SearchPair[], now: Date, c: Collector): Prom
   return rep;
 }
 
+type Lane = { key: string; own: boolean };
+
+const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
+
 /**
- * JSearch has a small free quota, so: cached searches (12 h) first, then the
- * least recently searched (role, city, variant) combinations — which rotates
- * through every combination over the days — within this run's share and the
- * daily cap. A second page only when the first had enough relevant postings.
+ * JSearch has a small monthly quota, so: cached searches (12 h, shared by all
+ * users) first, then never-searched / least recently searched (role, city,
+ * variant) combinations, which rotates through all of them over the days.
+ * Searches use the user's own key first (its own monthly quota spread over the
+ * month); otherwise their share of today's shared searches. A second page only
+ * when the first had enough relevant postings.
  */
-async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, isRelevant?: (job: Job) => boolean): Promise<SourceReport> {
+async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, opts: CollectOptions): Promise<SourceReport> {
   const cfg = config();
-  const rep = report("jsearch", !!cfg.rapidApiKey);
-  if (!cfg.rapidApiKey) {
+  const sharedKey = cfg.rapidApiKey;
+  const userId = opts.userId;
+  const own = userId !== undefined ? (opts.ownJSearchKey ?? null) : null;
+  const rep = report("jsearch", !!sharedKey || !!own);
+  if (!rep.configured) {
     rep.note = "Not configured (add RAPIDAPI_KEY)";
     return rep;
   }
@@ -214,7 +251,7 @@ async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, isRe
   }
   if (!stale.length) return rep;
 
-  // Never searched first, then oldest; ties keep the priority order (plain variants first).
+  // Never searched first, then oldest; ties keep the priority order (email-friendly variants first).
   const lastRows = await query<{ combo_key: string; last_queried_at: Date }>(
     "SELECT combo_key, last_queried_at FROM search_rotation WHERE source = 'jsearch' AND combo_key IN (?)",
     [stale.map((s) => s.comboKey)],
@@ -223,52 +260,107 @@ async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, isRe
   const order = new Map(stale.map((s, i) => [s.comboKey, i]));
   stale.sort((a, b) => (last.get(a.comboKey) ?? 0) - (last.get(b.comboKey) ?? 0) || order.get(a.comboKey)! - order.get(b.comboKey)!);
 
-  const cap = cfg.jsearchDailyCap;
   const perRun = cfg.jsearchMaxCallsPerRun;
   let runCalls = 0;
-  let stopped: string | null = null;
-  let deferred = 0;
-  const take = async () => {
-    if (stopped || runCalls >= perRun) return false;
-    if (!(await reserveCall("jsearch", cap, now))) {
-      stopped = `Daily cap reached (${cap} calls/day across all users)`;
-      return false;
+  let ownCalls = 0;
+  const ownBudget: OwnKeyBudget | null = own ? await ownKeyBudget(userId!, own.savedAt, now) : null;
+  // The own key "breaks" when RapidAPI refuses it; only then does its owner fall back to the shared searches.
+  let ownBroken = !!ownBudget?.exhausted;
+  let ownOn = !!ownBudget && !ownBroken;
+  let ownStop: string | null = ownBroken ? "Your JSearch key has no searches left this month" : null;
+  let shared: SharedBudget | null = null;
+  let sharedStop: string | null = null;
+
+  const take = async (): Promise<Lane | null> => {
+    if (perRun > 0 && runCalls >= perRun) return null;
+    let lane: Lane | null = null;
+    if (ownOn && ownBudget) {
+      if (await reserveOwnCall(userId!, ownBudget, now)) lane = { key: own!.key, own: true };
+      else {
+        ownOn = false;
+        ownStop = `Your JSearch key: today's ${ownBudget.allowance} searches are used (its ${ownBudget.quota} a month are spread over the month)`;
+      }
     }
+    if (!lane && sharedKey && !sharedStop && (!ownBudget || ownBroken)) {
+      shared ??= await sharedBudget(now, userId);
+      const r = await reserveSharedCall(shared, now, userId);
+      if (r === "ok") lane = { key: sharedKey, own: false };
+      else
+        sharedStop =
+          r === "share"
+            ? `Your share of today's free JSearch searches is used (${shared.share} of ${shared.pool}, shared by ${plural(shared.sharers, "user")})`
+            : `Today's free JSearch searches are used (${shared.pool} a day, shared by all users)`;
+    }
+    if (!lane) return null;
     runCalls++;
     rep.calls++;
-    return true;
+    if (lane.own) ownCalls++;
+    return lane;
   };
 
+  const fetchPage = async (combo: JSearchQuery, cursor: string | null, lane: Lane) => {
+    try {
+      return await fetchJSearchPage(combo, cursor, lane.key);
+    } catch (err) {
+      if (!isNetworkError(err)) throw err;
+      await sleep(NETWORK_RETRY_MS); // connection dropped: one retry
+      return fetchJSearchPage(combo, cursor, lane.key);
+    }
+  };
+
+  // RapidAPI doesn't count refused calls; the own key's count shows searches that ran.
+  const refused = async (err: unknown, lane: Lane) => {
+    if (!(err instanceof SourceHttpError)) return;
+    if (lane.own) {
+      if (isQuotaStatus(err.status)) {
+        await markOwnKeyExhausted(userId!, now);
+        ownStop = "Your JSearch key has used this month's free searches";
+      } else {
+        const status = classifyRapidApiRefusal(err.status, err.message);
+        if (!status) return;
+        await setJSearchKeyStatus(userId!, status);
+        ownStop = status === "not_subscribed" ? "Your JSearch key isn't subscribed to the free plan yet (see Setup)" : "RapidAPI rejected your JSearch key (see Setup)";
+      }
+      ownOn = false;
+      ownBroken = true;
+      ownCalls--;
+    } else if (isQuotaStatus(err.status)) {
+      await markExhausted("jsearch", now);
+      sharedStop = "Quota exhausted (HTTP 429), skipped until tomorrow";
+    } else if (err.status === 401 || err.status === 403) {
+      sharedStop = `Key rejected or not subscribed to JSearch (HTTP ${err.status})`;
+    }
+  };
+
+  let deferred = 0;
   for (const combo of stale) {
-    if (!(await take())) {
+    const lane = await take();
+    if (!lane) {
       deferred++;
       continue;
     }
     let jobs: Job[] = [];
     let error: string | undefined;
     try {
-      const first = await fetchJSearchPage(combo);
+      const first = await fetchPage(combo, null, lane);
       jobs = first.jobs;
-      const relevant = isRelevant ? jobs.filter(isRelevant).length : jobs.length;
-      if (first.cursor && relevant >= JSEARCH_SECOND_PAGE_MIN_RELEVANT && (await take())) {
+      const relevant = opts.isRelevant ? jobs.filter(opts.isRelevant).length : jobs.length;
+      const lane2 = first.cursor && relevant >= JSEARCH_SECOND_PAGE_MIN_RELEVANT ? await take() : null;
+      if (first.cursor && lane2) {
         try {
-          const second = await fetchJSearchPage(combo, first.cursor);
+          const second = await fetchPage(combo, first.cursor, lane2);
           const have = new Set(jobs.map((j) => j.key));
           jobs = [...jobs, ...second.jobs.filter((j) => !have.has(j.key))];
         } catch (err) {
           recordError(rep, err);
+          await refused(err, lane2);
         }
       }
       await writeCache("jsearch", combo.comboKey, "in", jobs, now);
     } catch (err) {
       recordError(rep, err);
       error = err instanceof Error ? err.message : "error";
-      if (err instanceof SourceHttpError && isQuotaStatus(err.status)) {
-        await markExhausted("jsearch", now);
-        stopped = "Quota exhausted (HTTP 429), skipped until tomorrow";
-      } else if (err instanceof SourceHttpError && (err.status === 401 || err.status === 403)) {
-        stopped = `Key rejected or not subscribed to JSearch (HTTP ${err.status})`;
-      }
+      await refused(err, lane);
     }
     await execute(
       "INSERT INTO search_rotation (source, combo_key, last_queried_at) VALUES ('jsearch', ?, ?) ON DUPLICATE KEY UPDATE last_queried_at = VALUES(last_queried_at)",
@@ -278,8 +370,10 @@ async function collectJSearch(pairs: SearchPair[], now: Date, c: Collector, isRe
     c.add(jobs);
     c.log({ source: "jsearch", variant: combo.variant, role: combo.role, location: combo.location, query: combo.query, fetched: jobs.length, fromCache: false, error });
   }
-  if (stopped) rep.note = deferred ? `${stopped}; ${deferred} searches left for later runs` : stopped;
-  else if (deferred) rep.note = `${deferred} searches rotated to later runs (free quota)`;
+  const stops = [ownStop, sharedStop].filter((x): x is string => !!x);
+  const parts = ownCalls ? [`${plural(ownCalls, "search", "searches")} with your own key`, ...stops] : stops;
+  if (deferred) parts.push(stops.length ? `${deferred} searches left for later runs` : `${deferred} searches rotated to later runs (free quota)`);
+  if (parts.length) rep.note = parts.join("; ");
   return rep;
 }
 
@@ -293,7 +387,7 @@ export async function collectJobs(pairs: SearchPair[], opts: CollectOptions = {}
     sources.push(await collectMock(unique, now, c));
   } else {
     sources.push(f.adzuna ? await collectAdzuna(unique, now, c) : { ...report("adzuna", false), note: "Not configured (add ADZUNA_APP_ID / ADZUNA_APP_KEY)" });
-    sources.push(await collectJSearch(unique, now, c, opts.isRelevant));
+    sources.push(await collectJSearch(unique, now, c, opts));
   }
   return { jobs: [...c.jobs.values()], sources, queries: c.queries };
 }

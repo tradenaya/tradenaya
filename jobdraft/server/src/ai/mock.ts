@@ -4,7 +4,7 @@ import { extractEmails } from "../matching/emails.js";
 import { isStaffingAgencyName } from "../matching/filters.js";
 import type { ResumeData } from "./schemas.js";
 
-type Req = { task: "resume" | "job_check" | "screen" | "followup"; input: unknown };
+type Req = { task: "resume" | "job_check" | "screen" | "followup" | "cover_note"; input: unknown };
 
 interface MockCandidate {
   name: string;
@@ -20,6 +20,7 @@ interface MockCandidate {
 export async function mockGenerateJson(req: Req): Promise<unknown> {
   if (req.task === "resume") return mockResume((req.input as { text: string }).text);
   if (req.task === "followup") return mockFollowUp(req.input as { sequence: 1 | 2; company: string; job_title: string; candidate: MockCandidate });
+  if (req.task === "cover_note") return mockCoverNote(req.input as { candidate: MockCandidate; posting: { title: string; company: string } });
   if (req.task === "screen") return mockScreen(req.input as { candidate: MockCandidate; postings: { index: number; title: string; company: string; description: string }[] });
   const { candidate, posting } = req.input as { candidate: MockCandidate; posting: { title: string; company: string; location: string; description: string } };
   return mockJobCheck(candidate, posting);
@@ -40,6 +41,20 @@ function mockScreen({ candidate, postings }: { candidate: MockCandidate; posting
         is_staffing_agency: c.is_staffing_agency,
       };
     }),
+  };
+}
+
+function mockCoverNote({ candidate, posting }: { candidate: MockCandidate; posting: { title: string; company: string } }) {
+  const strength = candidate.skills.slice(0, 2).join(" and ") || "my core skills";
+  return {
+    note: `Dear Hiring Team,
+
+I am applying for the ${posting.title} role at ${posting.company}. I work as ${candidate.current_title || "a professional in this field"} with ${candidate.total_experience_years} years of experience.
+
+My day to day work with ${strength} matches what this role needs, and I would like to bring that to your team.
+
+Regards,
+${candidate.name}`,
   };
 }
 

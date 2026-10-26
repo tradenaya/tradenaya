@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ExternalLink, History as HistoryIcon, Link2, Mail } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, FileText, History as HistoryIcon, Link2, Mail } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog";
@@ -185,7 +185,9 @@ function RunCard({ run }: { run: Run }) {
                   <p className="text-slate-600">Nothing to apply for by link in this run.</p>
                 ) : (
                   <>
-                    <p className="mb-2 text-sm text-slate-600">Good matches that don&apos;t take email applications. Apply on their site.</p>
+                    <p className="mb-2 text-sm text-slate-600">
+                      Good matches that don&apos;t take email applications. Apply on their site; JobDraft can write a cover note to paste into their form.
+                    </p>
                     <ul className="divide-y divide-slate-200">
                       {detail.linkOnly.map((d) => (
                         <li key={d.id} className="py-3 first:pt-0" data-testid="link-item">
@@ -193,6 +195,7 @@ function RunCard({ run }: { run: Run }) {
                           <p className="break-words text-slate-800">{d.jobTitle}</p>
                           {d.location && <p className="text-sm text-slate-600">{d.location}</p>}
                           {d.jobUrl && <JobLink href={d.jobUrl} />}
+                          <CoverNote item={d} />
                         </li>
                       ))}
                     </ul>
@@ -344,6 +347,54 @@ function Timeline({ app }: { app: Application }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+/** "Apply via link": a cover note for the application form, written on request (with the user's Gemini key) and kept. */
+function CoverNote({ item }: { item: Application }) {
+  const [note, setNote] = useState(item.coverNote);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function toggle() {
+    if (note) return setOpen((o) => !o);
+    setBusy(true);
+    try {
+      const res = await api<{ coverNote: string }>(`/api/items/${item.id}/cover-note`, { method: "POST" });
+      setNote(res.coverNote);
+      setOpen(true);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(note ?? "");
+      toast.success("Cover note copied. Paste it into the application form.");
+    } catch {
+      toast.error("Couldn't copy. Select the text and copy it yourself.");
+    }
+  }
+
+  return (
+    <div className="mt-1">
+      <Button type="button" variant="secondary" onClick={() => void toggle()} loading={busy} aria-expanded={!!note && open} aria-label={`${note ? (open ? "Hide" : "Show") : "Write"} a cover note for ${item.company}`}>
+        <FileText className="size-4" aria-hidden /> {note ? (open ? "Hide cover note" : "Show cover note") : "Write a cover note"}
+      </Button>
+      {note && open && (
+        <div className="mt-2 rounded-xl bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+          <p className="whitespace-pre-wrap break-words text-[15px] text-slate-800" data-testid="cover-note">
+            {note}
+          </p>
+          <Button type="button" variant="secondary" onClick={() => void copy()} className="mt-2">
+            <Copy className="size-4" aria-hidden /> Copy
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

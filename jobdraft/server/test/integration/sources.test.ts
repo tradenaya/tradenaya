@@ -1,13 +1,17 @@
 // Real-source code paths (Adzuna, JSearch) with a stubbed fetch: no network,
 // no real keys. MOCK_EXTERNAL is switched off only inside these tests.
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closePool, query, queryOne } from "../../src/db/pool.js";
+import { closePool, execute, query, queryOne } from "../../src/db/pool.js";
 import { collectJobs } from "../../src/jobs/fetch.js";
+import { sharedBudget } from "../../src/jobs/jsearch-budget.js";
 import type { JSearchJob } from "../../src/jobs/jsearch.js";
 import { HOUR } from "../../src/lib/clock.js";
 import { resetDb, setIst } from "../helpers.js";
 
-const ENV_KEYS = ["MOCK_EXTERNAL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "RAPIDAPI_KEY", "ADZUNA_DAILY_CAP", "JSEARCH_DAILY_CAP", "JSEARCH_MAX_CALLS_PER_RUN"] as const;
+const ENV_KEYS = [
+  "MOCK_EXTERNAL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "RAPIDAPI_KEY", "ADZUNA_DAILY_CAP", "JSEARCH_DAILY_CAP", "JSEARCH_MAX_CALLS_PER_RUN",
+  "JSEARCH_MONTHLY_QUOTA", "JSEARCH_RESET_DAY", "JSEARCH_OWN_KEY_MONTHLY_QUOTA",
+] as const;
 let saved: Record<string, string | undefined> = {};
 
 function setEnv(over: Partial<Record<(typeof ENV_KEYS)[number], string>>) {
@@ -19,10 +23,13 @@ interface Call {
   host: string;
   path: string;
   params: URLSearchParams;
+  /** The RapidAPI key sent (JSearch). */
+  key: string | null;
 }
+type Reply = { status: number; body: unknown } | { dropConnection: true };
 let calls: Call[] = [];
-let adzunaReply: (p: URLSearchParams) => { status: number; body: unknown } = () => ({ status: 200, body: { results: [] } });
-let jsearchReply: (p: URLSearchParams) => { status: number; body: unknown } = () => ({ status: 200, body: { status: "OK", data: { jobs: [], cursor: null } } });
+let adzunaReply: (p: URLSearchParams) => Reply = () => ({ status: 200, body: { results: [] } });
+let jsearchReply: (p: URLSearchParams, key: string | null) => Reply = () => ({ status: 200, body: { status: "OK", data: { jobs: [], cursor: null } } });
 
 beforeEach(async () => {
   await resetDb();
@@ -30,10 +37,12 @@ beforeEach(async () => {
   calls = [];
   adzunaReply = () => ({ status: 200, body: { results: [] } });
   jsearchReply = () => ({ status: 200, body: { status: "OK", data: { jobs: [], cursor: null } } });
-  vi.stubGlobal("fetch", async (input: string) => {
+  vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     const url = new URL(input);
-    calls.push({ host: url.host, path: url.pathname, params: url.searchParams });
-    const r = url.host.includes("adzuna") ? adzunaReply(url.searchParams) : jsearchReply(url.searchParams);
+    const key = (init?.headers as Record<string, string> | undefined)?.["X-RapidAPI-Key"] ?? null;
+    calls.push({ host: url.host, path: url.pathname, params: url.searchParams, key });
+    const r = url.host.includes("adzuna") ? adzunaReply(url.searchParams) : jsearchReply(url.searchParams, key);
+    if ("dropConnection" in r) throw new TypeError("fetch failed"); // what Node reports for a dropped connection
     return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
   });
 });
@@ -179,7 +188,7 @@ describe("JSearch", () => {
     calls = [];
     const capped = await collectJobs(pairs, { now: new Date(day1.getTime() + 3 * HOUR) });
     expect(jsearchCalls()).toHaveLength(0);
-    expect(capped.sources[1]!.note).toMatch(/^Daily cap reached \(6 calls\/day across all users\)/);
+    expect(capped.sources[1]!.note).toBe("Today's free JSearch searches are used (6 a day, shared by all users); 4 searches left for later runs");
 
     // Next day: never-searched combinations first (walk-in), then the oldest.
     calls = [];
@@ -218,5 +227,142 @@ describe("JSearch", () => {
     expect(res.jobs.map((j) => [j.key, j.variant])).toEqual([["jsearch:uid-1", "plain"]]);
     const rot = await query<{ combo_key: string }>("SELECT combo_key FROM search_rotation");
     expect(rot.map((r) => r.combo_key)).toEqual(["product manager in pune india"]);
+  });
+});
+
+/** A user straight in the database: automation on, Gmail connected (what counts as "sharing" the server's JSearch key). */
+async function sharer(i: number, opts: { automation?: boolean; ownKeyStatus?: "valid" | "not_subscribed"; inactive?: boolean } = {}): Promise<number> {
+  const res = await execute("INSERT INTO users (name, email, password_hash, status) VALUES (?, ?, 'x', ?)", [`User ${i}`, `u${i}@example.org`, opts.inactive ? "inactive" : "active"]);
+  const id = res.insertId;
+  await execute("INSERT INTO profiles (user_id, automation_enabled, rapidapi_key_enc, rapidapi_key_status) VALUES (?, ?, ?, ?)", [
+    id,
+    opts.automation === false ? 0 : 1,
+    opts.ownKeyStatus ? "encrypted" : null,
+    opts.ownKeyStatus ?? null,
+  ]);
+  await execute("INSERT INTO gmail_connections (user_id, gmail_address, refresh_token_enc, status) VALUES (?, ?, 'enc', 'connected')", [id, `u${i}@gmail.com`]);
+  return id;
+}
+
+const OK_ONE_JOB: Reply = { status: 200, body: { status: "OK", data: { jobs: [jsJob(1)], cursor: null } } };
+const OWN = "own-key-123";
+
+describe("JSearch quota: monthly pacing, fair shares and own keys", () => {
+  it("spreads what is left of the month over the days left, so unused searches carry over", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_MONTHLY_QUOTA: "60" });
+    const now = setIst("2026-11-21T09:00"); // 10 days left in November, counting today
+    expect(await sharedBudget(now)).toMatchObject({ pool: 6, usedThisCycle: 0, daysLeft: 10 });
+    await execute("INSERT INTO api_usage (source, day, calls) VALUES ('jsearch', '2026-10-30', 50), ('jsearch', '2026-11-05', 10), ('jsearch', '2026-11-20', 10)");
+    // October is another cycle; 20 used in November: (60 − 20) / 10 days.
+    expect(await sharedBudget(now)).toMatchObject({ pool: 4, usedThisCycle: 20 });
+    // Unused searches aren't lost: the last day of the cycle may use everything left.
+    expect((await sharedBudget(setIst("2026-11-30T09:00"))).pool).toBe(40);
+    // A reset day other than the 1st (the day the RapidAPI plan was subscribed): Oct 25 → Nov 24.
+    process.env.JSEARCH_RESET_DAY = "25";
+    expect(await sharedBudget(now)).toMatchObject({ daysLeft: 4, usedThisCycle: 70, pool: 0 });
+  });
+
+  it("splits each day's searches equally between active users with automation on", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "" });
+    const a = await sharer(1);
+    const b = await sharer(2);
+    const handRunner = await sharer(3, { automation: false }); // only joins when they run by hand
+    await sharer(4, { ownKeyStatus: "valid" }); // has their own key
+    await sharer(5, { inactive: true });
+    const now = setIst("2026-11-02T09:00"); // 200 a month, 29 days left → 6 today
+    expect(await sharedBudget(now, a)).toMatchObject({ pool: 6, sharers: 2, share: 3 });
+
+    const ra = await collectJobs([PM_PAIRS[0]!], { now, userId: a });
+    expect(jsearchCalls()).toHaveLength(3);
+    expect(new Set(jsearchCalls().map((c) => c.key))).toEqual(new Set(["test-rapid"]));
+    expect(ra.sources[1]!.note).toBe("Your share of today's free JSearch searches is used (3 of 6, shared by 2 users); 2 searches left for later runs");
+
+    calls = [];
+    await collectJobs([PM_PAIRS[1]!], { now, userId: b });
+    expect(jsearchCalls()).toHaveLength(3);
+
+    // a runs again later: their share is used (the 3 done are answered from the cache).
+    calls = [];
+    const again = await collectJobs([PM_PAIRS[0]!], { now: new Date(now.getTime() + HOUR), userId: a });
+    expect(jsearchCalls()).toHaveLength(0);
+    expect(again.sources[1]!.cached).toBe(3);
+
+    // Someone without automation runs by hand: they'd get a share (6 / 3), but today's 6 are used.
+    calls = [];
+    const rc = await collectJobs([PM_PAIRS[3]!], { now, userId: handRunner });
+    expect(jsearchCalls()).toHaveLength(0);
+    expect(rc.sources[1]!.note).toMatch(/^Today's free JSearch searches are used \(6 a day, shared by all users\)/);
+    expect((await usage("jsearch"))!.calls).toBe(6);
+    const perUser = await query<{ user_id: number; calls: number }>("SELECT user_id, calls FROM jsearch_user_usage WHERE own_key = 0 ORDER BY user_id");
+    expect(perUser.map((r) => [r.user_id, r.calls])).toEqual([[a, 3], [b, 3], [handRunner, 0]]);
+  });
+
+  it("uses the user's own key with its own monthly quota and leaves the shared searches to others", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "", JSEARCH_OWN_KEY_MONTHLY_QUOTA: "90" });
+    const u = await sharer(1, { ownKeyStatus: "valid" });
+    const other = await sharer(2);
+    const now = setIst("2026-11-02T09:00");
+    // Saved today: its cycle runs Nov 2 → Dec 2 (30 days) → 3 a day.
+    const res = await collectJobs([PM_PAIRS[0]!], { now, userId: u, ownJSearchKey: { key: OWN, savedAt: now } });
+    expect(jsearchCalls().map((c) => c.key)).toEqual([OWN, OWN, OWN]);
+    expect(res.sources[1]!.note).toBe(
+      "3 searches with your own key; Your JSearch key: today's 3 searches are used (its 90 a month are spread over the month); 2 searches left for later runs",
+    );
+    expect(await usage("jsearch")).toBeNull(); // the shared key wasn't used
+    expect(await sharedBudget(now, other)).toMatchObject({ sharers: 1, share: 6 });
+  });
+
+  it("an own key RapidAPI refuses (not subscribed) is flagged for Setup; the run falls back to the shared searches", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "" });
+    const u = await sharer(1, { ownKeyStatus: "valid" });
+    jsearchReply = (_p, key) => (key === OWN ? { status: 403, body: { message: "You are not subscribed to this API." } } : OK_ONE_JOB);
+    const now = setIst("2026-11-02T09:00");
+    const res = await collectJobs([PM_PAIRS[0]!], { now, userId: u, ownJSearchKey: { key: OWN, savedAt: now } });
+    expect(jsearchCalls().map((c) => c.key)).toEqual([OWN, "test-rapid", "test-rapid", "test-rapid", "test-rapid"]);
+    expect(res.sources[1]!.note).toBe("Your JSearch key isn't subscribed to the free plan yet (see Setup)");
+    expect(res.sources[1]!.errors[0]).toEqual({ status: 403, message: "JSearch error 403: You are not subscribed to this API." });
+    expect(res.jobs.map((j) => j.key)).toEqual(["jsearch:uid-1"]);
+    const p = await queryOne<{ rapidapi_key_status: string }>("SELECT rapidapi_key_status FROM profiles WHERE user_id = ?", [u]);
+    expect(p!.rapidapi_key_status).toBe("not_subscribed");
+  });
+
+  it("an own key out of monthly searches (HTTP 429) isn't tried again today; the shared searches are used instead", async () => {
+    setEnv({ ADZUNA_APP_ID: "", ADZUNA_APP_KEY: "" });
+    const u = await sharer(1, { ownKeyStatus: "valid" });
+    jsearchReply = (_p, key) => (key === OWN ? { status: 429, body: { message: "You have exceeded the MONTHLY quota" } } : OK_ONE_JOB);
+    const now = setIst("2026-11-02T09:00");
+    const own = { key: OWN, savedAt: setIst("2026-10-20T10:00") };
+    const first = await collectJobs([PM_PAIRS[0]!], { now, userId: u, ownJSearchKey: own });
+    expect(jsearchCalls()[0]!.key).toBe(OWN);
+    expect(jsearchCalls().slice(1).every((c) => c.key === "test-rapid")).toBe(true);
+    expect(first.sources[1]!.note).toBe("Your JSearch key has used this month's free searches");
+    calls = [];
+    const later = await collectJobs([PM_PAIRS[1]!], { now: new Date(now.getTime() + HOUR), userId: u, ownJSearchKey: own });
+    expect(jsearchCalls().length).toBeGreaterThan(0);
+    expect(jsearchCalls().every((c) => c.key === "test-rapid")).toBe(true);
+    expect(later.sources[1]!.note).toMatch(/^Your JSearch key has no searches left this month/);
+  });
+
+  it("a dropped connection ('fetch failed') is retried once, for Adzuna and JSearch, without using another search", async () => {
+    setEnv({});
+    let a = 0;
+    adzunaReply = () => (++a === 1 ? { dropConnection: true } : { status: 200, body: { results: [] } });
+    let j = 0;
+    jsearchReply = () => (++j === 1 ? { dropConnection: true } : OK_ONE_JOB);
+    const res = await collectJobs([PM_PAIRS[0]!], { now: setIst("2026-11-02T09:00") });
+    expect(adzunaCalls()).toHaveLength(2); // the one Pune search, retried
+    expect(res.sources[0]!.errors).toEqual([]);
+    expect(jsearchCalls()).toHaveLength(6); // 5 searches + 1 retry
+    expect(res.sources[1]).toMatchObject({ calls: 5, errors: [] });
+    expect((await usage("jsearch"))!.calls).toBe(5);
+  });
+
+  it("a connection that drops twice is reported, and the next search still runs", async () => {
+    setEnv({ RAPIDAPI_KEY: "" });
+    adzunaReply = () => ({ dropConnection: true });
+    const res = await collectJobs([PM_PAIRS[0]!, PM_PAIRS[1]!], { now: setIst("2026-11-02T09:00") });
+    expect(adzunaCalls()).toHaveLength(4);
+    expect(res.sources[0]!.errors.map((e) => e.message)).toEqual(["fetch failed", "fetch failed"]);
+    expect(res.queries.map((q) => q.error)).toEqual(["fetch failed", "fetch failed"]);
   });
 });

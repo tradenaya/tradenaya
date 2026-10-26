@@ -6,6 +6,7 @@ import { execute, isDuplicateKey, query, queryOne } from "../db/pool.js";
 import { gmail } from "../gmail/index.js";
 import { buildMimeMessage, generateMessageId, toBase64Url } from "../gmail/mime.js";
 import { collectJobs } from "../jobs/fetch.js";
+import { usableJSearchKey } from "../jobs/jsearch-key.js";
 import type { Job, SearchPair } from "../jobs/types.js";
 import { clock, DAY, MINUTE } from "../lib/clock.js";
 import { GmailAuthError, HttpError, sleep } from "../lib/errors.js";
@@ -148,17 +149,37 @@ function chunks<T>(list: T[], size: number): T[][] {
   return out;
 }
 
+/** Description kept with an "apply via link" posting, for writing its cover note later. */
+const MAX_KEPT_DESCRIPTION = 8000;
+
 async function insertLinkOnly(runId: number, userId: number, job: Job, note: string, confidence: number | null, now: Date) {
   await execute(
-    `INSERT INTO run_items (run_id, user_id, type, company, company_key, job_title, location, job_url, source, query_variant, posted_at, note, confidence, created_at)
-     VALUES (?, ?, 'link_only', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO run_items (run_id, user_id, type, company, company_key, job_title, location, job_url, source, query_variant, posted_at, note, confidence, job_description, created_at)
+     VALUES (?, ?, 'link_only', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [runId, userId, job.company.slice(0, 255), companyKey(job.company), job.title.slice(0, 255), job.location.slice(0, 255), job.url.slice(0, 2048), job.source,
-      job.variant ?? null, job.postedAt ? new Date(job.postedAt) : null, note.slice(0, 300), confidence, now],
+      job.variant ?? null, job.postedAt ? new Date(job.postedAt) : null, note.slice(0, 300), confidence, job.description.slice(0, MAX_KEPT_DESCRIPTION) || null, now],
   );
 }
 
 /**
- * Fetch → filter → AI screen (5 per call, up to 15 per run) → an email for
+ * The order postings are screened in, so a key that hits its limit early is
+ * spent on the postings that can become applications: every posting that
+ * states an application email first, then the rest. Within each group: a close
+ * title match to a target role, then JSearch (full descriptions). Every target
+ * role counts equally (career moves too).
+ */
+export function screeningOrder(jobs: Job[], targetRoles: string[]): Job[] {
+  const roles = targetRoles.map((r) => r.toLowerCase());
+  const rank = (j: Job) => (roles.some((r) => j.title.toLowerCase().includes(r)) ? 2 : 0) + (j.source === "jsearch" ? 1 : 0);
+  const byRank = (a: Job, b: Job) => rank(b) - rank(a);
+  const withEmail: Job[] = [];
+  const rest: Job[] = [];
+  for (const j of jobs) (applicationEmailsIn(j.description).length ? withEmail : rest).push(j);
+  return [...withEmail.sort(byRank), ...rest.sort(byRank)];
+}
+
+/**
+ * Fetch → filter → AI screen (email postings first, 10 per call) → an email for
  * each suitable posting that states an application address, "apply via link"
  * for the rest. Never throws: failures are recorded on the run with the funnel
  * so far. Drafts already created stay in Gmail whatever happens later.
@@ -187,7 +208,12 @@ export async function processRun(runId: number, userId: number): Promise<void> {
 
     // 2. Jobs from every source (shared cache, daily caps).
     const quickMatch = (j: Job) => locationMatches(j, profile.locations) && titleMatchesAny(j.title, profile.targetRoles);
-    const collected = await collectJobs(pairsFor(profile), { isRelevant: quickMatch });
+    const ownKey = usableJSearchKey(profile);
+    const collected = await collectJobs(pairsFor(profile), {
+      isRelevant: quickMatch,
+      userId,
+      ownJSearchKey: ownKey ? { key: ownKey, savedAt: profile.rapidApiKeyUpdatedAt } : null,
+    });
     funnel.sources = collected.sources;
     funnel.queries = collected.queries;
     funnel.fetched = collected.jobs.length;
@@ -211,16 +237,11 @@ export async function processRun(runId: number, userId: number): Promise<void> {
     });
     for (const r of rejected) bump(funnel.removed, stepOf(r.reason));
     funnel.afterFilters = passed.length;
-    // Postings that state an email can become applications: screen those first (newest first within each group).
-    // Most promising first, so a key that hits its limit early is spent on the best postings:
-    // an application email (only those can become emails) > a close title match to a target role
-    // > JSearch (full descriptions) > newest. Every target role counts equally (career moves too).
-    const closeTitle = (j: Job) => profile.targetRoles.some((r) => j.title.toLowerCase().includes(r.toLowerCase()));
-    const priority = (j: Job) => (applicationEmailsIn(j.description).length ? 8 : 0) + (closeTitle(j) ? 4 : 0) + (j.source === "jsearch" ? 2 : 0);
-    passed.sort((a, b) => priority(b) - priority(a));
+    // Postings with an application email are screened first (see screeningOrder).
     // No fixed cap by default: screen until done, the key's limit, or the run's time limit.
+    const ordered = screeningOrder(passed, profile.targetRoles);
     const cap = config().maxScreenPerRun;
-    const toScreen = cap > 0 ? passed.slice(0, cap) : passed;
+    const toScreen = cap > 0 ? ordered.slice(0, cap) : ordered;
     funnel.notChecked = passed.length - toScreen.length;
     let quotaHit = false;
     log.info("run_filtered", { ...ctx, fetched: funnel.fetched, passed: passed.length, screening: toScreen.length });
