@@ -42,9 +42,9 @@ cd "$JD"
 exec 9>"$JD/.deploy.lock"
 flock -n 9 || fail "Another JobDraft deploy is already running."
 
+# A missing pm2 app is (re)created from ecosystem.config.cjs at the restart step.
 for app in jobdraft-server jobdraft-client; do
-  pm2 describe "$app" >/dev/null 2>&1 \
-    || fail "pm2 has no app '$app'. Do the one-time setup first (README → Deploy with pm2)."
+  pm2 describe "$app" >/dev/null 2>&1 || echo "pm2 has no app '$app' yet: it will be started from ecosystem.config.cjs."
 done
 [ -f server/.env ] || fail "server/.env is missing (one-time setup)."
 [ -f client/.env.local ] || fail "client/.env.local is missing (one-time setup)."
@@ -85,12 +85,32 @@ swap_in() {
   mv client/.next-build client/.next
 }
 
+# pm2 sometimes refuses a restart ("[PM2][ERROR] Process with pid … already
+# exists") when its process list is out of step, which left JobDraft stopped
+# (502). Each app is restarted on its own, and a refused restart re-creates the
+# app from ecosystem.config.cjs. Never aborts the script: the health check and
+# rollback below always run.
+restart_app() {
+  local app="$1"
+  if pm2 restart "$app" --update-env >/dev/null 2>&1; then return 0; fi
+  log "pm2 couldn't restart $app; starting it again from ecosystem.config.cjs"
+  pm2 delete "$app" >/dev/null 2>&1 || true
+  pm2 start ecosystem.config.cjs --only "$app" --update-env >/dev/null 2>&1
+}
+
+restart_all() {
+  local ok=0
+  restart_app jobdraft-server || ok=1
+  restart_app jobdraft-client || ok=1
+  return "$ok"
+}
+
 roll_back() {
   log "Rolling back to the previous build"
   rm -rf server/dist-failed client/.next-failed
   [ -d server/dist-prev ] && { mv server/dist server/dist-failed; mv server/dist-prev server/dist; }
   [ -d client/.next-prev ] && { mv client/.next client/.next-failed; mv client/.next-prev client/.next; }
-  pm2 restart jobdraft-server jobdraft-client --update-env >/dev/null
+  restart_all || true
 }
 
 healthy() {
@@ -103,7 +123,7 @@ healthy() {
 
 log "Switching to the new build and restarting"
 swap_in
-pm2 restart jobdraft-server jobdraft-client --update-env >/dev/null
+restart_all || log "pm2 reported a problem restarting; checking whether JobDraft answers anyway"
 
 if healthy; then
   echo "$TREE" > .deployed-tree
