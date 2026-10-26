@@ -51,3 +51,18 @@ export function effectiveAllocation(requestedPct: number, available: number | nu
     capped: requested > safe + 1e-9,
   };
 }
+
+/**
+ * Share of the wallet (of its TOTAL balance) kept free as a cushion for the
+ * fees and margin of trades that are already open. When less than this is
+ * free — e.g. a Risky bot put the whole wallet into one trade — other bots
+ * wait instead of opening tiny trades from the leftovers.
+ */
+export const WALLET_RESERVE_PCT = 5;
+
+/** Free balance new trades may use: the available balance, or 0 when only the reserve (or less) is free. */
+export function freeForNewTrades(available: number | null | undefined, total: number | null | undefined): number {
+  if (available == null || !(available > 0)) return 0;
+  const reserve = total != null && total > 0 ? total * (WALLET_RESERVE_PCT / 100) : 0;
+  return available <= reserve ? 0 : available;
+}

@@ -15,7 +15,7 @@ import { AutomationSwitch } from "@/components/automation/AutomationSwitch";
 import { AutoBadge } from "@/components/automation/AutoBadge";
 import { PositionDetailSheet, type ExchangePosition } from "@/components/positions/PositionDetailSheet";
 import { formatTimestamp } from "@/components/analytics/format";
-import { parseBotConfig, statusMeta, type BotView, fmtMoney, displaySymbol, sideLabel, botName } from "@/components/automation/bot-config";
+import { parseBotConfig, statusMeta, type BotView, botName, activeTrade, capitalText } from "@/components/automation/bot-config";
 import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider";
 import { currencyLabel, formatWithUnit, formatPct } from "@/lib/currency/store";
 
@@ -214,8 +214,11 @@ export default function DashboardPage() {
               {runningBots.slice(0, 4).map((bot) => {
                 const cfg = parseBotConfig(bot);
                 const st = statusMeta(bot.status);
-                const sym = displaySymbol(bot, cfg);
-                const dir = sideLabel(cfg.side);
+                // Coin / direction / leverage only while the bot is really in a
+                // trade — between trades an auto bot only remembers its last pick.
+                const trade = activeTrade(bot, cfg);
+                const sym = trade.symbol;
+                const dir = trade.side;
                 const name = botName(bot, cfg);
                 return (
                   <div
@@ -229,12 +232,12 @@ export default function DashboardPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                           {name && <span className="max-w-36 truncate text-xs font-medium text-muted-foreground" title={name}>{name}</span>}
-                          <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || "Auto"}</span>
+                          <span className="font-semibold text-foreground">{sym.replace(/USDT$/, "") || (trade.scanning ? "Scanning" : "Auto")}</span>
                           {cfg.autoSelect && <AutoBadge />}
                           {dir && <Badge className={sideBadge(dir === "Long" ? "LONG" : "SHORT")}>{dir}</Badge>}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {cfg.timeframe} · {cfg.leverage}x · {fmtMoney(cfg.capital, 2)}
+                          {cfg.timeframe} · {trade.leverage} · {capitalText(cfg)}
                         </div>
                       </div>
                     </div>

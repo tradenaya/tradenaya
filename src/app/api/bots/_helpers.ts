@@ -45,6 +45,7 @@ export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig 
     walletPercent: capitalMode === "percent" ? n(body.walletPercent) : undefined,
     maxRiskPerTrade: n(body.maxRiskPerTrade) as number,
     dailyLossLimit: n(body.dailyLossLimit) as number,
+    riskStyle: body.riskStyle === "RISKY" ? "RISKY" : "SAFE",
     enableTrailingStop: Boolean(body.enableTrailingStop),
     trailingDistancePercent: n(body.trailingDistancePercent),
     minRiskRewardRatio: n(body.minRiskRewardRatio),

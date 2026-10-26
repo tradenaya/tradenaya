@@ -6,6 +6,8 @@ export interface PositionSizeInput {
   limitPrice: number;
   stopLoss: number;
   takeProfit: number;
+  /** RISKY trade style: use the whole allocated capital as margin (no max-risk cap). */
+  fullAllocation?: boolean;
 }
 
 export interface PositionSizeResult {
@@ -25,7 +27,7 @@ export interface PositionSizeCalculator {
 
 export class DefaultPositionSizeCalculator implements PositionSizeCalculator {
   calculate(input: PositionSizeInput): PositionSizeResult {
-    const { allocatedCapital, leverage, maxRiskPerTradePct, side, limitPrice, stopLoss, takeProfit } = input;
+    const { allocatedCapital, leverage, maxRiskPerTradePct, side, limitPrice, stopLoss, takeProfit, fullAllocation } = input;
 
     if (!(allocatedCapital > 0)) return this.invalid("Allocated capital must be greater than zero.");
     if (!(leverage > 0)) return this.invalid("Leverage must be greater than zero.");
@@ -39,12 +41,17 @@ export class DefaultPositionSizeCalculator implements PositionSizeCalculator {
     const takeProfitDistance = side === "BUY" ? takeProfit - limitPrice : limitPrice - takeProfit;
     if (!(takeProfitDistance > 0)) return this.invalid("Take profit must be on the winning side of the entry price.");
 
-    const riskAmount = allocatedCapital * (maxRiskPerTradePct / 100);
-    if (!(riskAmount > 0)) return this.invalid("Computed risk amount is zero.");
-
-    const riskBasedSize = riskAmount / stopDistance;
     const capitalCappedSize = (allocatedCapital * leverage) / limitPrice;
-    const positionSize = Math.min(riskBasedSize, capitalCappedSize);
+    let positionSize: number;
+    if (fullAllocation) {
+      // RISKY: the whole allocated capital is the margin; the stop-loss still
+      // limits the loss, but no longer to max-risk-per-trade.
+      positionSize = capitalCappedSize;
+    } else {
+      const riskAmount = allocatedCapital * (maxRiskPerTradePct / 100);
+      if (!(riskAmount > 0)) return this.invalid("Computed risk amount is zero.");
+      positionSize = Math.min(riskAmount / stopDistance, capitalCappedSize);
+    }
 
     if (!Number.isFinite(positionSize) || positionSize <= 0) return this.invalid("Position size is invalid.");
 
@@ -62,7 +69,9 @@ export class DefaultPositionSizeCalculator implements PositionSizeCalculator {
       expectedProfit,
       riskPercentage,
       valid: true,
-      reason: "Position sized against configured risk and capital limits.",
+      reason: fullAllocation
+        ? "Risky trade style: position uses the whole allocated capital as margin."
+        : "Position sized against configured risk and capital limits.",
     };
   }
 

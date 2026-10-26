@@ -578,7 +578,8 @@ export class BotScheduler {
 
           // Risk compatibility check: verify that the estimated SL loss
           // does not exceed the user's max risk allocation.
-          const maxRiskPct = Number(config.maxRiskPerTrade) || 0;
+          // RISKY bots use the whole allocation by design — no max-risk check.
+          const maxRiskPct = config.riskStyle === "RISKY" ? 0 : Number(config.maxRiskPerTrade) || 0;
           if (maxRiskPct > 0 && allocated > 0) {
             const maxRiskUsdt = allocated * (maxRiskPct / 100);
             // Mirror stop-loss-planner: baseDistance = max(atr*1.35, price*minStopDistancePct*1.01)

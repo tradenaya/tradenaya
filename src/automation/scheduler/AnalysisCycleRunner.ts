@@ -19,7 +19,7 @@ import { clientOrderId } from "@/automation/executor/order-id";
 import { dispatchTelegram } from "@/lib/telegram-dispatch";
 import { telegramAnalysis, telegramCoinSwitchError } from "@/lib/telegram";
 import { resolveMinRiskReward } from "@/automation/planner/risk-reward-constants";
-import { effectiveAllocation } from "@/automation/risk/allocation-headroom";
+import { effectiveAllocation, freeForNewTrades } from "@/automation/risk/allocation-headroom";
 import { currentTradingMode } from "@/automation/paper/mode";
 import { MAX_RUNNING_BOTS } from "./SchedulerTypes";
 import { accountOrderLock } from "./account-lock";
@@ -70,6 +70,14 @@ export function describeIdleScan(summary: AutoScanSummary | null): string {
 }
 
 /** Risk rejections that come from the account, not the coin (every coin would fail the same way). */
+export const NO_FREE_BALANCE_MESSAGE =
+  "No free balance in the wallet right now (the money is in other open trades or orders) — this bot will trade as soon as some is freed";
+
+/** Waiting for money held by other trades: a normal wait, never a "risk rejected" alert. */
+export function isNoFreeBalance(reason: string): boolean {
+  return reason.startsWith("No free balance");
+}
+
 export function isAccountLevelRejection(reason: string): boolean {
   return /daily loss limit|daily trade limit|maximum.*(positions|bots)|wallet balance|available balance|free balance|capital must be greater|could not read open positions/i.test(reason);
 }
@@ -179,6 +187,15 @@ export class AnalysisCycleRunner {
       return this.handleCycleError(bot, error);
     }
 
+    // Nothing free in the wallet (other trades hold it): don't scan coins for a
+    // trade this bot cannot place — wait and check again next cycle.
+    if (await this.walletHasNoFreeBalance(bot)) {
+      const message = await this.completeAnalysis(bot, "WAIT", `${NO_FREE_BALANCE_MESSAGE} (coin scan skipped)`);
+      liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: bot.symbol, phase: "lifecycle", message });
+      console.log(`[scan] bot ${bot.id}: no free balance — coin scan skipped`);
+      return { executed: true, state: "RUNNING", action: "ANALYZED", message };
+    }
+
     // Mandatory debug logs to trace AUTO-selection runtime path
     console.log(`[AUTO DEBUG] botId=${bot.id} selectionMode=${config.autoSelect ? "AUTO" : "FIXED"}`);
     console.log(`[AUTO DEBUG] configuredCoin=${bot.symbol}`);
@@ -273,7 +290,7 @@ export class AnalysisCycleRunner {
     // the bot stuck in ANALYZING forever: invisible to the scheduler, no further
     // cycles, and a live trace frozen on the rejection line below. completeAnalysis
     // is what restores RUNNING and arms next_run_at for the following cycle.
-    const rejectionStatus = rejections.some((r) => r.source === "risk") ? "RISK_REJECTED" : "WAIT";
+    const rejectionStatus = rejections.some((r) => r.source === "risk" && !isNoFreeBalance(r.reason)) ? "RISK_REJECTED" : "WAIT";
     const reason =
       rejections.length === 1
         ? `No trade for ${rejections[0].symbol}: ${rejections[0].reason}`
@@ -306,7 +323,7 @@ export class AnalysisCycleRunner {
     if (submitted.status === "DONE") return submitted.result;
 
     await this.deps.events.emit({ type: "RISK_REJECTED", botId: bot.id, userId: bot.userId, message: submitted.reason });
-    const riskMessage = await this.completeAnalysis(bot, "RISK_REJECTED", submitted.reason);
+    const riskMessage = await this.completeAnalysis(bot, isNoFreeBalance(submitted.reason) ? "WAIT" : "RISK_REJECTED", submitted.reason);
     liveActivityHub.publish({ botId: bot.id, userId: bot.userId, symbol: cycleSymbol, phase: "lifecycle", message: riskMessage });
     console.log(
       `[scan] SCAN COMPLETE — candidates evaluated 1 | rejected 1 | reason: ${submitted.reason} | next scan in ~${this.deps.config.analysisIntervalMinutes} min`,
@@ -462,8 +479,8 @@ export class AnalysisCycleRunner {
       // Wallet-% bots share the wallet: with nothing free right now (the money is
       // in other bots' trades) say so plainly — it is a wait, not an error.
       const reason =
-        config.capitalMode === "percent" && !(risk.allocatedCapital > 0)
-          ? "No free balance in the wallet right now (the money is in other open trades or orders) — this bot will trade as soon as some is freed"
+        !(risk.allocatedCapital > 0) && (config.capitalMode === "percent" || risk.noFreeBalance)
+          ? NO_FREE_BALANCE_MESSAGE
           : risk.decision.reason;
       this.rejectCandidate(bot, cycleSymbol, index, reason, "risk");
       return { status: "CONTINUE", reason };
@@ -491,7 +508,9 @@ export class AnalysisCycleRunner {
         quantity: risk.decision.positionSize,
         leverage: config.leverage,
         allocatedCapital: risk.allocatedCapital,
-        maxRiskAmount: risk.allocatedCapital * ((Number(config.maxRiskPerTrade) || 0) / 100),
+        // RISKY uses the whole allocation: the max-risk cap does not apply.
+        maxRiskAmount: config.riskStyle === "RISKY" ? undefined : risk.allocatedCapital * ((Number(config.maxRiskPerTrade) || 0) / 100),
+        fullAllocation: config.riskStyle === "RISKY",
       });
     } catch (error) {
       return { status: "DONE", result: await this.handleCycleError(bot, error) };
@@ -723,7 +742,17 @@ export class AnalysisCycleRunner {
     return message;
   }
 
-  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number; symbolBusy: boolean; accountUnreadable: boolean }> {
+  /** True only when the wallet was READ and less than the reserve is free (a failed read never blocks here). */
+  private async walletHasNoFreeBalance(bot: BotRuntimeState): Promise<boolean> {
+    try {
+      const wallet = await this.deps.client.getWalletSnapshot(bot.userId);
+      return wallet != null && wallet.available != null && freeForNewTrades(wallet.available, wallet.total) === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async evaluateRisk(bot: BotRuntimeState, config: AutomationConfig, plan: TradePlan): Promise<{ decision: RiskDecision; allocatedCapital: number; symbolBusy: boolean; accountUnreadable: boolean; noFreeBalance: boolean }> {
     const [wallet, positionsRead, ordersRead, daily] = await Promise.all([
       this.deps.client.getWalletSnapshot(bot.userId).catch(() => null),
       this.deps.client.getPositions(bot.userId).catch(() => null),
@@ -739,7 +768,10 @@ export class AnalysisCycleRunner {
     const runningBots = Math.max(0, (await this.deps.lifecycle.countActiveBotsForUser(bot.userId, currentTradingMode())) - 1);
     const isPercent = config.capitalMode === "percent";
     const fixedCapital = Number(config.capital) || 0;
-    const walletAvailable = wallet?.available ?? null;
+    // Below the wallet reserve nothing counts as free: the leftover is the
+    // cushion for trades already open, never a tiny new trade.
+    const walletAvailable = wallet ? freeForNewTrades(wallet.available, wallet.total) : null;
+    const noFreeBalance = walletAvailable === 0;
     // percent mode MUST size against the live wallet; it must never silently
     // fall back to a stale fixed capital (the root cause of "uses last amount").
     const balance = isPercent ? (walletAvailable ?? 0) : (walletAvailable ?? fixedCapital);
@@ -747,7 +779,7 @@ export class AnalysisCycleRunner {
     // the highest allocation that leaves margin headroom, instead of failing.
     const allocation = effectiveAllocation(Number(config.walletPercent) || 0, balance);
     const walletPercent = isPercent ? allocation.effectivePct : config.walletPercent;
-    const allocatedCapital = isPercent ? allocation.amount : fixedCapital;
+    const allocatedCapital = noFreeBalance ? 0 : isPercent ? allocation.amount : fixedCapital;
     if (isPercent) {
       console.log(`[scan] wallet-% bot ${bot.id}: ${walletAvailable ?? 0} USDT free in the wallet now → this cycle uses ${allocatedCapital.toFixed(4)} USDT`);
     }
@@ -791,11 +823,12 @@ export class AnalysisCycleRunner {
         dailyLossLimitPct: config.dailyLossLimit,
         dailyTradeLimit: 20,
         minRiskRewardRatio: resolvedMinRR.value,
+        fullAllocation: config.riskStyle === "RISKY",
       },
       wallet: { balance },
       capital: {
         mode: config.capitalMode,
-        amount: config.capitalMode === "fixed" ? config.capital : undefined,
+        amount: config.capitalMode === "fixed" ? (noFreeBalance ? 0 : config.capital) : undefined,
         percent: config.capitalMode === "percent" ? walletPercent : undefined,
         leverage: config.leverage,
       },
@@ -811,6 +844,7 @@ export class AnalysisCycleRunner {
       allocatedCapital,
       symbolBusy: symbolInUse(String(plan.symbol ?? config.symbol), exchangePositions, openOrders),
       accountUnreadable,
+      noFreeBalance,
     };
   }
 

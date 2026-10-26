@@ -47,6 +47,7 @@ import {
 import { StrategyPicker } from "./StrategyPicker";
 import { DEFAULT_STRATEGY_ID, strategyInfo } from "@/automation/strategy/catalog";
 import { CoinUniversePicker, type CoinUniverse } from "./CoinUniversePicker";
+import { RiskStylePicker } from "./RiskStylePicker";
 
 interface AutoSelectionPreview {
   symbol: string;
@@ -300,8 +301,9 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
       leverage: Number(cfg.leverage) || 1,
       maxRiskPerTradePct: Number(cfg.maxRiskPerTrade) || 0,
       currentPrice: price,
+      fullAllocation: cfg.riskStyle === "RISKY",
     });
-  }, [wallet, isPercent, cfg.capital, cfg.walletPercent, cfg.leverage, cfg.maxRiskPerTrade, price]);
+  }, [wallet, isPercent, cfg.capital, cfg.walletPercent, cfg.leverage, cfg.maxRiskPerTrade, cfg.riskStyle, price]);
 
   /* ---- Field-level validation ---- */
   const fieldErrors = useMemo<Record<string, string | null>>(() => {
@@ -528,6 +530,7 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
         walletPercent: isPercent ? Number(cfg.walletPercent) : undefined,
         maxRiskPerTrade: Number(cfg.maxRiskPerTrade) || 1,
         dailyLossLimit: Number(cfg.dailyLossLimit),
+        riskStyle: cfg.riskStyle,
         enableTrailingStop: cfg.enableTrailingStop,
         trailingDistancePercent: cfg.enableTrailingStop && cfg.trailingDistancePercent != null ? Number(cfg.trailingDistancePercent) : undefined,
         momentumEntriesOnly: cfg.momentumEntriesOnly ?? false,
@@ -974,10 +977,19 @@ export function EditBotDialog({ bot, open, onOpenChange, onSaved }: EditBotDialo
             </div>
           </div>
 
+          <RiskStylePicker
+            value={cfg.riskStyle}
+            onChange={(v) => update("riskStyle", v)}
+            timeframe={strategyInfo(cfg.strategy).fixedTimeframe ?? cfg.timeframe}
+            symbol={cfg.autoSelect ? null : cfg.symbol.trim().toUpperCase() || null}
+          />
+
           <div className="space-y-1.5">
             <Label>Max risk / trade (%)</Label>
             <p className="text-[11px] text-muted-foreground -mt-0.5">
-              Maximum percentage of your margin you are willing to lose if SL is hit. This is separate from your capital allocation.
+              {cfg.riskStyle === "RISKY"
+                ? "Not used in Risky style — the whole amount is used. Kept for when you switch back to Safe."
+                : "Maximum percentage of your margin you are willing to lose if SL is hit. This is separate from your capital allocation."}
             </p>
             <Input
               type="number"

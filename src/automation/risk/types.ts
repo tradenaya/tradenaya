@@ -13,6 +13,8 @@ export interface RiskManagerConfig {
   dailyLossLimitPct: number;
   dailyTradeLimit: number;
   minRiskRewardRatio: number;
+  /** RISKY trade style: size from the whole allocated capital, skip the max-risk-per-trade cap. */
+  fullAllocation?: boolean;
   tolerance?: number;
 }
 

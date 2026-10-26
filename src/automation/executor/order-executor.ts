@@ -144,6 +144,19 @@ export class OrderExecutorService {
     this.protective = new ProtectiveOrdersService(this.client, this.store);
   }
 
+  /**
+   * RISKY trade style: the whole allocated capital is the margin, so the size
+   * follows the FINAL leverage — a liquidation-safety downshift shrinks the
+   * position instead of asking for more margin than was allocated.
+   */
+  private fullAllocationQuantity(input: OrderExecutorInput, leverage: number): number | null {
+    if (!input.fullAllocation) return null;
+    const allocated = Number(input.allocatedCapital);
+    const price = Number(input.plan.limitPrice ?? input.plan.entryPrice);
+    if (!(allocated > 0) || !(price > 0) || !(leverage > 0)) return null;
+    return (allocated * leverage) / price;
+  }
+
   async execute(input: OrderExecutorInput): Promise<OrderExecutorResult> {
     const symbol = input.plan.symbol ?? "";
     const side = (input.plan.side ?? input.plan.action) as "BUY" | "SELL";
@@ -213,7 +226,7 @@ export class OrderExecutorService {
 
     // Re-derive the effective input so normalization, margin and telemetry all
     // compute against the FINAL leverage, never the originally requested one.
-    const effectiveInput: OrderExecutorInput = { ...input, leverage };
+    const effectiveInput: OrderExecutorInput = { ...input, leverage, quantity: this.fullAllocationQuantity(input, leverage) ?? input.quantity };
     const normalized = normalizeEntryOrder(instrument, effectiveInput);
 
     // Liquidation-safety gate: re-verify at the point of no return using the

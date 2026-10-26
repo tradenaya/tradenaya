@@ -381,3 +381,36 @@ describe("OrderExecutorService.execute — coin skipped before ordering (product
     expect(store.saveNotification).not.toHaveBeenCalled();
   });
 });
+
+describe("OrderExecutorService.execute — RISKY trade style (whole allocation as margin)", () => {
+  const entryQuantity = (client: ReturnType<typeof makeClient>) =>
+    Number((entryOrderCalls(client).find((c) => c.orderType === "LIMIT") as { quantity?: number } | undefined)?.quantity);
+
+  it("re-sizes to the FINAL leverage after a liquidation downshift, so the margin stays the allocation", async () => {
+    // 50 USDT allocated, 65x requested → downshifted to 16x for a 5% stop: 50 × 16 / 100 = 8 coins.
+    const { result, client } = await run(
+      { leverage: 65, quantity: 32.5, allocatedCapital: 50, fullAllocation: true, plan: plan({ limitPrice: 100, entryPrice: 100, stopLoss: 95 }) },
+      { instrument: instrument() },
+    );
+    expect(client.typed.setLeverage).toHaveBeenCalledWith(1, "ENAUSDT", 16);
+    expect(entryQuantity(client)).toBe(8);
+    expect(result.success).toBe(true);
+  });
+
+  it("SAFE style keeps the risk-sized quantity untouched", async () => {
+    const { client } = await run(
+      { leverage: 65, quantity: 1, allocatedCapital: 50, plan: plan({ limitPrice: 100, entryPrice: 100, stopLoss: 95 }) },
+      { instrument: instrument() },
+    );
+    expect(entryQuantity(client)).toBe(1);
+  });
+
+  it("the liquidation-safety gate still applies: no safe leverage → no order", async () => {
+    const { result, client } = await run(
+      { leverage: 65, quantity: 30, allocatedCapital: 50, fullAllocation: true, plan: plan({ limitPrice: 100, entryPrice: 100, stopLoss: 40 }) },
+      { instrument: instrument({ min_leverage: "5" }) },
+    );
+    expect(result.success).toBe(false);
+    expect(client.typed.placeOrder).not.toHaveBeenCalled();
+  });
+});

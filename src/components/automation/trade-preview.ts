@@ -25,6 +25,8 @@ export interface TradePreviewInput {
   minStopDistancePct?: number;
   /** Min risk/reward ratio used by the TP planner (default 2). */
   minRiskRewardRatio?: number;
+  /** RISKY trade style: the whole allocation is the margin (no max-risk cap). */
+  fullAllocation?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -54,6 +56,9 @@ export interface TradePreview {
   riskRewardRatio: number;
 
   /* Position sizing */
+  /** True for the RISKY trade style (whole allocation as margin). */
+  fullAllocation: boolean;
+  positionSize: number;
   riskBasedSize: number;
   capitalCappedSize: number;
   bindingConstraint: "risk" | "none";
@@ -81,6 +86,7 @@ export function computeTradePreview(input: TradePreviewInput): TradePreview {
     estimatedAtrPct = 0.01,
     minStopDistancePct = 0.008,
     minRiskRewardRatio = 2,
+    fullAllocation = false,
   } = input;
 
   const price = currentPrice ?? 0;
@@ -118,9 +124,9 @@ export function computeTradePreview(input: TradePreviewInput): TradePreview {
   /* ---- Position sizing (mirrors position-size-calculator) ---- */
   const riskBasedSize = slDistance > 0 ? maxRiskUsdt / slDistance : 0;
   const capitalCappedSize = price > 0 ? positionNotional / price : 0;
-  const positionSize = Math.min(riskBasedSize, capitalCappedSize);
+  const positionSize = fullAllocation ? capitalCappedSize : Math.min(riskBasedSize, capitalCappedSize);
 
-  const riskLimited = riskBasedSize <= capitalCappedSize;
+  const riskLimited = !fullAllocation && riskBasedSize <= capitalCappedSize;
 
   /* ---- Expected outcomes ---- */
   const estimatedLoss = slDistance * positionSize;
@@ -129,7 +135,7 @@ export function computeTradePreview(input: TradePreviewInput): TradePreview {
 
   /* ---- Risk compatibility ---- */
   const TOLERANCE = 1.01;
-  const riskCompatible = riskPct <= 0 || estimatedLoss <= maxRiskUsdt * TOLERANCE;
+  const riskCompatible = fullAllocation || riskPct <= 0 || estimatedLoss <= maxRiskUsdt * TOLERANCE;
   const riskExceededBy = riskCompatible ? 0 : Math.max(0, estimatedLoss - maxRiskUsdt);
 
   /* ---- Binding constraint ---- */
@@ -147,6 +153,11 @@ export function computeTradePreview(input: TradePreviewInput): TradePreview {
     status = "error";
     message = "Set your capital and select a symbol to see a preview.";
     capitalRiskNote = "";
+  } else if (fullAllocation) {
+    const lossPct = allocatedCapital > 0 ? (estimatedLoss / allocatedCapital) * 100 : 0;
+    status = "warning";
+    message = `Risky: if the stop-loss is hit you lose ~${fmt(estimatedLoss)} USDT (~${lossPct.toFixed(0)}% of the ${fmt(allocatedCapital)} USDT used).`;
+    capitalRiskNote = `The whole ${fmt(allocatedCapital)} USDT is used as margin at ${lev}x, opening a ~${fmt(positionNotional)} USDT position. At the estimated SL distance of ${fmt(slDistancePct)}%, a stop-loss hit loses ~${fmt(estimatedLoss)} USDT; the take-profit would make ~${fmt(estimatedProfit)} USDT. If the stop-loss would sit past the liquidation price, the bot lowers the leverage (smaller position) or skips the trade.`;
   } else if (!riskCompatible) {
     status = "error";
     message = `Configuration exceeds maximum risk. The current SL distance would risk ~${fmt(estimatedLoss)} USDT, but your max risk allows only ${fmt(maxRiskUsdt)} USDT.`;
@@ -179,6 +190,8 @@ export function computeTradePreview(input: TradePreviewInput): TradePreview {
     tpPrice,
     estimatedProfit,
     riskRewardRatio,
+    fullAllocation,
+    positionSize,
     riskBasedSize,
     capitalCappedSize,
     bindingConstraint,
