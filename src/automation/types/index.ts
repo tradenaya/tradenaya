@@ -20,6 +20,14 @@ export interface AutomationConfig {
   walletPercent?: number;
   maxRiskPerTrade: number;
   dailyLossLimit: number;
+  /**
+   * SAFE (default): size each trade so a stop-loss hit loses at most
+   * maxRiskPerTrade % of the allocated capital.
+   * RISKY: use the WHOLE allocated capital as margin at the bot's leverage;
+   * maxRiskPerTrade is not applied. Stop-loss, the liquidation-safety gate,
+   * exchange minimums and the daily loss limit still apply.
+   */
+  riskStyle?: "SAFE" | "RISKY";
   enableTrailingStop: boolean;
   trailingDistancePercent?: number;
   minRiskRewardRatio?: number;

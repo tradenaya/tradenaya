@@ -44,6 +44,8 @@ export interface BotConfig {
   walletPercent: number | null;
   maxRiskPerTrade: number | null;
   dailyLossLimit: number | null;
+  /** SAFE (sized by max risk) or RISKY (whole allocation as margin). */
+  riskStyle: "SAFE" | "RISKY";
   enableTrailingStop: boolean;
   trailingDistancePercent: number | null;
   /** Only take entries with strong momentum in the trade's direction. */
@@ -123,6 +125,7 @@ export function parseBotConfig(bot: Pick<BotView, "symbol" | "configJson" | "lev
     walletPercent: raw.walletPercent != null ? Number(raw.walletPercent) : bot.walletPercent ?? null,
     maxRiskPerTrade: raw.maxRiskPerTrade != null ? Number(raw.maxRiskPerTrade) : null,
     dailyLossLimit: raw.dailyLossLimit != null ? Number(raw.dailyLossLimit) : null,
+    riskStyle: raw.riskStyle === "RISKY" ? "RISKY" : "SAFE",
     enableTrailingStop: Boolean(raw.enableTrailingStop),
     trailingDistancePercent: raw.trailingDistancePercent != null ? Number(raw.trailingDistancePercent) : null,
     momentumEntriesOnly: raw.momentumEntriesOnly === true,
@@ -214,6 +217,7 @@ export function activeTrade(bot: Pick<BotView, "symbol" | "status" | "leverage">
 
 /** How much the bot trades with: "25% of wallet" for percent bots, else the fixed amount. */
 export function capitalText(cfg: BotConfig): string {
-  if (cfg.capitalMode === "percent" && cfg.walletPercent != null) return `${cfg.walletPercent}% of wallet`;
-  return fmtMoney(cfg.capital, 2);
+  const risky = cfg.riskStyle === "RISKY" ? " · Risky" : "";
+  if (cfg.capitalMode === "percent" && cfg.walletPercent != null) return `${cfg.walletPercent}% of wallet${risky}`;
+  return `${fmtMoney(cfg.capital, 2)}${risky}`;
 }

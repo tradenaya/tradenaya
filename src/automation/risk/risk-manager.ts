@@ -47,6 +47,7 @@ export class DefaultRiskManager implements RiskManager {
       limitPrice: Number(input.plan.limitPrice ?? 0),
       stopLoss: Number(input.plan.stopLoss ?? 0),
       takeProfit: Number(input.plan.takeProfit ?? 0),
+      fullAllocation: config.fullAllocation === true,
     });
 
     return this.validationEngine.run(input, config, { allocation, position });

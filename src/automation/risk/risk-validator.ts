@@ -34,7 +34,13 @@ export class DefaultRiskValidator implements RiskValidator {
       });
     }
 
-    if (riskPercentage - tolerance > config.maxRiskPerTradePct) {
+    if (config.fullAllocation) {
+      checks.push({
+        name: "max-risk-per-trade",
+        passed: true,
+        message: `Risky trade style: whole allocation used — a stop-loss hit loses ~${riskPercentage.toFixed(2)}% of it (max-risk-per-trade not applied).`,
+      });
+    } else if (riskPercentage - tolerance > config.maxRiskPerTradePct) {
       checks.push({
         name: "max-risk-per-trade",
         passed: false,

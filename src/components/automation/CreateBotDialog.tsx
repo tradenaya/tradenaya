@@ -37,6 +37,7 @@ import {
 import { StrategyPicker } from "./StrategyPicker";
 import { DEFAULT_STRATEGY_ID, strategyInfo } from "@/automation/strategy/catalog";
 import { CoinUniversePicker, type CoinUniverse } from "./CoinUniversePicker";
+import { RiskStylePicker, type RiskStyle } from "./RiskStylePicker";
 import { useTradingMode } from "@/lib/trading-mode/TradingModeProvider";
 
 export interface InstrumentInfo {
@@ -92,6 +93,7 @@ const DEFAULT_SETTINGS = {
   // 5% keeps a normal losing streak survivable (7 losses ≈ -30%, vs -79% at 20%).
   maxRiskPerTrade: "5",
   dailyLossLimit: "30",
+  riskStyle: "SAFE" as RiskStyle,
   orderExpiryMinutes: "",
   minConfidence: "",
   driftAtr: "1.5",
@@ -293,8 +295,9 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       leverage: Number(settings.leverage) || 1,
       maxRiskPerTradePct: Number(settings.maxRiskPerTrade) || 0,
       currentPrice: price,
+      fullAllocation: settings.riskStyle === "RISKY",
     });
-  }, [wallet, capitalMode, settings.capital, walletPercent, settings.leverage, settings.maxRiskPerTrade, price]);
+  }, [wallet, capitalMode, settings.capital, walletPercent, settings.leverage, settings.maxRiskPerTrade, settings.riskStyle, price]);
 
   /* ---- Field-level validation (shown inline as the user types) ---- */
   const fieldErrors = useMemo<Record<string, string | null>>(() => {
@@ -532,6 +535,7 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
       walletPercent: capitalMode === "percent" ? Number(walletPercent) : undefined,
       maxRiskPerTrade: Number(settings.maxRiskPerTrade) || 1,
       dailyLossLimit: Number(settings.dailyLossLimit) || 5,
+      riskStyle: settings.riskStyle,
       enableTrailingStop: settings.enableTrailingStop,
       trailingDistancePercent: settings.enableTrailingStop && settings.trailingDistancePercent ? Number(settings.trailingDistancePercent) : undefined,
       momentumEntriesOnly: settings.momentumEntriesOnly,
@@ -1018,10 +1022,19 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
             </div>
           </div>
 
+          <RiskStylePicker
+            value={settings.riskStyle}
+            onChange={(riskStyle) => setSettings((s) => ({ ...s, riskStyle }))}
+            timeframe={strategyInfo(settings.strategy).fixedTimeframe ?? settings.timeframe}
+            symbol={settings.autoSelect ? null : settings.symbol.trim().toUpperCase() || null}
+          />
+
           <div className="space-y-1.5">
             <Label htmlFor="auto-max-risk">Max risk / trade (%)</Label>
             <p className="text-[11px] text-muted-foreground -mt-0.5">
-              Maximum percentage of your margin you are willing to lose if SL is hit. This is separate from your capital allocation.
+              {settings.riskStyle === "RISKY"
+                ? "Not used in Risky style — the whole amount is used. Kept for when you switch back to Safe."
+                : "Maximum percentage of your margin you are willing to lose if SL is hit. This is separate from your capital allocation."}
             </p>
             <Input
               id="auto-max-risk"

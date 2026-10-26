@@ -92,8 +92,8 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
 
         {/* Risk */}
         <PreviewSection title="Risk">
-          <PreviewRow label="Max risk" value={`${maxRiskPct}%`} />
-          <PreviewRow label="Max loss allowed" value={formatCurrency(maxRiskUsdt)} />
+          <PreviewRow label="Max risk" value={preview.fullAllocation ? "Not used (Risky)" : `${maxRiskPct}%`} />
+          <PreviewRow label="Max loss allowed" value={preview.fullAllocation ? "Whole margin" : formatCurrency(maxRiskUsdt)} danger={preview.fullAllocation} />
           <PreviewRow label="Est. SL distance" value={`${formatPreviewValue(slDistancePct)}%`} />
           <PreviewRow
             label="Est. loss at SL"
@@ -102,7 +102,7 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
           />
           <PreviewRow
             label="Risk status"
-            value={riskCompatible ? "Within limit" : "Exceeds limit"}
+            value={preview.fullAllocation ? "Risky — full margin" : riskCompatible ? "Within limit" : "Exceeds limit"}
             icon={riskCompatible ? <CheckCircle2 size={13} className="text-emerald-400" /> : <XCircle size={13} className="text-red-400" />}
             danger={!riskCompatible}
           />
@@ -119,10 +119,10 @@ export function TradePreviewPanel({ preview }: TradePreviewPanelProps) {
         <PreviewSection title="Summary">
           <PreviewRow label="Capital mode" value={preview.margin > 0 ? (preview.allocatedCapital === (preview.walletAvailable ?? 0) ? "Fixed (100%)" : "Fixed") : "—"} />
           <PreviewRow label="Actual margin" value={formatCurrency(allocatedCapital)} />
-          <PreviewRow label="Position size" value={`${formatPreviewValue(preview.riskBasedSize > 0 && preview.riskBasedSize <= preview.capitalCappedSize ? preview.riskBasedSize : preview.capitalCappedSize, 6)}`} />
+          <PreviewRow label="Position size" value={`${formatPreviewValue(preview.positionSize, 6)}`} />
           <PreviewRow
             label="Binding constraint"
-            value={preview.bindingConstraint === "risk" ? "Risk limit" : "None"}
+            value={preview.fullAllocation ? "Full allocation (Risky)" : preview.bindingConstraint === "risk" ? "Risk limit" : "None"}
           />
         </PreviewSection>
       </div>

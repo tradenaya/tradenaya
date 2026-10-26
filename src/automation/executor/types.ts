@@ -37,6 +37,12 @@ export interface OrderExecutorInput {
   allocatedCapital?: number;
   /** Max loss at SL allowed by the bot's Max Risk setting (USDT). Raising to the exchange minimum may never exceed it. */
   maxRiskAmount?: number;
+  /**
+   * RISKY trade style: the position uses the whole allocated capital as margin.
+   * The size is re-derived at the FINAL leverage (after any liquidation-safety
+   * downshift) so the margin always matches the allocation.
+   */
+  fullAllocation?: boolean;
 }
 
 export interface OrderExecutorOptions {

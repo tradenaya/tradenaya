@@ -143,6 +143,11 @@ export class AutomationEngine {
       step("risk", "Position size is worked out from the free wallet balance when the order is placed.");
       return { signal: plan.action, plan, analysis };
     }
+    // RISKY bots use the whole allocation, so the max-risk sizing pre-check does not apply.
+    if (config.riskStyle === "RISKY") {
+      step("risk", "Risky trade style — the whole allocated capital is used as margin; the stop-loss and liquidation checks run when the order is placed.");
+      return { signal: plan.action, plan, analysis };
+    }
     const risk = this.riskManager.assess(
       {
         capital: config.capital,

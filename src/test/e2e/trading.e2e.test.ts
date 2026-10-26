@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import mysql from "mysql2/promise";
-import { SimExchange, SimMarket, loadFixture, type FaultRates } from "./sim-exchange";
+import { NO_FAULTS, SimExchange, SimMarket, loadFixture, type FaultRates } from "./sim-exchange";
 
 const RUN = process.env.E2E === "1";
 const H = 3_600_000;
@@ -40,7 +40,7 @@ const e2eDb = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const state: { pool: any } = { pool: null };
   const guard = (sql: string) => {
-    if (/(DROP|CREATE)s+DATABASE/i.test(sql) && !sql.includes(name)) throw new Error("e2e: refusing a database-level statement outside the e2e schema");
+    if (/\b(DROP|CREATE)\s+DATABASE\b/i.test(sql) && !sql.includes(name)) throw new Error("e2e: refusing a database-level statement outside the e2e schema");
   };
   // NOW() / CURRENT_TIMESTAMP follow the simulated clock (SET TIMESTAMP per query).
   const run = async (kind: "query" | "execute", sql: string, params?: unknown) => {
@@ -138,13 +138,14 @@ interface RunResult {
   botStates: Record<string, string>;
   unprotectedAlerts: number;
   alerts: string[];
+  maxMarginByBot: Record<string, number>;
   stopMoves: number;
   btcEntries: number;
   injected: SimExchange["stats"]["injected"];
   reasons: Record<string, number>;
 }
 
-async function runScenario(opts: { label: string; balance: number; days: number; faults: FaultRates; seed: number; restartAtHalf: boolean }): Promise<RunResult> {
+async function runScenario(opts: { label: string; balance: number; days: number; faults: FaultRates; seed: number; restartAtHalf: boolean; bots?: BotSpec[] }): Promise<RunResult> {
   const conn = localDbEnv();
   // fresh schema
   const admin = await mysql.createConnection({ host: conn.host, port: conn.port, user: conn.user, password: conn.password });
@@ -158,7 +159,8 @@ async function runScenario(opts: { label: string; balance: number; days: number;
   const market = new SimMarket(loadFixture());
   sim.market = market;
   sim.alerts = [];
-  const exchange = new SimExchange(market, { seed: opts.seed, faults: opts.faults });
+  // E2E_NO_FAULTS=1: same scenario on a perfectly reliable exchange (deterministic comparisons)
+  const exchange = new SimExchange(market, { seed: opts.seed, faults: process.env.E2E_NO_FAULTS === "1" ? NO_FAULTS : opts.faults });
   sim.exchange = exchange;
   await exchange.setBalance(USER, opts.balance);
 
@@ -187,7 +189,7 @@ async function runScenario(opts: { label: string; balance: number; days: number;
 
   const lifecycle = new BotLifecycleService();
   const botIds: number[] = [];
-  for (const spec of BOTS) {
+  for (const spec of opts.bots ?? BOTS) {
     const config = sanitizeConfig({
       symbol: "BTCUSDT", leverage: 10, leverageMode: "auto", autoSelect: true, capital: opts.balance, capitalMode: "percent", walletPercent: 100,
       enableTrailingStop: false, name: spec.name, ...spec.body,
@@ -298,6 +300,11 @@ async function runScenario(opts: { label: string; balance: number; days: number;
     if (loss > 2 * risk + 0.01) violations.push(`position ${r.id} ${r.symbol}: lost ${loss.toFixed(3)} USDT before fees, planned risk was ${risk.toFixed(3)} USDT`);
   }
   const entries = (await q<{ n: number }>("SELECT COUNT(*) n FROM automation_positions WHERE entry_price IS NOT NULL AND filled_quantity > 0"))[0].n;
+  // Largest margin any bot put into one filled trade (RISKY bots should use ~the whole free wallet).
+  const marginRows = await q<{ name: string; margin: string }>(
+    "SELECT b.name, MAX(p.filled_quantity * p.entry_price / p.leverage) margin FROM automation_positions p JOIN automation_bots b ON b.id = p.bot_id WHERE p.filled_quantity > 0 AND p.entry_price IS NOT NULL GROUP BY b.name",
+  );
+  const maxMarginByBot = Object.fromEntries(marginRows.map((m) => [m.name, Number(m.margin)]));
   const btcEntries = (await q<{ n: number }>("SELECT COUNT(*) n FROM automation_positions WHERE symbol = 'BTCUSDT' AND filled_quantity > 0"))[0].n;
   const stopMoves = (await q<{ n: number }>("SELECT COUNT(*) n FROM automation_position_events WHERE type = 'TRAILING_MOVED'"))[0].n;
   const states = await q<{ name: string; status: string }>("SELECT name, status FROM automation_bots");
@@ -315,6 +322,7 @@ async function runScenario(opts: { label: string; balance: number; days: number;
     unprotectedAlerts: sim.alerts.filter((a) => a.type === "POSITION_UNPROTECTED" && a.stopOnExchange !== false).length,
     alerts: sim.alerts.filter((a) => a.type === "POSITION_UNPROTECTED").map((a) => `${new Date(a.at).toISOString().slice(0, 16)} stop on exchange: ${a.stopOnExchange} — ${String(a.text).replace(/\s+/g, " ").slice(0, 200)}`),
     stopMoves: Number(stopMoves),
+    maxMarginByBot,
     btcEntries: Number(btcEntries),
     injected: exchange.stats.injected,
     reasons,
@@ -330,6 +338,7 @@ function report(label: string, r: RunResult) {
       `wallet ${r.startBalance} → ${r.endBalance.toFixed(4)} USDT · closed-trade P&L ${pnl.toFixed(4)} USDT\n` +
       `injected faults: ${JSON.stringify(r.injected)} · false "unprotected" alerts: ${r.unprotectedAlerts}\n` +
       `bot states: ${JSON.stringify(r.botStates)}\n` +
+      `largest margin per trade: ${JSON.stringify(Object.fromEntries(Object.entries(r.maxMarginByBot).map(([k, v]) => [k, Number(v.toFixed(2))])))}\n` +
       `"unprotected" alerts sent: ${r.alerts.length}${r.alerts.length ? "\n  " + r.alerts.join("\n  ") : ""}\n` +
       `violations: ${r.violations.length}${r.violations.length ? "\n  " + r.violations.slice(0, 15).join("\n  ") : ""}\n` +
       `most common cycle outcomes:\n  ${top.map(([k, n]) => `${n}× ${k}`).join("\n  ")}`,
@@ -372,5 +381,21 @@ describe.skipIf(!RUN)("END-TO-END: production trading path on a simulated, unrel
     // the old bug: a BTC refusal ended every cycle — now other coins are evaluated after it
     const btcEndedCycle = Object.entries(r.reasons).filter(([k]) => /^Position size # is below the exchange minimum/.test(k)).reduce((a, [, n]) => a + n, 0);
     expect(btcEndedCycle).toBe(0);
+  }, 3_600_000);
+
+  it("RISKY trade style: whole free wallet as margin, still stop-loss protected, alongside a Safe bot", async () => {
+    const risky: BotSpec[] = [
+      { name: "Risky Smart Majors", body: { strategy: "TradenayaSmartV1", timeframe: "1h", coinUniverse: "MAJORS", maxRiskPerTrade: 5, dailyLossLimit: 60, momentumEntriesOnly: false, riskStyle: "RISKY" } },
+      { name: "Risky Breakout Top", body: { strategy: "TrendBreakoutV1", timeframe: "4h", coinUniverse: "TOP_VOLUME", maxRiskPerTrade: 1, dailyLossLimit: 60, riskStyle: "RISKY" } },
+      { name: "Safe Smart Top", body: { strategy: "TradenayaSmartV1", timeframe: "1h", coinUniverse: "TOP_VOLUME", maxRiskPerTrade: 5, dailyLossLimit: 30, momentumEntriesOnly: false } },
+    ];
+    const r = await runScenario({ label: "RISKY", balance: 500, days: Number(process.env.E2E_DAYS_RISKY ?? 14), seed: 23, restartAtHalf: true, bots: risky, faults: { readTimeout: 0.1, placeFailure: 0.03, cancelFailure: 0.05 } });
+    report("RISKY 500 USDT · faults · restart", r);
+    expect(r.violations).toEqual([]); // one stop-loss per position, no orphans, nothing stuck, loss never far past the stop
+    expect(r.unprotectedAlerts).toBe(0);
+    expect(r.entries).toBeGreaterThanOrEqual(2);
+    // a Risky trade puts (nearly) the whole free wallet in as margin — far above what 5% max risk would size
+    expect(Math.max(r.maxMarginByBot["Risky Smart Majors"] ?? 0, r.maxMarginByBot["Risky Breakout Top"] ?? 0)).toBeGreaterThan(0.5 * 500);
+    for (const status of Object.values(r.botStates)) expect(["RUNNING", "POSITION_OPEN", "POSITION_MANAGED", "ORDER_PENDING"]).toContain(status);
   }, 3_600_000);
 });
