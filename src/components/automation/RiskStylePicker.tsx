@@ -37,6 +37,8 @@ interface RiskStylePickerProps {
   timeframe: string;
   /** Fixed coin, or null for an auto-select bot (judged on the market leaders). */
   symbol: string | null;
+  /** Show the live "Market right now" read (off for backtests, which run on past prices). */
+  showMarket?: boolean;
 }
 
 /**
@@ -44,7 +46,7 @@ interface RiskStylePickerProps {
  * the user can pick based on current conditions. Used by create and edit, for
  * paper and live bots alike.
  */
-export function RiskStylePicker({ value, onChange, timeframe, symbol }: RiskStylePickerProps) {
+export function RiskStylePicker({ value, onChange, timeframe, symbol, showMarket = true }: RiskStylePickerProps) {
   const [condition, setCondition] = useState<MarketConditionView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,13 +71,14 @@ export function RiskStylePicker({ value, onChange, timeframe, symbol }: RiskStyl
   );
 
   useEffect(() => {
+    if (!showMarket) return;
     const controller = new AbortController();
     const timer = setTimeout(() => void load(controller.signal), 400);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [load]);
+  }, [load, showMarket]);
 
   const meta = condition ? LEVEL_META[condition.level] : null;
   const riskyAgainstMarket = value === "RISKY" && condition != null && condition.level !== "PREDICTABLE";
@@ -102,6 +105,7 @@ export function RiskStylePicker({ value, onChange, timeframe, symbol }: RiskStyl
         />
       </div>
 
+      {showMarket && (
       <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs">
         <div className="flex items-center justify-between gap-2">
           <p className="font-medium text-foreground">
@@ -156,6 +160,7 @@ export function RiskStylePicker({ value, onChange, timeframe, symbol }: RiskStyl
           </div>
         )}
       </div>
+      )}
 
       {value === "RISKY" && (
         <div className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-300">

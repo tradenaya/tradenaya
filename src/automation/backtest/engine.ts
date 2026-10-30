@@ -47,6 +47,10 @@ export interface BacktestingEngineOptions {
 
 const DEFAULT_PROGRESS_INTERVAL = 250;
 
+/** Give the server a turn at least this often while simulating (ms of CPU). */
+const YIELD_EVERY_MS = 20;
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 export class BacktestingEngine {
   private readonly provider: HistoricalMarketDataProvider;
   private readonly shouldCancel: () => boolean;
@@ -90,8 +94,9 @@ export class BacktestingEngine {
       });
     } catch (error) {
       // A coin listed shortly before the start has no warm-up history; fall back
-      // to the requested window so the backtest still runs.
-      if (!(error instanceof BacktestError) || error.code !== "DATA_UNAVAILABLE" || warmupStart === config.startTime) throw error;
+      // to the requested window so the backtest still runs. Only for a missing
+      // START — a missing end would fail again after a second full download.
+      if (!(error instanceof BacktestError) || error.edge !== "start" || warmupStart === config.startTime) throw error;
       candles = await this.provider.getCandles({
         symbol: config.symbol,
         timeframe: config.timeframe,
@@ -107,6 +112,7 @@ export class BacktestingEngine {
       );
     }
 
+    await yieldToEventLoop(); // let waiting requests through before the CPU-heavy setup
     const dataQuality = validateCandleQuality(candles, { intervalMs });
 
     const feeRateBps = config.feeRateBps ?? DEFAULT_FEE_RATE_BPS;
@@ -139,8 +145,17 @@ export class BacktestingEngine {
     let exposureSum = 0;
     let exposureCount = 0;
 
+    await yieldToEventLoop();
+    let lastYield = performance.now();
     for (let i = warmup; i < candles.length; i += 1) {
       this.checkCancelled();
+      // The simulation is pure CPU work on in-memory candles: without a pause
+      // it held the server's only thread for the whole backtest, so every
+      // other request (and the live bots) waited until it finished.
+      if (performance.now() - lastYield >= YIELD_EVERY_MS) {
+        await yieldToEventLoop();
+        lastYield = performance.now();
+      }
       const candle = candles[i];
 
       if (sim.isIdle()) {
@@ -289,6 +304,8 @@ export class BacktestingEngine {
         dailyTradeLimit: 20,
         // Same floor the live risk gate resolves (bot setting, else the documented 1.5).
         minRiskRewardRatio: resolveMinRiskReward(config).value,
+        // Same as live: RISKY uses the whole allocated capital as margin.
+        fullAllocation: config.riskStyle === "RISKY",
       },
       wallet: { balance: wallet.balance },
       capital: {

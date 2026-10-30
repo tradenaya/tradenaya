@@ -51,7 +51,9 @@ export async function POST(req: NextRequest) {
       timeframe: info.fixedTimeframe ?? raw.timeframe,
       momentumEntriesOnly: info.supportsMomentumFilter && raw.momentumEntriesOnly === true,
     };
-    const data = await getBacktestService().run(userId, body);
+    // Starts in the background and returns at once (status RUNNING); the page
+    // polls the list. Waiting here hit the web server's ~60 s limit (HTTP 504).
+    const data = await getBacktestService().start(userId, body);
     return ok(data);
   } catch (error: any) {
     console.error("[analytics/backtests] run failed", error);

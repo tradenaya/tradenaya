@@ -12,6 +12,21 @@ export const MAX_ACTIVE_BACKTESTS = 2;
 /** Progress persistence threshold: only write the row every ~5%. */
 const PROGRESS_THRESHOLD = 5;
 
+/** Backtests running in THIS server process (production runs a single process). */
+const runningJobs = new Set<number>();
+
+/**
+ * Never ask for candles that do not exist yet: an end date of "today" meant
+ * 23:59 tonight, so the data check failed after downloading everything.
+ */
+export function clampToNow(config: BacktestConfig, now = Date.now()): BacktestConfig {
+  if (!(config?.endTime > now)) return config;
+  if (!(config.startTime < now)) {
+    throw new BacktestError("The start date must be in the past.", "INVALID_CONFIG");
+  }
+  return { ...config, endTime: now };
+}
+
 export interface BacktestServiceOptions {
   store?: BacktestStore;
   /** For tests: swap in a fake engine that returns a canned BacktestResult. */
@@ -42,8 +57,53 @@ export class BacktestService {
     });
   }
 
+  /**
+   * Start a backtest in the background and return its record straight away
+   * (status RUNNING). A long backtest takes minutes — far longer than the web
+   * server waits for a request (the 504 "Gateway Time-out" users saw) — so the
+   * page polls the list for progress and the result instead.
+   */
+  async start(userId: number, config: BacktestConfig): Promise<ReturnType<typeof summarizeBacktest>> {
+    const prepared = await this.prepare(userId, config);
+    runningJobs.add(prepared.id);
+    void this.execute(prepared.id, userId, prepared.config)
+      .catch(() => null) // already recorded as FAILED / CANCELLED on the row
+      .finally(() => runningJobs.delete(prepared.id));
+    const record = await this.store.get(userId, prepared.id);
+    if (!record) throw new BacktestError("Backtest record disappeared after creation", "INTERNAL");
+    return summarizeBacktest(record);
+  }
+
+  /** Run a backtest to completion (awaited). */
   async run(userId: number, config: BacktestConfig): Promise<ReturnType<typeof summarizeBacktest>> {
+    const prepared = await this.prepare(userId, config);
+    runningJobs.add(prepared.id);
+    try {
+      return await this.execute(prepared.id, userId, prepared.config);
+    } finally {
+      runningJobs.delete(prepared.id);
+    }
+  }
+
+  /**
+   * A RUNNING / QUEUED row that no job in this server process owns was cut off
+   * by a restart (e.g. a deploy). Without this it stayed "in progress" forever
+   * and, after two, blocked the user from starting any backtest.
+   */
+  async reapInterrupted(userId: number): Promise<void> {
+    for (const id of await this.store.activeIds(userId)) {
+      if (!runningJobs.has(id)) {
+        await this.store.updateStatus(id, "FAILED", {
+          errorMessage: "Stopped because the server restarted (for example an update was deployed) — please run it again.",
+        });
+      }
+    }
+  }
+
+  private async prepare(userId: number, raw: BacktestConfig): Promise<{ id: number; config: BacktestConfig }> {
+    const config = clampToNow(raw);
     this.validateConfig(config);
+    await this.reapInterrupted(userId);
     const active = await this.store.countActive(userId);
     if (active >= MAX_ACTIVE_BACKTESTS) {
       throw new BacktestError(
@@ -64,15 +124,23 @@ export class BacktestService {
     });
 
     await this.store.updateStatus(id, "RUNNING", { progress: null });
+    return { id, config };
+  }
 
+  private async execute(id: number, userId: number, config: BacktestConfig): Promise<ReturnType<typeof summarizeBacktest>> {
     const provider = this.providerFactory(userId);
     let lastPersistedProgress = 0;
+    // Progress writes are queued and awaited before the final status is written,
+    // so a late "RUNNING" can never overwrite COMPLETED / FAILED.
+    let progressWrites: Promise<void> = Promise.resolve();
     const onProgress = (progress: BacktestProgress) => {
       if (progress.percentage - lastPersistedProgress >= PROGRESS_THRESHOLD || progress.percentage >= 100) {
         lastPersistedProgress = progress.percentage;
-        this.store.updateStatus(id, "RUNNING", { progress }).catch((error) => {
-          console.error(`[BacktestService] failed to persist progress for ${id}:`, error);
-        });
+        progressWrites = progressWrites.then(() =>
+          this.store.updateStatus(id, "RUNNING", { progress }).catch((error) => {
+            console.error(`[BacktestService] failed to persist progress for ${id}:`, error);
+          }),
+        );
       }
     };
 
@@ -80,6 +148,7 @@ export class BacktestService {
 
     try {
       const result = await engine.run(config);
+      await progressWrites;
       await this.store.saveResult(id, {
         metrics: result.metrics,
         equityCurve: result.equityCurve,
@@ -92,6 +161,7 @@ export class BacktestService {
       if (!record) throw new BacktestError("Backtest record disappeared during execution", "INTERNAL");
       return summarizeBacktest(record);
     } catch (error) {
+      await progressWrites;
       if (error instanceof BacktestCancelledError) {
         await this.store.updateStatus(id, "CANCELLED", { errorMessage: error.message });
       } else {
@@ -103,6 +173,7 @@ export class BacktestService {
   }
 
   async list(userId: number, limit = 20): Promise<ReturnType<typeof summarizeBacktest>[]> {
+    await this.reapInterrupted(userId).catch(() => null);
     const records = await this.store.list(userId, limit);
     return records.map(summarizeBacktest);
   }

@@ -8,6 +8,12 @@ export interface HistoricalCandlesOptions {
   /** optional client-side filter */
   startTime?: number;
   endTime?: number;
+  /**
+   * Throw the exchange error instead of returning []. Live analysis keeps the
+   * quiet fallback; a backtest must show the real cause (e.g. expired API
+   * keys), not "no historical data".
+   */
+  throwOnError?: boolean;
 }
 
 export interface MarketDataRestClientOptions {
@@ -81,8 +87,18 @@ export class MarketDataRestClient {
     // while the cache still holds only the live candle. Retry once so a single
     // flake does not silently drop a valid symbol out of analysis.
     let candles: MarketCandle[] = [];
+    let lastError: unknown = null;
     for (let attempt = 0; attempt < 2 && candles.length === 0; attempt++) {
-      candles = await this.fetchCandlesOnce(userId, normalized, apiInterval, limit, options);
+      try {
+        candles = await this.fetchCandlesOnce(userId, normalized, apiInterval, limit, options);
+        lastError = null;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) {
+      if (options.throwOnError) throw lastError;
+      candles = [];
     }
 
     if (options.startTime !== undefined || options.endTime !== undefined) {
@@ -116,7 +132,8 @@ export class MarketDataRestClient {
         .map((row) => parseCandleRow(row, apiInterval))
         .filter((c): c is MarketCandle => c !== null)
         .sort((a, b) => a.timestamp - b.timestamp);
-    } catch {
+    } catch (error) {
+      if (options.throwOnError) throw error;
       return [];
     }
   }
