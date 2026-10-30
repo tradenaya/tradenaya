@@ -539,6 +539,8 @@ export interface BacktestSummary {
   createdAt: string;
   completedAt: string | null;
   errorMessage: string | null;
+  /** While RUNNING: % of candles simulated (null while price history is still loading). */
+  progressPct?: number | null;
 }
 
 export interface BacktestDetail extends BacktestSummary {

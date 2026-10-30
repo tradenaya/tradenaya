@@ -249,13 +249,29 @@ export class BacktestStore {
     );
   }
 
+  /**
+   * Summaries for the list. The equity curve (one point per candle — large for
+   * long backtests) is left out: the list never shows it and the page reloads
+   * it every few seconds. The detail view loads it with get().
+   */
   async list(userId: number, limit = 20): Promise<BacktestRecord[]> {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const [rows] = await db.query(
-      `SELECT * FROM automation_backtests WHERE user_id = ? ORDER BY id DESC LIMIT ?;`,
+      `SELECT id, user_id, bot_id, symbol, timeframe, start_time, end_time, initial_capital, config_json, status, progress_json,
+              execution_policy, slippage_applied, metrics_json, NULL AS equity_curve_json, error_message, created_at, completed_at
+         FROM automation_backtests WHERE user_id = ? ORDER BY id DESC LIMIT ?;`,
       [userId, safeLimit],
     );
     return (rows as any[]).map(mapRow);
+  }
+
+  /** Ids of this user's backtests marked QUEUED / RUNNING (cheap; for the restart clean-up). */
+  async activeIds(userId: number): Promise<number[]> {
+    const [rows] = await db.query(
+      `SELECT id FROM automation_backtests WHERE user_id = ? AND status IN ('QUEUED', 'RUNNING');`,
+      [userId],
+    );
+    return (rows as Array<{ id: number | string }>).map((r) => Number(r.id));
   }
 
   async get(userId: number, id: number): Promise<BacktestRecord | null> {
@@ -342,5 +358,6 @@ export function summarizeBacktest(record: BacktestRecord) {
     createdAt: record.createdAt,
     completedAt: record.completedAt,
     errorMessage: record.errorMessage,
+    progressPct: record.status === "RUNNING" && record.progress ? Math.round(record.progress.percentage) : null,
   };
 }

@@ -14,6 +14,8 @@ export class BacktestError extends Error {
   constructor(
     message: string,
     public readonly code: BacktestErrorCode,
+    /** For DATA_UNAVAILABLE: which end of the window has no candles. */
+    public readonly edge?: "start" | "end",
   ) {
     super(message);
     this.name = "BacktestError";

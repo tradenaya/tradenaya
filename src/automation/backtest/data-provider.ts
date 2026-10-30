@@ -51,16 +51,33 @@ export class RestHistoricalDataProvider implements HistoricalMarketDataProvider 
     }
 
     const pages: MarketCandle[][] = [];
-    let cursorEnd = request.endTime;
     let progress = false;
+    let pagesUsed = 0;
+    const fetchPage = async (startTime: number, endTime: number): Promise<MarketCandle[]> => {
+      pagesUsed += 1;
+      try {
+        return await this.options.restClient.getHistoricalCandles(this.options.userId, symbol, request.timeframe, {
+          startTime,
+          endTime,
+          limit: this.pageSize,
+          throwOnError: true,
+        });
+      } catch (error) {
+        // Show the real cause (e.g. expired API keys), not "no data".
+        const detail = error instanceof Error ? error.message : String(error);
+        const status = (error as { httpStatus?: number })?.httpStatus;
+        const hint = status === 401 || status === 403 || /invalid access|unauthori[sz]ed|signature/i.test(detail)
+          ? " Your CoinSwitch API keys may have expired — reconnect your CoinSwitch account and try again."
+          : " Please try again in a minute.";
+        throw new BacktestError(`Could not download price history for ${symbol} from CoinSwitch: ${detail}${status ? ` (HTTP ${status})` : ""}.${hint}`, "DATA_UNAVAILABLE");
+      }
+    };
 
-    for (let page = 0; page < this.maxPages; page += 1) {
-      const batch = await this.options.restClient.getHistoricalCandles(this.options.userId, symbol, request.timeframe, {
-        startTime: request.startTime,
-        endTime: cursorEnd,
-        limit: this.pageSize,
-      });
-
+    // 1) Page BACKWARDS from the end (exchanges usually return the newest
+    //    candles of the requested range first).
+    let cursorEnd = request.endTime;
+    while (pagesUsed < this.maxPages) {
+      const batch = await fetchPage(request.startTime, cursorEnd);
       if (batch.length === 0) break;
 
       const earliest = Math.min(...batch.map((c) => c.timestamp));
@@ -81,6 +98,18 @@ export class RestHistoricalDataProvider implements HistoricalMarketDataProvider 
       cursorEnd = nextEnd;
     }
 
+    // 2) Page FORWARDS if the exchange returned the OLDEST candles of the range
+    //    instead, so the window still reaches its end.
+    let latest = pages.length ? Math.max(...pages.flat().map((c) => c.timestamp)) : null;
+    while (latest != null && latest + intervalMs * 2 < request.endTime && pagesUsed < this.maxPages) {
+      const batch = await fetchPage(latest + intervalMs, request.endTime);
+      if (batch.length === 0) break;
+      const newest = Math.max(...batch.map((c) => c.timestamp));
+      if (newest <= latest) break; // nothing newer: stop, the end check below explains it
+      pages.push(batch);
+      latest = newest;
+    }
+
     const merged = this.merge(pages, symbol, intervalMs, request);
 
     if (merged.length === 0) {
@@ -98,6 +127,7 @@ export class RestHistoricalDataProvider implements HistoricalMarketDataProvider 
       throw new BacktestError(
         `Historical data for ${symbol} does not extend back to the requested start time (earliest candle ${new Date(first).toISOString()}).`,
         "DATA_UNAVAILABLE",
+        "start",
       );
     }
 
@@ -105,6 +135,7 @@ export class RestHistoricalDataProvider implements HistoricalMarketDataProvider 
       throw new BacktestError(
         `Historical data for ${symbol} does not reach the requested end time (last candle closes ${new Date(lastClose).toISOString()}).`,
         "DATA_UNAVAILABLE",
+        "end",
       );
     }
 

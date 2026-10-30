@@ -30,10 +30,12 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 }
 
 export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
+  // Backtests run in the background; the list refreshes so progress and
+  // results show up without reloading the page.
   const { data, loading, errorInfo, refresh } = useAsyncData<BacktestSummary[]>(
     () => apiGet("/api/analytics/backtests", { limit: 50 }),
     [filters.botId],
-    { pollMs: 10_000 },
+    { pollMs: 5_000 },
   )
 
   const [runOpen, setRunOpen] = useState(false)
@@ -103,7 +105,6 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
                   <TableHead className="text-right hidden sm:table-cell">Win Rate</TableHead>
                   <TableHead className="text-right hidden lg:table-cell">Max DD</TableHead>
                   <TableHead className="text-right hidden md:table-cell">Trades</TableHead>
-                  <TableHead className="text-right hidden xl:table-cell">Policy</TableHead>
                   <TableHead className="hidden lg:table-cell">Ran</TableHead>
                   <TableHead />
                 </TableRow>
@@ -121,7 +122,14 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
                         {formatDate(new Date(b.endTime).toISOString(), { year: "numeric", month: "short", day: "2-digit" })}
                       </TableCell>
                       <TableCell>
-                        <Badge className={badge.className}>{badge.label}</Badge>
+                        <Badge className={badge.className}>
+                          {b.status === "RUNNING" ? (b.progressPct != null ? `Running ${b.progressPct}%` : "Loading prices…") : badge.label}
+                        </Badge>
+                        {b.status === "FAILED" && b.errorMessage && (
+                          <p className="mt-1 max-w-56 text-[11px] leading-snug text-red-400/90" title={b.errorMessage}>
+                            {b.errorMessage.length > 120 ? `${b.errorMessage.slice(0, 120)}…` : b.errorMessage}
+                          </p>
+                        )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums hidden md:table-cell">{formatMoney(b.initialCapital)}</TableCell>
                       <TableCell className={`text-right font-medium tabular-nums ${signClass(b.totalReturnPct)}`}>{formatPercent(b.totalReturnPct)}</TableCell>
@@ -129,7 +137,6 @@ export function BacktestsCard({ filters }: { filters: AnalyticsFilterState }) {
                       <TableCell className="text-right tabular-nums hidden sm:table-cell">{formatPercent(b.winRate)}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground hidden lg:table-cell">{formatPercent(b.maxDrawdownPct)}</TableCell>
                       <TableCell className="text-right tabular-nums hidden md:table-cell">{b.tradeCount ?? "—"}</TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground hidden xl:table-cell">{b.executionPolicy ?? "—"}</TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground hidden lg:table-cell">{formatDate(b.createdAt)}</TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button

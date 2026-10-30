@@ -66,6 +66,8 @@ export interface BacktestConfig {
   leverage: number;
   maxRiskPerTrade: number;
   dailyLossLimit: number;
+  /** Same as the bot setting: SAFE (sized by max risk, default) or RISKY (whole capital as margin). */
+  riskStyle?: "SAFE" | "RISKY";
 
   enableTrailingStop: boolean;
   trailingDistancePercent?: number;
@@ -288,6 +290,7 @@ export function toAutomationConfig(config: BacktestConfig): AutomationConfig {
     walletPercent: config.walletPercent,
     maxRiskPerTrade: config.maxRiskPerTrade,
     dailyLossLimit: config.dailyLossLimit,
+    riskStyle: config.riskStyle === "RISKY" ? "RISKY" : "SAFE",
     enableTrailingStop: config.enableTrailingStop,
     trailingDistancePercent: config.trailingDistancePercent,
     minRiskRewardRatio: config.minRiskRewardRatio,
@@ -314,6 +317,7 @@ export function fingerprintConfig(config: BacktestConfig): string {
     leverage: config.leverage,
     maxRiskPerTrade: config.maxRiskPerTrade,
     dailyLossLimit: config.dailyLossLimit,
+    riskStyle: config.riskStyle === "RISKY" ? "RISKY" : "SAFE",
     enableTrailingStop: config.enableTrailingStop,
     trailingDistancePercent: config.trailingDistancePercent ?? null,
     minRiskRewardRatio: config.minRiskRewardRatio ?? null,

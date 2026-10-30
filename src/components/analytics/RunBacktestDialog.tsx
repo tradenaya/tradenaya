@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -17,22 +18,30 @@ import type { BacktestConfig } from "@/automation/backtest/types"
 import { apiSend } from "./api"
 import { ErrorState } from "@/components/ui/error-state"
 import { StrategyPicker } from "@/components/automation/StrategyPicker"
+import { CoinSearchSelect } from "@/components/automation/CoinSearchSelect"
+import { RiskStylePicker, type RiskStyle } from "@/components/automation/RiskStylePicker"
 import { DEFAULT_STRATEGY_ID, TREND_BREAKOUT_ID, strategyInfo } from "@/automation/strategy/catalog"
 
 const inputClass = "h-9 rounded-md border border-border bg-input px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
+      {hint && <p className="-mt-0.5 text-[11px] text-muted-foreground/80">{hint}</p>}
       {children}
     </div>
   )
 }
 
-const defaultFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
-const defaultTo = new Date().toISOString().slice(0, 10)
+const today = () => new Date().toISOString().slice(0, 10)
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
 
+/**
+ * Backtest form. Field names and defaults match "Create bot", so a backtest
+ * shows how a bot with those settings would have traded. Fees, slippage and
+ * the same-candle fill rule use realistic fixed defaults (not user fields).
+ */
 export function RunBacktestDialog({
   open,
   onOpenChange,
@@ -42,54 +51,70 @@ export function RunBacktestDialog({
   onOpenChange: (open: boolean) => void
   onCreated: () => void
 }) {
-  const [symbol, setSymbol] = useState("BTCUSDT")
+  const initial = strategyInfo(DEFAULT_STRATEGY_ID).defaults
   const [strategy, setStrategy] = useState<string>(DEFAULT_STRATEGY_ID)
-  const [timeframe, setTimeframe] = useState("1h")
   const info = strategyInfo(strategy)
-  const [from, setFrom] = useState(defaultFrom)
-  const [to, setTo] = useState(defaultTo)
-  const [capital, setCapital] = useState("1000")
+  const [symbol, setSymbol] = useState("BTCUSDT")
+  const [timeframe, setTimeframe] = useState(initial.timeframe)
+  const [from, setFrom] = useState(daysAgo(90))
+  const [to, setTo] = useState(today())
+  const [capital, setCapital] = useState("100")
   const [leverage, setLeverage] = useState("5")
-  const [risk, setRisk] = useState("5")
-  const [dailyLoss, setDailyLoss] = useState("5")
-  // Defaults mirror a newly created live bot so a backtest shows how new bots trade.
-  const [trailing, setTrailing] = useState(false)
-  const [momentumOnly, setMomentumOnly] = useState(true)
+  const [riskStyle, setRiskStyle] = useState<RiskStyle>("SAFE")
+  const [risk, setRisk] = useState(String(initial.maxRiskPerTrade))
+  const [dailyLoss, setDailyLoss] = useState(String(initial.dailyLossLimit))
+  const [momentumOnly, setMomentumOnly] = useState(initial.momentumEntriesOnly)
+  const [trailing, setTrailing] = useState(initial.enableTrailingStop)
   const [trailingDist, setTrailingDist] = useState("1")
-  const [feeBps, setFeeBps] = useState("5")
-  const [slippageBps, setSlippageBps] = useState("0")
-  const [policy, setPolicy] = useState("CONSERVATIVE")
-  const [description, setDescription] = useState("")
+  const [name, setName] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(null)
+
+  const isBreakout = info.id === TREND_BREAKOUT_ID
+
+  const pickStrategy = (id: string) => {
+    // Same recommended settings as "Create bot" applies for this strategy.
+    const d = strategyInfo(id).defaults
+    setStrategy(id)
+    setTimeframe(strategyInfo(id).fixedTimeframe ?? d.timeframe)
+    setRisk(String(d.maxRiskPerTrade))
+    setDailyLoss(String(d.dailyLossLimit))
+    setMomentumOnly(d.momentumEntriesOnly)
+    setTrailing(d.enableTrailingStop)
+  }
 
   const submit = async () => {
     setError(null)
     const startTime = new Date(`${from}T00:00:00.000Z`).getTime()
-    const endTime = new Date(`${to}T23:59:59.999Z`).getTime()
+    // "To" = end of that day, but never later than now (no candles exist yet).
+    const endTime = Math.min(new Date(`${to}T23:59:59.999Z`).getTime(), Date.now())
     if (!(startTime > 0) || !(endTime > startTime)) {
-      setError("Backtest end must be after start.")
+      setError("The start date must be before the end date (and in the past).")
       return
     }
+    const nums = { capital: Number(capital), leverage: Number(leverage), risk: Number(risk), dailyLoss: Number(dailyLoss) }
+    if (!(nums.capital > 0)) return setError("Capital per trade must be greater than 0.")
+    if (!(nums.leverage >= 1)) return setError("Leverage must be at least 1x.")
+    if (riskStyle === "SAFE" && !(nums.risk > 0)) return setError("Max risk / trade must be greater than 0%.")
+    if (!(nums.dailyLoss >= 0)) return setError("Daily loss limit must be 0% or more.")
+
     const config: BacktestConfig = {
       symbol: symbol.trim().toUpperCase(),
       strategy,
       timeframe: info.fixedTimeframe ?? timeframe,
       startTime,
       endTime,
-      initialCapital: Number(capital),
+      initialCapital: nums.capital,
       capitalMode: "fixed",
-      leverage: Number(leverage),
-      maxRiskPerTrade: Number(risk),
-      dailyLossLimit: Number(dailyLoss),
+      leverage: nums.leverage,
+      riskStyle,
+      maxRiskPerTrade: nums.risk > 0 ? nums.risk : 1,
+      dailyLossLimit: nums.dailyLoss,
       // Trend Breakout always uses its own candle-channel trailing stop.
-      enableTrailingStop: info.id === TREND_BREAKOUT_ID ? false : trailing,
-      trailingDistancePercent: trailing ? Number(trailingDist) : 0,
+      enableTrailingStop: isBreakout ? false : trailing,
+      trailingDistancePercent: !isBreakout && trailing ? Number(trailingDist) : 0,
       momentumEntriesOnly: info.supportsMomentumFilter && momentumOnly,
-      feeRateBps: Number(feeBps),
-      slippageBps: Number(slippageBps),
-      executionPolicy: policy as BacktestConfig["executionPolicy"],
-      description: description || undefined,
+      description: name.trim() || undefined,
     }
 
     try {
@@ -99,6 +124,7 @@ export function RunBacktestDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       })
+      toast.success("Backtest started — it runs in the background. Progress and the result appear in the Backtests list.")
       onCreated()
       onOpenChange(false)
     } catch (e) {
@@ -113,27 +139,25 @@ export function RunBacktestDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Run Backtest</DialogTitle>
-          <DialogDescription>Simulate the automation pipeline on historical data.</DialogDescription>
+          <DialogDescription>See how a bot with these settings would have traded on past prices.</DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <StrategyPicker
-              id="backtest-strategy"
-              value={strategy}
-              onChange={(id) => {
-                setStrategy(id)
-                const fixed = strategyInfo(id).fixedTimeframe
-                if (fixed) setTimeframe(fixed)
-              }}
-            />
+            <StrategyPicker id="backtest-strategy" value={strategy} onChange={pickStrategy} />
+            <p className="mt-1 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              Recommended settings applied: {info.defaults.note} You can still change them below.
+            </p>
           </div>
-          <Field label="Symbol">
-            <Input className={inputClass} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="BTCUSDT" />
-          </Field>
+
+          <div className="col-span-2">
+            <Field label="Symbol">
+              <CoinSearchSelect value={symbol} onChange={setSymbol} />
+            </Field>
+          </div>
+
           <Field label="Timeframe">
             <select className={inputClass} value={info.fixedTimeframe ?? timeframe} onChange={(e) => setTimeframe(e.target.value)} disabled={Boolean(info.fixedTimeframe)}>
-              <option value="5m">5m</option>
               <option value="15m">15m</option>
               <option value="30m">30m</option>
               <option value="1h">1h</option>
@@ -141,6 +165,10 @@ export function RunBacktestDialog({
               <option value="1d">1d</option>
             </select>
           </Field>
+          <Field label="Leverage">
+            <Input className={inputClass} type="number" min="1" value={leverage} onChange={(e) => setLeverage(e.target.value)} />
+          </Field>
+
           <Field label="From">
             <DatePicker
               value={from}
@@ -156,6 +184,7 @@ export function RunBacktestDialog({
             <DatePicker
               value={to}
               minDate={from}
+              maxDate={today()}
               placeholder="To date"
               onChange={(value) => {
                 setTo(value ?? "")
@@ -163,75 +192,65 @@ export function RunBacktestDialog({
               }}
             />
           </Field>
-          <Field label="Initial Capital (USDT)">
-            <Input className={inputClass} type="number" min="1" value={capital} onChange={(e) => setCapital(e.target.value)} />
+
+          <div className="col-span-2">
+            <Field label="Capital per trade (USDT)" hint="The amount the bot trades with — the backtest starts with this as its wallet.">
+              <Input className={inputClass} type="number" min="1" value={capital} onChange={(e) => setCapital(e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="col-span-2 grid grid-cols-1 md:grid-cols-2">
+            <RiskStylePicker value={riskStyle} onChange={setRiskStyle} timeframe={info.fixedTimeframe ?? timeframe} symbol={symbol || null} showMarket={false} />
+          </div>
+
+          <Field
+            label="Max risk / trade (%)"
+            hint={riskStyle === "RISKY" ? "Not used in Risky style — the whole amount is used." : "Most of the amount a stop-loss hit may lose."}
+          >
+            <Input className={inputClass} type="number" step="0.1" min="0.1" value={risk} onChange={(e) => setRisk(e.target.value)} disabled={riskStyle === "RISKY"} />
           </Field>
-          <Field label="Leverage">
-            <Input className={inputClass} type="number" min="1" value={leverage} onChange={(e) => setLeverage(e.target.value)} />
-          </Field>
-          <Field label="Max Risk per Trade (%)">
-            <Input className={inputClass} type="number" step="0.1" min="0.1" value={risk} onChange={(e) => setRisk(e.target.value)} />
-          </Field>
-          <Field label="Daily Loss Limit (%)">
+          <Field label="Daily loss limit (%)" hint="Stops new trades for the day after this loss.">
             <Input className={inputClass} type="number" step="0.1" min="0" value={dailyLoss} onChange={(e) => setDailyLoss(e.target.value)} />
           </Field>
-          <Field label="Fee (bps)">
-            <Input className={inputClass} type="number" min="0" value={feeBps} onChange={(e) => setFeeBps(e.target.value)} />
-          </Field>
-          <Field label="Slippage (bps)">
-            <Input className={inputClass} type="number" min="0" value={slippageBps} onChange={(e) => setSlippageBps(e.target.value)} />
-          </Field>
-          <Field label="Execution Policy">
-            <select className={inputClass} value={policy} onChange={(e) => setPolicy(e.target.value)}>
-              <option value="CONSERVATIVE">Conservative</option>
-              <option value="STOP_FIRST">Stop first</option>
-              <option value="TARGET_FIRST">Target first</option>
-            </select>
-          </Field>
+
           {info.supportsMomentumFilter && (
-          <Field label="Strong-momentum entries only">
-            <select
-              className={inputClass}
-              value={momentumOnly ? "on" : "off"}
-              onChange={(e) => setMomentumOnly(e.target.value === "on")}
-            >
-              <option value="on">On (like new bots)</option>
-              <option value="off">Off</option>
-            </select>
-          </Field>
+            <label className="col-span-2 flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={momentumOnly} onChange={(e) => setMomentumOnly(e.target.checked)} />
+              Strong-momentum entries only
+            </label>
           )}
-          {info.id !== TREND_BREAKOUT_ID && (
-          <Field label="Trailing stop">
-            <select
-              className={inputClass}
-              value={trailing ? "on" : "off"}
-              onChange={(e) => setTrailing(e.target.value === "on")}
-            >
-              <option value="on">Enabled</option>
-              <option value="off">Disabled</option>
-            </select>
-          </Field>
+          {!isBreakout && (
+            <label className="col-span-2 flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={trailing} onChange={(e) => setTrailing(e.target.checked)} />
+              Enable trailing stop
+            </label>
           )}
-          {trailing && info.id !== TREND_BREAKOUT_ID && (
+          {!isBreakout && trailing && (
             <Field label="Trailing distance (%)">
               <Input className={inputClass} type="number" step="0.1" min="0.1" value={trailingDist} onChange={(e) => setTrailingDist(e.target.value)} />
             </Field>
           )}
+
           <div className="col-span-2">
-            <Field label="Description (optional)">
-              <Input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. trend-following test on BTC" />
+            <Field label="Name (optional)">
+              <Input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Breakout on BTC, last 3 months" />
             </Field>
           </div>
+
+          <p className="col-span-2 text-[11px] leading-relaxed text-muted-foreground">
+            Uses exchange-like trading fees (0.05% per side) and a cautious rule: if one candle touches both the stop-loss and the take-profit, it
+            counts as a stop-loss. The backtest runs in the background — long periods can take a few minutes; you can close this window.
+          </p>
         </div>
 
-        {error != null && <ErrorState error={error} title="Couldn't run the backtest" />}
+        {error != null && <ErrorState error={error} title="Couldn't start the backtest" />}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
           <Button onClick={submit} disabled={submitting}>
-            {submitting ? "Running…" : "Run Backtest"}
+            {submitting ? "Starting…" : "Run Backtest"}
           </Button>
         </DialogFooter>
       </DialogContent>
