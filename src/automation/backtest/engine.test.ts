@@ -83,7 +83,9 @@ function baseConfig(candles: MarketCandle[]): BacktestConfig {
   };
 }
 
-describe("BacktestingEngine (end to end)", () => {
+// Full replays of the strategy over hundreds of candles: give them time (Smart scans more candles now
+// that it only takes strong-momentum entries — fewer trades, so fewer candles skipped while in a trade).
+describe("BacktestingEngine (end to end)", { timeout: 60_000 }, () => {
   it("runs the live strategy pipeline and produces a valid result", async () => {
     const candles = buildUptrend(600, 42);
     const provider: HistoricalMarketDataProvider = { getCandles: async () => candles };

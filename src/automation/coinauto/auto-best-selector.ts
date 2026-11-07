@@ -340,7 +340,8 @@ export class AutoBestSelector {
       async (coin) =>
         config.strategy === TREND_BREAKOUT_ID
           ? this.scanBreakout(coin, adapter, timeframe, candlesKey, summary)
-          : this.scanOne(coin, adapter, timeframe, candlesKey, Boolean(config.momentumEntriesOnly), summary),
+          // Smart is always strong-momentum only (see momentum-filter.ts).
+          : this.scanOne(coin, adapter, timeframe, candlesKey, true, summary),
     );
     summary.scanned = universe.length;
     const scanned = scannedResults.filter((s): s is ScannedOpportunity => s !== null);

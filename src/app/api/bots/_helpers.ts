@@ -55,7 +55,8 @@ export function sanitizeConfig(body: Record<string, unknown>): AutomationConfig 
     maxCandles: n(body.maxCandles),
     hardCapCandles: n(body.hardCapCandles),
     regimeTolerancePct: n(body.regimeTolerancePct),
-    momentumEntriesOnly: info.supportsMomentumFilter && body.momentumEntriesOnly === true,
+    // Always on for Smart (see strategy/tradenaya/momentum-filter.ts).
+    momentumEntriesOnly: info.supportsMomentumFilter,
     coinUniverse: body.coinUniverse === "MAJORS" ? "MAJORS" : "TOP_VOLUME",
   };
 }

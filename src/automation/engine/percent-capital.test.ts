@@ -10,16 +10,18 @@ import { HistoricalMarketDataAdapter } from "@/automation/backtest/market-adapte
  */
 const H4 = 4 * 3_600_000;
 const T0 = 1_700_000_000_000;
+/** An early-trend breakout (flat market, a short climb, then a breakout with volume) — the kind the strategy takes. */
 function breakout(): MarketCandle[] {
   const out: MarketCandle[] = [];
-  let p = 100;
-  for (let i = 0; i < 320; i++) {
-    if (i < 295) p += 0.2;
-    const w = i % 2 ? 0.4 : -0.4;
-    out.push({ timestamp: T0 + i * H4, open: p, high: Math.max(p, p + w) + 0.3, low: Math.min(p, p + w) - 0.3, close: p + w, volume: 1000, timeframe: "4h" });
+  let p = 400;
+  for (let i = 0; i < 319; i++) {
+    if (i >= 308) p += 0.3;
+    const w = i % 2 ? 1 : -1;
+    out.push({ timestamp: T0 + i * H4, open: p - w, high: Math.max(p - w, p + w) + 1, low: Math.min(p - w, p + w) - 1, close: p + w, volume: 1000, timeframe: "4h" });
   }
-  const high = Math.max(...out.slice(-21, -1).map((c) => c.high));
-  out[319] = { ...out[319], close: high + 2, high: high + 2.2, volume: 2500 };
+  const high = Math.max(...out.slice(-20).map((c) => c.high));
+  const prev = out[out.length - 1].close;
+  out.push({ timestamp: T0 + 319 * H4, open: prev, high: high + 1.7, low: prev - 0.5, close: high + 1.5, volume: 2500, timeframe: "4h" });
   return out;
 }
 

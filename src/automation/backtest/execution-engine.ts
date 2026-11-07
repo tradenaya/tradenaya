@@ -11,7 +11,7 @@ import { BacktestOrderSimulator, applyExitSlippage } from "./order-simulator";
 import { BacktestTrailingStop } from "./trailing-stop";
 import { BacktestPositionManager } from "./position-manager";
 import type { BacktestPortfolio } from "./portfolio";
-import { channelStop } from "@/automation/strategy/trend-breakout";
+import { BREAKEVEN_BUFFER, TRAIL_ARM_R, channelStop } from "@/automation/strategy/trend-breakout";
 
 export interface PlaceOrderInput {
   symbol: string;
@@ -157,11 +157,23 @@ export class BacktestExecutionEngine {
 
   private processOpenPosition(candle: MarketCandle): CandleProcessingResult {
     const position = this.openPosition as SimulatedPosition;
-    // Candle-channel trail uses only candles that closed BEFORE this one, the
-    // same levels a live stop order would be resting at during this candle.
+    // Trend Breakout exits — the SAME rule as live (PositionMonitor.syncChannelTrailing):
+    // keep the original stop until the trade has been TRAIL_ARM_R in profit, then
+    // the tighter of breakeven (+costs) and the channel of candles that closed
+    // BEFORE this one. (The backtest used to trail from the first candle, which
+    // stopped out trades the live bot keeps.)
     if (position.channelTrailLookback) {
-      const level = channelStop(position.side === "LONG" ? "BUY" : "SELL", this.recent.slice(-position.channelTrailLookback), position.stopLoss);
-      if (level != null && level !== position.stopLoss) this.positions.applyTrailing(position, level, true);
+      const long = position.side === "LONG";
+      const risk = Math.abs(position.entryPrice - position.initialStopLoss);
+      if (!position.trailingActivated && risk > 0 && position.mfe / risk >= TRAIL_ARM_R) position.trailingActivated = true;
+      if (position.trailingActivated) {
+        const breakeven = position.entryPrice * (1 + (long ? 1 : -1) * BREAKEVEN_BUFFER);
+        const channel = channelStop(long ? "BUY" : "SELL", this.recent.slice(-position.channelTrailLookback), null);
+        // Only levels on the protective side of the price this candle opens at (live: of the current price).
+        const levels = [breakeven, channel].filter((l): l is number => l != null && (long ? l < candle.open : l > candle.open));
+        const best = levels.length ? (long ? Math.max(...levels) : Math.min(...levels)) : null;
+        if (best != null && (long ? best > position.stopLoss : best < position.stopLoss)) this.positions.applyTrailing(position, best, true);
+      }
     }
     this.positions.observe(position, candle);
 

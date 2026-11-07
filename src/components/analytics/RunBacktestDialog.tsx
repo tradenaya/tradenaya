@@ -63,7 +63,6 @@ export function RunBacktestDialog({
   const [riskStyle, setRiskStyle] = useState<RiskStyle>("SAFE")
   const [risk, setRisk] = useState(String(initial.maxRiskPerTrade))
   const [dailyLoss, setDailyLoss] = useState(String(initial.dailyLossLimit))
-  const [momentumOnly, setMomentumOnly] = useState(initial.momentumEntriesOnly)
   const [trailing, setTrailing] = useState(initial.enableTrailingStop)
   const [trailingDist, setTrailingDist] = useState("1")
   const [name, setName] = useState("")
@@ -79,7 +78,6 @@ export function RunBacktestDialog({
     setTimeframe(strategyInfo(id).fixedTimeframe ?? d.timeframe)
     setRisk(String(d.maxRiskPerTrade))
     setDailyLoss(String(d.dailyLossLimit))
-    setMomentumOnly(d.momentumEntriesOnly)
     setTrailing(d.enableTrailingStop)
   }
 
@@ -113,7 +111,7 @@ export function RunBacktestDialog({
       // Trend Breakout always uses its own candle-channel trailing stop.
       enableTrailingStop: isBreakout ? false : trailing,
       trailingDistancePercent: !isBreakout && trailing ? Number(trailingDist) : 0,
-      momentumEntriesOnly: info.supportsMomentumFilter && momentumOnly,
+      momentumEntriesOnly: info.supportsMomentumFilter, // always on for Smart
       description: name.trim() || undefined,
     }
 
@@ -215,8 +213,8 @@ export function RunBacktestDialog({
 
           {info.supportsMomentumFilter && (
             <label className="col-span-2 flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={momentumOnly} onChange={(e) => setMomentumOnly(e.target.checked)} />
-              Strong-momentum entries only
+              <input type="checkbox" checked disabled readOnly />
+              Strong-momentum entries only (always on for Smart)
             </label>
           )}
           {!isBreakout && (

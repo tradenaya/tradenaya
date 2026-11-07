@@ -36,6 +36,7 @@ export class BacktestPositionManager {
       entryPrice: input.fillPrice,
       entryTime: input.fillTime,
       stopLoss: input.order.stopLoss,
+      initialStopLoss: input.order.stopLoss,
       takeProfit: input.order.takeProfit,
       leverage: input.order.leverage,
       margin: input.order.margin,
