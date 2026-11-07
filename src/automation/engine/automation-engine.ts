@@ -9,7 +9,8 @@ import type { StrategyContext, StrategyDecision } from "@/automation/strategy/ty
 import type { MarketDataService } from "@/automation/market/market-data-service";
 import { normalizeInterval } from "@/automation/market/normalizer";
 import { closedCandles } from "@/automation/indicators/candle-resampler";
-import { MOMENTUM_RSI_THRESHOLD, passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
+import { MIN_MOMENTUM_BODY_ATR, MOMENTUM_RSI_THRESHOLD, hasMomentumBody, passesMomentumFilter } from "@/automation/strategy/tradenaya/momentum-filter";
+import { atrSeries } from "@/automation/indicators/series";
 import { summarizeDecision } from "@/automation/strategy/tradenaya/humanize";
 import type { AnalysisPhase } from "@/automation/scheduler/LiveActivityHub";
 import { usdt } from "@/lib/currency/usdt-text";
@@ -91,11 +92,23 @@ export class AutomationEngine {
       return { signal: "WAIT", analysis };
     }
 
-    if (!isBreakout && config.momentumEntriesOnly && !passesMomentumFilter(decision.signal, Number(decision.indicators?.rsi))) {
+    // Smart: always strong-momentum entries only, whatever an old bot config says
+    // (without the filter the strategy loses money after fees — see momentum-filter.ts).
+    if (!isBreakout && !passesMomentumFilter(decision.signal, Number(decision.indicators?.rsi))) {
       const rsi = Number(decision.indicators?.rsi);
       const summary = `No trade for ${config.symbol} — ${decision.signal} signal skipped: strong-momentum entries only (RSI ${Number.isFinite(rsi) ? rsi.toFixed(1) : "n/a"}, needs ${decision.signal === "BUY" ? `≥ ${MOMENTUM_RSI_THRESHOLD}` : `≤ ${100 - MOMENTUM_RSI_THRESHOLD}`})`;
       step("strategy", summary);
       return { signal: "WAIT", analysis: { ...analysis, summary } };
+    }
+    if (!isBreakout) {
+      const signalCandle = candles[candles.length - 1];
+      const atrValue = atrSeries(candles.map((c) => c.high), candles.map((c) => c.low), candles.map((c) => c.close), 14).at(-1);
+      if (!hasMomentumBody(signalCandle, atrValue)) {
+        const body = signalCandle && atrValue ? Math.abs(signalCandle.close - signalCandle.open) / atrValue : 0;
+        const summary = `No trade for ${config.symbol} — ${decision.signal} signal skipped: the signal candle has no real momentum (body ${body.toFixed(2)} ATR, needs ≥ ${MIN_MOMENTUM_BODY_ATR})`;
+        step("strategy", summary);
+        return { signal: "WAIT", analysis: { ...analysis, summary } };
+      }
     }
 
     step("plan", `Planning ${decision.signal} trade for ${config.symbol}…`);

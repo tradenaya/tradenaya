@@ -49,6 +49,14 @@ export const MIN_BREAKOUT_ATR = 0.25;
 export const MIN_VOLUME_RATIO = 1.2;
 /** ADX(14) at/above this = the market is trending enough for a breakout to follow through. */
 export const MIN_ADX = 20;
+/**
+ * Only EARLY-trend breakouts: the close may be at most this many ATRs beyond
+ * the 200-EMA. Late breakouts, far into a stretched trend, mostly reversed
+ * straight into the stop. Replay (6 majors, Nov 2024 – Nov 2026, live exit
+ * rules; threshold picked on year 1, checked on year 2): win rate 52→66% (y1)
+ * and 35→44% (y2), average R per trade roughly doubled in both years.
+ */
+export const MAX_EMA_DISTANCE_ATR = 3;
 /** Start trailing the stop only once the trade has been this many R in profit… */
 export const TRAIL_ARM_R = 1.5;
 /** …and at that point move the stop to entry + costs, so the trade can no longer lose. */
@@ -117,6 +125,9 @@ export function analyzeBreakout(candles: MarketCandle[]): BreakoutAnalysis | nul
     if (strength < MIN_BREAKOUT_ATR) rejected = `breakout too weak — closed only ${strength.toFixed(2)} ATR beyond the range (need ${MIN_BREAKOUT_ATR})`;
     else if (volumeRatio != null && volumeRatio < MIN_VOLUME_RATIO) rejected = `no volume behind the breakout — ${volumeRatio.toFixed(2)}× normal (need ${MIN_VOLUME_RATIO}×)`;
     else if (adx == null || adx < MIN_ADX) rejected = `market not trending — ADX ${adx == null ? "n/a" : adx.toFixed(1)} (need ${MIN_ADX})`;
+    else if (ema != null && atr != null && atr > 0 && Math.abs(last.close - ema) / atr > MAX_EMA_DISTANCE_ATR) {
+      rejected = `breakout came late — price is already ${(Math.abs(last.close - ema) / atr).toFixed(1)} ATR beyond the 200-EMA (max ${MAX_EMA_DISTANCE_ATR}); late breakouts mostly reverse`;
+    }
   }
   const signal = breakout && !rejected ? breakout : null;
   return { signal, close: last.close, ema, atr, channelHigh, channelLow, strength, breakout, adx, volumeRatio, rejected };

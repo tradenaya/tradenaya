@@ -90,8 +90,8 @@ const DEFAULT_SETTINGS = {
   leverageMode: "auto" as "auto" | "manual",
   leveragePercent: "50",
   capital: "100",
-  // 5% keeps a normal losing streak survivable (7 losses ≈ -30%, vs -79% at 20%).
-  maxRiskPerTrade: "5",
+  // Smart's recommended 2% (see the strategy catalog): its edge is small, so losing streaks must stay cheap.
+  maxRiskPerTrade: "2",
   dailyLossLimit: "30",
   riskStyle: "SAFE" as RiskStyle,
   orderExpiryMinutes: "",
@@ -1170,13 +1170,15 @@ export function CreateBotDialog({ open, onOpenChange, onCreated }: CreateBotDial
                 <input
                   id="auto-momentum"
                   type="checkbox"
-                  checked={settings.momentumEntriesOnly}
-                  onChange={(e) => setSettings((s) => ({ ...s, momentumEntriesOnly: e.target.checked }))}
+                  checked
+                  disabled
+                  readOnly
                   className="h-4 w-4 rounded border-border accent-emerald-500"
                 />
-                <Label htmlFor="auto-momentum" className="mb-0">Strong-momentum entries only</Label>
+                <Label htmlFor="auto-momentum" className="mb-0">Strong-momentum entries only (always on)</Label>
               </div>
               <p className="text-[11px] text-muted-foreground">
+                Always on for Smart: in a 2-year test on 6 major coins, Smart without this filter lost money after fees.{" "}
                 Only trades when momentum is already strong in the trade&apos;s direction (RSI ≥ 80 for longs, ≤ 20 for
                 shorts). Far fewer trades — the only filter that was profitable in backtests.
               </p>

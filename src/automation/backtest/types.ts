@@ -155,6 +155,8 @@ export interface SimulatedPosition {
   trailingActivationPct: number;
   trailingActivated: boolean;
   channelTrailLookback?: number;
+  /** Stop at entry (the planned risk); trailing never changes it. */
+  initialStopLoss: number;
   highestPrice: number;
   lowestPrice: number;
   currentPrice: number | null;

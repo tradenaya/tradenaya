@@ -7,7 +7,9 @@ import { AutomationEngine } from "@/automation/engine/automation-engine";
 import { HistoricalMarketDataAdapter } from "@/automation/backtest/market-adapter";
 import { sanitizeConfig } from "@/app/api/bots/_helpers";
 import {
+  BREAKEVEN_BUFFER,
   EXIT_LOOKBACK,
+  MAX_EMA_DISTANCE_ATR,
   MIN_CANDLES,
   STOP_ATR,
   TARGET_R,
@@ -36,19 +38,49 @@ function series(n: number, opts: { drift?: number; last?: Partial<MarketCandle> 
   return out;
 }
 
+/**
+ * An EARLY-trend breakout: a flat market (price ≈ its 200-EMA), a short
+ * 10-candle climb, then a breakout candle with volume — close to the EMA, as
+ * the strategy wants (late breakouts far beyond the EMA are rejected).
+ */
+function earlyTrend(n: number, opts: { volume?: number } = {}): MarketCandle[] {
+  const out: MarketCandle[] = [];
+  let p = 400;
+  for (let i = 0; i < n - 1; i++) {
+    if (i >= n - 11) p += 0.3;
+    const w = i % 2 ? 1 : -1;
+    const open = p - w;
+    const close = p + w;
+    out.push({ timestamp: T0 + i * H4, open, high: Math.max(open, close) + 1, low: Math.min(open, close) - 1, close, volume: opts.volume ?? 1000, timeframe: "4h" });
+  }
+  const high = Math.max(...out.slice(-20).map((c) => c.high));
+  const prev = out[out.length - 1].close;
+  out.push({ timestamp: T0 + (n - 1) * H4, open: prev, high: high + 1.7, low: prev - 0.5, close: high + 1.5, volume: opts.volume === 0 ? 0 : 2000, timeframe: "4h" });
+  return out;
+}
+
 describe("Trend Breakout — signal rules", () => {
   it("needs enough history for the 200-EMA", () => {
     expect(analyzeBreakout(series(MIN_CANDLES - 1))).toBeNull();
   });
 
-  it("goes LONG on a close above the 20-candle high in an uptrend", () => {
-    const base = series(260);
-    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
-    const candles = series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
-    const r = analyzeBreakout(candles)!;
+  it("goes LONG on a close above the 20-candle high early in an uptrend", () => {
+    const r = analyzeBreakout(earlyTrend(260))!;
     expect(r.signal).toBe("BUY");
     expect(r.close).toBeGreaterThan(r.channelHigh);
     expect(r.close).toBeGreaterThan(r.ema!);
+    expect((r.close - r.ema!) / r.atr!).toBeLessThanOrEqual(MAX_EMA_DISTANCE_ATR);
+  });
+
+  it("rejects a LATE breakout far beyond the 200-EMA, and says why", () => {
+    // long steady uptrend: the breakout comes when price is already stretched
+    const base = series(260);
+    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
+    const r = analyzeBreakout(series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } }))!;
+    expect(r.breakout).toBe("BUY");
+    expect((r.close - r.ema!) / r.atr!).toBeGreaterThan(MAX_EMA_DISTANCE_ATR);
+    expect(r.signal).toBeNull();
+    expect(r.rejected).toMatch(/breakout came late/);
   });
 
   it("waits while price stays inside the range", () => {
@@ -100,19 +132,14 @@ describe("Trend Breakout — signal rules", () => {
   });
 
   it("does not block trades when the feed has no volume data", () => {
-    const base = series(260).map((c) => ({ ...c, volume: 0 }));
-    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
-    base[259] = { ...base[259], close: high + 2, high: high + 2.2, volume: 0 };
-    const r = analyzeBreakout(base)!;
+    const r = analyzeBreakout(earlyTrend(260, { volume: 0 }))!;
     expect(r.volumeRatio).toBeNull();
     expect(r.signal).toBe("BUY");
   });
 
   it("strategy decision carries a 2-ATR stop and a TARGET_R target", async () => {
-    const base = series(260);
-    const high = Math.max(...base.slice(-21, -1).map((c) => c.high));
-    const candles = series(260, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
-    const d = await new TrendBreakoutStrategy().analyze({ symbol: "BTCUSDT", timeframe: "4h", candles, indicators: {} as never, market: { price: high + 2 } as never });
+    const candles = earlyTrend(260);
+    const d = await new TrendBreakoutStrategy().analyze({ symbol: "BTCUSDT", timeframe: "4h", candles, indicators: {} as never, market: { price: candles[candles.length - 1].close } as never });
     expect(d.signal).toBe("BUY");
     const risk = (d.entryZone as number) - (d.stopLossSuggestion as number);
     expect(risk).toBeCloseTo(STOP_ATR * Number(d.indicators.atr), 6);
@@ -183,6 +210,20 @@ describe("Trend Breakout — trailing stop", () => {
     expect(res.trade!.exitReason).toBe("TRAILING_STOP");
     expect(res.trade!.netPnl).toBeGreaterThan(0);
   });
+
+  it("backtest keeps the ORIGINAL stop until +TRAIL_ARM_R, like the live bot", () => {
+    const sim = new BacktestExecutionEngine({ feeRateBps: 5, slippageBps: 0, executionPolicy: "CONSERVATIVE" }, new BacktestPortfolio(10_000, 0));
+    const history = Array.from({ length: EXIT_LOOKBACK }, (_, i) => c(i, 98, 101));
+    history.forEach((x) => sim.processCandle(x));
+    // entry 100, stop 90 (risk 10): arming needs +15
+    sim.placeOrder({ symbol: "BTCUSDT", side: "BUY", limitPrice: 100, stopLoss: 90, takeProfit: 250, quantity: 1, leverage: 5, margin: 20, createdAt: history[history.length - 1].timestamp, expiresAt: T0 + 100 * H4, reason: "t", trailingEnabled: false, trailingDistancePct: 1, trailingActivationPct: 0, channelTrailLookback: EXIT_LOOKBACK });
+    let i = EXIT_LOOKBACK;
+    expect(sim.processCandle(c(i++, 99.5, 101)).orderFilled).toBe(true);
+    for (let k = 0; k < 12; k++) sim.processCandle(c(i++, 104, 110)); // +1R: not enough to arm
+    expect(sim.getOpenPosition()!.stopLoss).toBe(90); // the old backtest had already trailed to ~98
+    for (let k = 0; k < 2; k++) sim.processCandle(c(i++, 108, 116)); // +1.6R → armed
+    expect(sim.getOpenPosition()!.stopLoss).toBeGreaterThanOrEqual(100 * (1 + BREAKEVEN_BUFFER) - 1e-9); // breakeven or better
+  });
 });
 
 describe("Trend Breakout — wiring", () => {
@@ -193,9 +234,7 @@ describe("Trend Breakout — wiring", () => {
   });
 
   it("engine routes a Trend Breakout bot to the breakout strategy + planner", async () => {
-    const base = series(320);
-    const high = Math.max(...base.slice(-21, -1).map((x) => x.high));
-    const candles = series(320, { last: { close: high + 2, high: high + 2.2, volume: 2000 } });
+    const candles = earlyTrend(320);
     const adapter = new HistoricalMarketDataAdapter();
     adapter.setSlice(candles, candles.length);
     const result = await new AutomationEngine(adapter).run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", leverage: 5, capital: 1000, capitalMode: "fixed", maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false, momentumEntriesOnly: true });
@@ -204,22 +243,29 @@ describe("Trend Breakout — wiring", () => {
   });
 
   it("backtest keeps trading in fixed-capital mode after a losing trade", async () => {
-    // Uptrend that steps up every 30 candles (a breakout). The first breakout
-    // is followed by a crash through its stop (a loss); later ones run.
+    // Every 80 candles: a quiet range, a short 10-candle climb and an early-trend
+    // breakout with volume. The first breakout is followed by a crash through
+    // its stop (a loss); later ones run.
     const candles: MarketCandle[] = [];
-    let p = 100;
-    for (let i = 0; i < 900; i++) {
-      if (i % 30 === 0 && i >= 300) p += 3;
-      else if (i === 302) p -= 9;
-      else p += 0.02;
-      const w = i % 2 ? 0.3 : -0.3;
+    let p = 400;
+    let firstBreakout = -1;
+    for (let i = 0; i < 1000; i++) {
+      const k = i % 80;
+      const breakout = i >= 260 && k === 79;
+      if (i >= 260 && k >= 69 && k < 79) p += 0.35;
+      if (breakout && firstBreakout < 0) firstBreakout = i;
+      if (firstBreakout > 0 && i === firstBreakout + 3) p -= 9;
+      const w = i % 2 ? 1 : -1;
+      const open = p - w;
+      const close = breakout ? p + 3.5 : p + w;
+      if (breakout) p += 3.5;
       // breakout candles come with above-average volume, like real ones
-      candles.push({ timestamp: T0 + i * H4, open: p - w, high: p + 0.5, low: p - 0.5, close: p + w, volume: i % 30 === 0 && i >= 300 ? 2500 : 1000, timeframe: "4h" });
+      candles.push({ timestamp: T0 + i * H4, open, high: Math.max(open, close) + 1, low: Math.min(open, close) - 1, close, volume: breakout ? 2500 : 1000, timeframe: "4h" });
     }
     const engine = new BacktestingEngine({ provider: { getCandles: async () => candles }, backtestId: 1 });
-    const r = await engine.run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", startTime: candles[300].timestamp, endTime: candles[899].timestamp + 1, initialCapital: 1000, capitalMode: "fixed", leverage: 5, maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false });
+    const r = await engine.run({ symbol: "BTCUSDT", timeframe: "4h", strategy: "TrendBreakoutV1", startTime: candles[300].timestamp, endTime: candles[999].timestamp + 1, initialCapital: 1000, capitalMode: "fixed", leverage: 5, maxRiskPerTrade: 1, dailyLossLimit: 30, enableTrailingStop: false });
     const firstLoss = r.trades.findIndex((t) => t.netPnl < 0);
     expect(firstLoss).toBeGreaterThanOrEqual(0);
     expect(r.trades.length).toBeGreaterThan(firstLoss + 1);
-  });
+  }, 30_000);
 });

@@ -44,20 +44,21 @@ export const STRATEGIES: StrategyInfo[] = [
     usesPullbackTuning: true,
     defaults: {
       timeframe: "1h",
-      maxRiskPerTrade: 5,
+      // 2%, not 5%: its edge is small (2-year replay: +0.14R/trade), and 5% gave 20–35% drawdowns.
+      maxRiskPerTrade: 2,
       dailyLossLimit: 30,
       leverageMode: "auto",
       momentumEntriesOnly: true,
       enableTrailingStop: false,
       coinUniverse: "TOP_VOLUME",
-      note: "1h candles, strong-momentum entries only, 5% risk per trade.",
+      note: "1h candles, strong-momentum entries only (always on), 2% risk per trade.",
     },
   },
   {
     id: TREND_BREAKOUT_ID,
     label: "Trend Breakout (4h)",
     summary:
-      "Enters when price breaks the last 20 candles' range decisively, with volume, in a trending market and in the direction of the 200-EMA trend. The stop stays put until the trade is +1.5R in profit, then moves to entry and trails the last 10 candles so winners can run. Wins ~1 in 3 trades, but wins are ~3x the losses.",
+      "Enters when price breaks the last 20 candles' range decisively, with volume, in a trending market and in the direction of the 200-EMA trend. The stop stays put until the trade is +1.5R in profit, then moves to entry and trails the last 10 candles so winners can run. Only early-trend breakouts (price still close to the 200-EMA); wins about half its trades, with winners ~2x the losers.",
     fixedTimeframe: "4h",
     supportsMomentumFilter: false,
     usesPullbackTuning: false,
@@ -69,7 +70,7 @@ export const STRATEGIES: StrategyInfo[] = [
       momentumEntriesOnly: false,
       enableTrailingStop: false,
       coinUniverse: "MAJORS",
-      note: "Major coins only (BTC, ETH, SOL, XRP, BNB, DOGE — what it was tested on), 1% risk per trade: this strategy wins ~1 in 3 trades, so losing streaks of 6–8 are normal and must stay small. Its own stop stays put until +1.5R, then moves to entry and trails the last 10 candles.",
+      note: "Major coins only (BTC, ETH, SOL, XRP, BNB, DOGE — what it was tested on), 1% risk per trade. It only takes early-trend breakouts (close to the 200-EMA) and wins about half its trades, but losing streaks of 4–5 still happen, so keep the risk small. Its own stop stays put until +1.5R, then moves to entry and trails the last 10 candles.",
     },
   },
 ];

@@ -37,6 +37,16 @@ import { useDisplayCurrency } from "@/lib/currency/CurrencyProvider"
 const AXIS_STROKE = "#9aa4b6"
 const GRID_STROKE = "rgba(154,164,182,0.15)"
 
+/** Plain-language exit reasons for the trade table. */
+const EXIT_LABEL: Record<string, string> = {
+  TAKE_PROFIT: "Take-profit hit",
+  STOP_LOSS: "Stop-loss hit",
+  TRAILING_STOP: "Trailing stop",
+  MANUAL: "Closed manually",
+  END_OF_BACKTEST: "Still open at the end",
+  OTHER: "Other",
+}
+
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   QUEUED: { label: "Queued", className: "bg-muted text-muted-foreground" },
   RUNNING: { label: "Running", className: "bg-blue-500/15 text-blue-400" },
@@ -191,7 +201,7 @@ export function BacktestDetailDialog({
                           <TableHead className="text-right">Entry</TableHead>
                           <TableHead className="text-right">Exit</TableHead>
                           <TableHead className="text-right">Net PnL</TableHead>
-                          <TableHead className="text-right">Return</TableHead>
+                          <TableHead className="text-right" title="Profit or loss of this trade as a % of the starting capital">% of capital</TableHead>
                           <TableHead>Reason</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -208,8 +218,11 @@ export function BacktestDetailDialog({
                             <TableCell className="text-right tabular-nums">{formatPrice(trade.entryPrice)}</TableCell>
                             <TableCell className="text-right tabular-nums">{formatPrice(trade.exitPrice)}</TableCell>
                             <TableCell className={`text-right font-medium tabular-nums ${signClass(trade.netPnl)}`}>{pnlText(trade.netPnl)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatPercent(trade.returnPct)}</TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{trade.exitReason}</TableCell>
+                            {/* % of the starting capital — the old "Return" was % of the trade's margin, which leverage inflates (a 5% loss read as -50%). */}
+                            <TableCell className={`text-right tabular-nums ${signClass(trade.netPnl)}`}>
+                              {data.initialCapital > 0 ? formatPercent((trade.netPnl / data.initialCapital) * 100) : "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{EXIT_LABEL[trade.exitReason] ?? trade.exitReason}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
